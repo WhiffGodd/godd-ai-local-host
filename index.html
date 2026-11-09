@@ -11,15 +11,15 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
 </head>
 <body>
-    <!-- Background Ambient Glows -->
+    <!-- Ambient Background Lighting -->
     <div class="ambient-glow glow-1"></div>
     <div class="ambient-glow glow-2"></div>
     <div class="ambient-glow glow-3"></div>
 
-    <!-- Top Navigation -->
+    <!-- Navigation Bar -->
     <header class="navbar">
         <div class="nav-container">
-            <div class="brand">
+            <div class="brand" onclick="resetToHome()" style="cursor: pointer;">
                 <div class="logo-icon">⚡</div>
                 <span class="logo-text">godd<span class="accent-text">.ai</span></span>
                 <span class="badge-free">100% FREE FOREVER</span>
@@ -27,7 +27,7 @@
             <nav class="nav-links">
                 <a href="#features">Features</a>
                 <a href="#how-it-works">How It Works</a>
-                <button class="btn-sample-nav" onclick="loadSampleVideo('sample_huberman')">Try Sample</button>
+                <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">Try Sample</button>
             </nav>
         </div>
     </header>
@@ -45,40 +45,73 @@
                     <span class="gradient-text">viral TikToks, Reels & Shorts</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Paste any YouTube video or live stream. <strong>godd ai</strong> automatically detects the most entertaining moments, crops to 9:16 vertical, adds animated karaoke subtitles, and exports ready-to-post clips.
+                    Paste any YouTube link or upload your own video file. <strong>godd ai</strong> automatically detects the most entertaining moments, crops to 9:16 vertical, adds animated karaoke subtitles, and exports ready-to-post clips.
                 </p>
 
-                <!-- Input Box -->
-                <div class="input-card">
-                    <div class="input-wrapper">
-                        <span class="yt-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                            </svg>
-                        </span>
-                        <input type="text" id="videoUrlInput" placeholder="Paste YouTube video or livestream link (e.g. https://www.youtube.com/watch?v=...)" autocomplete="off">
-                        <button class="btn-paste" onclick="pasteFromClipboard()" title="Paste from Clipboard">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                            <span>Paste</span>
+                <!-- Input Box with Tabs -->
+                <div class="input-card-container">
+                    <!-- Tab Switcher -->
+                    <div class="input-tabs">
+                        <button class="tab-btn active" id="tabYoutubeBtn" type="button" onclick="switchInputTab('youtube')">
+                            <span>🔗 Paste YouTube Link</span>
+                        </button>
+                        <button class="tab-btn" id="tabUploadBtn" type="button" onclick="switchInputTab('upload')">
+                            <span>📁 Upload Video File</span>
                         </button>
                     </div>
-                    <button class="btn-generate" id="btnGenerate" onclick="analyzeVideo()">
-                        <span class="btn-text">⚡ Generate Free Shorts</span>
-                        <span class="btn-sparkle">✨</span>
-                    </button>
+
+                    <!-- YouTube Link Tab Content -->
+                    <div class="tab-content" id="tabYoutubeContent">
+                        <div class="input-card">
+                            <div class="input-wrapper">
+                                <span class="yt-icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                                    </svg>
+                                </span>
+                                <input type="text" id="videoUrlInput" placeholder="Paste YouTube link (e.g. https://www.youtube.com/watch?v=...)" autocomplete="off">
+                                <button class="btn-paste" type="button" onclick="pasteFromClipboard()" title="Paste from Clipboard">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                    <span>Paste</span>
+                                </button>
+                            </div>
+                            <button class="btn-generate" id="btnGenerate" type="button" onclick="analyzeVideo()">
+                                <span class="btn-text">⚡ Generate Free Shorts</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Upload Video File Tab Content -->
+                    <div class="tab-content" id="tabUploadContent" style="display: none;">
+                        <div class="upload-dropzone" id="uploadDropzone" onclick="document.getElementById('fileInput').click()">
+                            <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/*" style="display: none;" onchange="handleFileSelected(event)">
+                            <div class="upload-icon">📁</div>
+                            <div class="upload-heading">Click or Drag & Drop Video File Here</div>
+                            <div class="upload-subtext">Supports MP4, MOV, WebM, MKV (Up to 2GB • Fast In-Browser Processing)</div>
+                            <div class="selected-file-badge" id="selectedFileBadge" style="display: none;">
+                                <span id="selectedFileName">video.mp4</span>
+                                <span id="selectedFileSize">(0 MB)</span>
+                            </div>
+                        </div>
+                        <div class="upload-action-row" id="uploadActionRow" style="display: none; margin-top: 14px;">
+                            <button class="btn-generate btn-generate-upload" type="button" onclick="processUploadedFile()">
+                                <span class="btn-text">⚡ Generate Viral Shorts From File</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Instant Try Samples -->
                 <div class="sample-pills">
                     <span class="sample-label">Or try an instant sample:</span>
-                    <button class="sample-pill" onclick="loadSampleVideo('sample_huberman')">
-                        🎙️ Creative Genius Podcast
+                    <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_huberman')">
+                        🎙️ Creative Genius Podcast (Huberman)
                     </button>
-                    <button class="sample-pill" onclick="loadSampleVideo('sample_streamer')">
-                        🎮 Live Stream Record Clutch
+                    <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_streamer')">
+                        🎮 Live Stream Clutch Reaction
                     </button>
                 </div>
 
@@ -154,7 +187,7 @@
                             <span class="meta-tag highlight-tag" id="metaClipsCount">4 Viral Shorts Ready</span>
                         </div>
                     </div>
-                    <button class="btn-new-video" onclick="resetToHome()">+ Process Another Video</button>
+                    <button class="btn-new-video" type="button" onclick="resetToHome()">+ Process Another Video</button>
                 </div>
 
                 <!-- Studio Workspace Grid -->
@@ -174,9 +207,17 @@
                     <div class="player-panel">
                         <div class="phone-mockup">
                             <div class="phone-screen">
-                                <!-- Real-time Canvas / Video Renderer -->
+                                <!-- Real-time Video / Canvas Renderer -->
                                 <div class="canvas-wrapper" id="canvasWrapper">
-                                    <video id="previewVideo" playsinline crossorigin="anonymous" style="display:none;"></video>
+                                    <!-- Native video element for local uploaded videos or sample files -->
+                                    <video id="previewVideo" playsinline loop crossorigin="anonymous"></video>
+                                    
+                                    <!-- Responsive YouTube iframe container for YouTube URLs -->
+                                    <div id="ytContainer" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden;">
+                                        <iframe id="ytIframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width: 300%; height: 100%; margin-left: -100%; pointer-events: none;"></iframe>
+                                    </div>
+
+                                    <!-- Canvas fallback / recorder -->
                                     <canvas id="shortsCanvas" width="720" height="1280"></canvas>
                                     
                                     <!-- Dynamic Animated Subtitles Overlay -->
@@ -197,12 +238,12 @@
 
                                 <!-- In-Player Video Controls -->
                                 <div class="player-controls">
-                                    <button class="btn-play-pause" id="btnPlayPause" onclick="togglePlay()">
+                                    <button class="btn-play-pause" id="btnPlayPause" type="button" onclick="togglePlay()">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" id="playIcon">
                                             <polygon points="5 3 19 12 5 21 5 3"></polygon>
                                         </svg>
                                     </button>
-                                    <div class="scrubber-bar" onclick="seekScrubber(event)">
+                                    <div class="scrubber-bar" id="scrubberBar" onclick="seekScrubber(event)">
                                         <div class="scrubber-fill" id="scrubberFill"></div>
                                     </div>
                                     <span class="timestamp-label" id="timeLabel">0:00 / 0:40</span>
@@ -216,19 +257,19 @@
                         <div class="control-box">
                             <label class="control-label">🔥 Subtitle Preset</label>
                             <div class="style-presets-grid">
-                                <button class="preset-btn active" data-style="hormozi" onclick="setSubtitleStyle('hormozi')">
+                                <button class="preset-btn active" data-style="hormozi" type="button" onclick="setSubtitleStyle('hormozi')">
                                     <div class="preset-preview style-p-hormozi">YELLOW</div>
                                     <span>Hormozi</span>
                                 </button>
-                                <button class="preset-btn" data-style="mrbeast" onclick="setSubtitleStyle('mrbeast')">
+                                <button class="preset-btn" data-style="mrbeast" type="button" onclick="setSubtitleStyle('mrbeast')">
                                     <div class="preset-preview style-p-beast">CYAN</div>
                                     <span>MrBeast</span>
                                 </button>
-                                <button class="preset-btn" data-style="cyber" onclick="setSubtitleStyle('cyber')">
+                                <button class="preset-btn" data-style="cyber" type="button" onclick="setSubtitleStyle('cyber')">
                                     <div class="preset-preview style-p-cyber">GREEN</div>
                                     <span>Cyber Glow</span>
                                 </button>
-                                <button class="preset-btn" data-style="clean" onclick="setSubtitleStyle('clean')">
+                                <button class="preset-btn" data-style="clean" type="button" onclick="setSubtitleStyle('clean')">
                                     <div class="preset-preview style-p-clean">CLEAN</div>
                                     <span>Minimal</span>
                                 </button>
@@ -238,13 +279,13 @@
                         <div class="control-box">
                             <label class="control-label">📐 9:16 Video Layout</label>
                             <div class="layout-toggle-group">
-                                <button class="layout-btn active" data-layout="crop" onclick="setLayout('crop')">
+                                <button class="layout-btn active" data-layout="crop" type="button" onclick="setLayout('crop')">
                                     <span>✂️ Smart Crop</span>
                                 </button>
-                                <button class="layout-btn" data-layout="blur" onclick="setLayout('blur')">
+                                <button class="layout-btn" data-layout="blur" type="button" onclick="setLayout('blur')">
                                     <span>✨ Blur Background</span>
                                 </button>
-                                <button class="layout-btn" data-layout="fit" onclick="setLayout('fit')">
+                                <button class="layout-btn" data-layout="fit" type="button" onclick="setLayout('fit')">
                                     <span>🔲 Fit Letterbox</span>
                                 </button>
                             </div>
@@ -271,21 +312,21 @@
 
                         <div class="control-box">
                             <label class="control-label">📝 Full Transcript & Script</label>
-                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true">
+                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true" oninput="handleTranscriptEdit(event)">
                                 Full transcript will appear here...
                             </div>
                         </div>
 
                         <!-- Export Actions -->
                         <div class="export-actions">
-                            <button class="btn-download-mp4" onclick="downloadShortVideo()">
+                            <button class="btn-download-mp4" type="button" onclick="downloadShortVideo()">
                                 <span>⚡ Download 9:16 Short (MP4)</span>
                             </button>
                             <div class="secondary-actions">
-                                <button class="btn-secondary" onclick="downloadSrtCaptions()">
+                                <button class="btn-secondary" type="button" onclick="downloadSrtCaptions()">
                                     <span>📄 Export SRT</span>
                                 </button>
-                                <button class="btn-secondary" onclick="copyHookText()">
+                                <button class="btn-secondary" type="button" onclick="copyHookText()">
                                     <span>📋 Copy Script</span>
                                 </button>
                             </div>
@@ -333,8 +374,8 @@
                 <div class="steps-grid">
                     <div class="step-card">
                         <div class="step-number">01</div>
-                        <h3>Paste YouTube Link</h3>
-                        <p>Drop any podcast, live stream vod, challenge video, or interview link into godd ai.</p>
+                        <h3>Paste Link or Upload Video</h3>
+                        <p>Drop any YouTube podcast, stream VOD, or upload your own MP4/MOV file directly.</p>
                     </div>
                     <div class="step-card">
                         <div class="step-number">02</div>

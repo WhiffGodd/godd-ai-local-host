@@ -202,6 +202,109 @@ body {
     font-weight: 400;
 }
 
+/* Input Card Container & Tabs */
+.input-card-container {
+    max-width: 760px;
+    margin: 0 auto 24px;
+}
+.input-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    justify-content: center;
+}
+.tab-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.tab-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #FFF;
+}
+.tab-btn.active {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: var(--accent-purple);
+    color: #FFF;
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);
+}
+
+/* Upload Dropzone */
+.upload-dropzone {
+    background: var(--bg-card);
+    border: 2px dashed rgba(139, 92, 246, 0.35);
+    border-radius: var(--radius-xl);
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+.upload-dropzone:hover, .upload-dropzone.dragover {
+    border-color: var(--accent-purple);
+    background: rgba(139, 92, 246, 0.05);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(139, 92, 246, 0.15);
+}
+.upload-icon {
+    font-size: 38px;
+    margin-bottom: 10px;
+}
+.upload-heading {
+    font-size: 16px;
+    font-weight: 700;
+    color: #FFF;
+    margin-bottom: 6px;
+}
+.upload-subtext {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.selected-file-badge {
+    margin-top: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #34D399;
+}
+.btn-generate-upload {
+    width: 100%;
+    padding: 14px;
+    justify-content: center;
+}
+
+/* Video inside phone mockup */
+#previewVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+}
+#previewVideo.layout-crop {
+    object-fit: cover;
+}
+#previewVideo.layout-blur {
+    object-fit: contain;
+    background: rgba(139, 92, 246, 0.15);
+}
+#previewVideo.layout-fit {
+    object-fit: contain;
+    background: #000;
+}
+
 /* Input Card */
 .input-card {
     max-width: 760px;
