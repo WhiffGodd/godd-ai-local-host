@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>godd ai | Turn Videos into Viral TikToks, Reels & Shorts (100% Free)</title>
+    <title>godd ai | Turn Videos into Viral TikToks, Reels &amp; Shorts (100% Free)</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -22,112 +22,134 @@
             <div class="brand" onclick="resetToHome()" style="cursor: pointer;">
                 <div class="logo-icon">⚡</div>
                 <span class="logo-text">godd<span class="accent-text">.ai</span></span>
-                <span class="badge-free">100% FREE FOREVER</span>
+                <span class="badge-free">100% FREE</span>
             </div>
             <nav class="nav-links">
-                <a href="#features">Features</a>
                 <a href="#how-it-works">How It Works</a>
-                <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">Try Sample</button>
+                <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">▶ Try Demo</button>
             </nav>
         </div>
     </header>
 
     <main>
-        <!-- Hero Section -->
+        <!-- ══════════════════════════════════════════
+             HERO SECTION
+        ══════════════════════════════════════════ -->
         <section class="hero-section" id="hero">
             <div class="container">
                 <div class="hero-badge">
                     <span class="pulse-dot"></span>
-                    <span>The #1 Free Alternative to Klap & Opus Clip</span>
+                    <span>Free Alternative to Klap &amp; Opus Clip — No Paywall, No Watermark</span>
                 </div>
                 <h1 class="hero-title">
-                    Turn long videos into <br>
-                    <span class="gradient-text">viral TikToks, Reels & Shorts</span>
+                    Turn any long video into<br>
+                    <span class="gradient-text">viral TikToks, Reels &amp; Shorts</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Paste any YouTube link or upload your own video file. <strong>godd ai</strong> automatically detects the most entertaining moments, crops to 9:16 vertical, adds animated karaoke subtitles, and exports ready-to-post clips.
+                    Paste a YouTube link <em>or</em> upload your own video. <strong>godd ai</strong> automatically finds the most entertaining moments, converts to vertical 9:16, adds karaoke captions, and lets you download the clip.
                 </p>
 
-                <!-- Input Box with Tabs -->
+                <!-- ── HOW IT WORKS STEPS (always visible) ── -->
+                <div class="how-steps-mini">
+                    <div class="hsm-step">
+                        <div class="hsm-num">1</div>
+                        <div class="hsm-text">Paste link or upload video</div>
+                    </div>
+                    <div class="hsm-arrow">→</div>
+                    <div class="hsm-step">
+                        <div class="hsm-num">2</div>
+                        <div class="hsm-text">AI finds top clips</div>
+                    </div>
+                    <div class="hsm-arrow">→</div>
+                    <div class="hsm-step">
+                        <div class="hsm-num">3</div>
+                        <div class="hsm-text">Preview &amp; download</div>
+                    </div>
+                </div>
+
+                <!-- ── INPUT CARD ── -->
                 <div class="input-card-container">
                     <!-- Tab Switcher -->
                     <div class="input-tabs">
                         <button class="tab-btn active" id="tabYoutubeBtn" type="button" onclick="switchInputTab('youtube')">
-                            <span>🔗 Paste YouTube Link</span>
+                            🔗 Paste YouTube Link
                         </button>
                         <button class="tab-btn" id="tabUploadBtn" type="button" onclick="switchInputTab('upload')">
-                            <span>📁 Upload Video File</span>
+                            📁 Upload My Video File
                         </button>
                     </div>
 
-                    <!-- YouTube Link Tab Content -->
+                    <!-- YouTube Link Tab -->
                     <div class="tab-content" id="tabYoutubeContent">
                         <div class="input-card">
+                            <div class="tab-hint">Paste any YouTube video or live stream link below</div>
                             <div class="input-wrapper">
                                 <span class="yt-icon">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
                                     </svg>
                                 </span>
-                                <input type="text" id="videoUrlInput" placeholder="Paste YouTube link (e.g. https://www.youtube.com/watch?v=...)" autocomplete="off">
-                                <button class="btn-paste" type="button" onclick="pasteFromClipboard()" title="Paste from Clipboard">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <input type="text" id="videoUrlInput" placeholder="e.g. https://www.youtube.com/watch?v=abc123" autocomplete="off">
+                                <button class="btn-paste" type="button" onclick="pasteFromClipboard()" title="Paste from clipboard">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                                     </svg>
-                                    <span>Paste</span>
+                                    Paste
                                 </button>
                             </div>
                             <button class="btn-generate" id="btnGenerate" type="button" onclick="analyzeVideo()">
-                                <span class="btn-text">⚡ Generate Free Shorts</span>
+                                <span class="btn-text">⚡ Find Viral Clips — It's Free!</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Upload Video File Tab Content -->
+                    <!-- Upload Video File Tab -->
                     <div class="tab-content" id="tabUploadContent" style="display: none;">
+                        <div class="tab-hint">Upload a video from your computer — MP4, MOV, WebM supported</div>
                         <div class="upload-dropzone" id="uploadDropzone" onclick="document.getElementById('fileInput').click()">
                             <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/*" style="display: none;" onchange="handleFileSelected(event)">
                             <div class="upload-icon">📁</div>
-                            <div class="upload-heading">Click or Drag & Drop Video File Here</div>
-                            <div class="upload-subtext">Supports MP4, MOV, WebM, MKV (Up to 2GB • Fast In-Browser Processing)</div>
+                            <div class="upload-heading">Click here or drag &amp; drop your video</div>
+                            <div class="upload-subtext">MP4, MOV, WebM, MKV supported • Up to 2GB • Works in-browser, no upload needed</div>
                             <div class="selected-file-badge" id="selectedFileBadge" style="display: none;">
+                                <span>✅</span>
                                 <span id="selectedFileName">video.mp4</span>
                                 <span id="selectedFileSize">(0 MB)</span>
                             </div>
                         </div>
                         <div class="upload-action-row" id="uploadActionRow" style="display: none; margin-top: 14px;">
                             <button class="btn-generate btn-generate-upload" type="button" onclick="processUploadedFile()">
-                                <span class="btn-text">⚡ Generate Viral Shorts From File</span>
+                                <span class="btn-text">⚡ Analyze Video &amp; Find Clips</span>
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Instant Try Samples -->
+                <!-- Try a sample -->
                 <div class="sample-pills">
-                    <span class="sample-label">Or try an instant sample:</span>
+                    <span class="sample-label">Not sure? Try a demo:</span>
                     <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_huberman')">
-                        🎙️ Creative Genius Podcast (Huberman)
+                        🎙️ Podcast Episode Demo
                     </button>
                     <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_streamer')">
-                        🎮 Live Stream Clutch Reaction
+                        🎮 Gaming Stream Demo
                     </button>
                 </div>
 
-                <!-- Feature Highlights -->
+                <!-- Feature strip -->
                 <div class="feature-strip">
                     <div class="strip-item">
                         <span class="strip-icon">🎯</span>
-                        <span>AI Virality Score (0-100)</span>
+                        <span>AI Virality Scoring</span>
                     </div>
                     <div class="strip-item">
                         <span class="strip-icon">📱</span>
-                        <span>Smart 9:16 Auto-Crop</span>
+                        <span>Auto Vertical 9:16 Format</span>
                     </div>
                     <div class="strip-item">
                         <span class="strip-icon">🔥</span>
-                        <span>Hormozi Karaoke Captions</span>
+                        <span>Animated Karaoke Captions</span>
                     </div>
                     <div class="strip-item">
                         <span class="strip-icon">🚫</span>
@@ -137,7 +159,9 @@
             </div>
         </section>
 
-        <!-- Processing Screen Modal / State -->
+        <!-- ══════════════════════════════════════════
+             PROCESSING SCREEN
+        ══════════════════════════════════════════ -->
         <section class="processing-section" id="processingSection" style="display: none;">
             <div class="processing-card">
                 <div class="scanner-ring">
@@ -145,34 +169,48 @@
                     <div class="ring ring-2"></div>
                     <div class="center-ai-icon">⚡</div>
                 </div>
-                <h3 class="processing-title" id="processingTitle">Analyzing Video with godd.ai...</h3>
-                <p class="processing-subtitle" id="processingSubtitle">Scanning audio waveforms for viral hooks, laughter, and high-retention peaks</p>
-                
+                <h3 class="processing-title" id="processingTitle">Analyzing Your Video…</h3>
+                <p class="processing-subtitle" id="processingSubtitle">Scanning for the most entertaining &amp; viral moments</p>
+
                 <div class="stepper-list">
                     <div class="step-item step-active" id="step1">
                         <div class="step-bullet">✓</div>
-                        <div class="step-text">Connecting to stream & fetching metadata</div>
+                        <div class="step-text">Loading video &amp; reading metadata</div>
                     </div>
                     <div class="step-item" id="step2">
                         <div class="step-bullet">2</div>
-                        <div class="step-text">Transcribing speech & detecting timestamps</div>
+                        <div class="step-text">Transcribing speech &amp; detecting timestamps</div>
                     </div>
                     <div class="step-item" id="step3">
                         <div class="step-bullet">3</div>
-                        <div class="step-text">Virality Engine: scoring emotion, curiosity & punchlines</div>
+                        <div class="step-text">Scoring emotion, humor &amp; curiosity hooks</div>
                     </div>
                     <div class="step-item" id="step4">
                         <div class="step-bullet">4</div>
-                        <div class="step-text">Reframing to 9:16 & generating animated captions</div>
+                        <div class="step-text">Preparing vertical clips with animated captions</div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Studio & Results Section -->
+        <!-- ══════════════════════════════════════════
+             STUDIO SECTION
+        ══════════════════════════════════════════ -->
         <section class="studio-section" id="studioSection" style="display: none;">
             <div class="container">
-                <!-- Video Meta Banner -->
+
+                <!-- Progress breadcrumb -->
+                <div class="studio-steps-bar">
+                    <div class="ssb-step done">✓ Upload</div>
+                    <div class="ssb-arrow">›</div>
+                    <div class="ssb-step done">✓ AI Analysis</div>
+                    <div class="ssb-arrow">›</div>
+                    <div class="ssb-step active">Pick Clip &amp; Customize</div>
+                    <div class="ssb-arrow">›</div>
+                    <div class="ssb-step">Download</div>
+                </div>
+
+                <!-- Video info bar -->
                 <div class="video-meta-bar">
                     <div class="video-thumbnail-box">
                         <img id="metaThumb" src="" alt="Thumbnail">
@@ -184,66 +222,67 @@
                             <span class="meta-dot">•</span>
                             <span class="meta-tag" id="metaDuration">Duration: 10:00</span>
                             <span class="meta-dot">•</span>
-                            <span class="meta-tag highlight-tag" id="metaClipsCount">4 Viral Shorts Ready</span>
+                            <span class="meta-tag highlight-tag" id="metaClipsCount">4 Viral Clips Ready</span>
                         </div>
                     </div>
                     <button class="btn-new-video" type="button" onclick="resetToHome()">+ Process Another Video</button>
                 </div>
 
-                <!-- Studio Workspace Grid -->
+                <!-- Studio Grid: Clips | Player | Controls -->
                 <div class="studio-grid">
-                    <!-- Left: Clips List -->
+
+                    <!-- LEFT: Clip List -->
                     <div class="clips-panel">
                         <div class="panel-header">
-                            <h3>Detected Viral Clips</h3>
-                            <span class="badge-count" id="clipsBadge">4 clips</span>
+                            <h3>🎬 Detected Viral Clips</h3>
+                            <span class="badge-count" id="clipsBadge">0 clips</span>
                         </div>
+                        <p class="panel-hint">👇 Click a clip below to preview it</p>
                         <div class="clips-list" id="clipsListContainer">
-                            <!-- Populated dynamically -->
+                            <!-- Dynamically populated -->
                         </div>
                     </div>
 
-                    <!-- Center: 9:16 Smartphone Mockup Player -->
+                    <!-- CENTER: Phone Preview -->
                     <div class="player-panel">
+                        <div class="player-label">📱 Vertical Preview (9:16)</div>
                         <div class="phone-mockup">
                             <div class="phone-screen">
-                                <!-- Real-time Video / Canvas Renderer -->
                                 <div class="canvas-wrapper" id="canvasWrapper">
-                                    <!-- Native video element for local uploaded videos or sample files -->
+                                    <!-- Native video for local uploads -->
                                     <video id="previewVideo" playsinline loop crossorigin="anonymous"></video>
-                                    
-                                    <!-- Responsive YouTube iframe container for YouTube URLs -->
+
+                                    <!-- YouTube iframe -->
                                     <div id="ytContainer" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden;">
                                         <iframe id="ytIframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width: 300%; height: 100%; margin-left: -100%; pointer-events: none;"></iframe>
                                     </div>
 
-                                    <!-- Canvas fallback / recorder -->
+                                    <!-- Canvas for rendering -->
                                     <canvas id="shortsCanvas" width="720" height="1280"></canvas>
-                                    
-                                    <!-- Dynamic Animated Subtitles Overlay -->
+
+                                    <!-- Animated Subtitles Overlay -->
                                     <div class="captions-overlay" id="captionsOverlay">
                                         <div class="caption-text-box style-hormozi" id="captionTextBox">
                                             <span class="caption-word">WAIT</span>
                                             <span class="caption-word active-word">UNTIL</span>
-                                            <span class="caption-word">YOU</span>
-                                            <span class="caption-word highlight-word">SEE 🔥</span>
+                                            <span class="caption-word highlight-word">YOU SEE 🔥</span>
                                         </div>
                                     </div>
 
-                                    <!-- Top Video Hook Tag -->
+                                    <!-- Hook banner at top -->
                                     <div class="hook-banner" id="hookBanner">
-                                        <span id="hookBannerText">The Brutal Truth About Creative Genius 🧠</span>
+                                        <span id="hookBannerText">Select a clip to preview ←</span>
                                     </div>
                                 </div>
 
-                                <!-- In-Player Video Controls -->
+                                <!-- Player Controls -->
                                 <div class="player-controls">
-                                    <button class="btn-play-pause" id="btnPlayPause" type="button" onclick="togglePlay()">
+                                    <button class="btn-play-pause" id="btnPlayPause" type="button" onclick="togglePlay()" title="Play / Pause">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" id="playIcon">
                                             <polygon points="5 3 19 12 5 21 5 3"></polygon>
                                         </svg>
                                     </button>
-                                    <div class="scrubber-bar" id="scrubberBar" onclick="seekScrubber(event)">
+                                    <div class="scrubber-bar" id="scrubberBar" onclick="seekScrubber(event)" title="Click to seek">
                                         <div class="scrubber-fill" id="scrubberFill"></div>
                                     </div>
                                     <span class="timestamp-label" id="timeLabel">0:00 / 0:40</span>
@@ -252,82 +291,103 @@
                         </div>
                     </div>
 
-                    <!-- Right: Editor & Customization Controls -->
+                    <!-- RIGHT: Controls & Export -->
                     <div class="controls-panel">
+
+                        <!-- SUBTITLE STYLE -->
                         <div class="control-box">
-                            <label class="control-label">🔥 Subtitle Preset</label>
+                            <label class="control-label">
+                                🎨 Caption Style
+                                <span class="label-hint">Pick how the words look on screen</span>
+                            </label>
                             <div class="style-presets-grid">
-                                <button class="preset-btn active" data-style="hormozi" type="button" onclick="setSubtitleStyle('hormozi')">
+                                <button class="preset-btn active" data-style="hormozi" type="button" onclick="setSubtitleStyle('hormozi')" title="Bold yellow — highest virality">
                                     <div class="preset-preview style-p-hormozi">YELLOW</div>
-                                    <span>Hormozi</span>
+                                    <span>Bold Yellow<br><small>Most Viral</small></span>
                                 </button>
-                                <button class="preset-btn" data-style="mrbeast" type="button" onclick="setSubtitleStyle('mrbeast')">
+                                <button class="preset-btn" data-style="mrbeast" type="button" onclick="setSubtitleStyle('mrbeast')" title="Cyan glow style">
                                     <div class="preset-preview style-p-beast">CYAN</div>
-                                    <span>MrBeast</span>
+                                    <span>MrBeast<br><small>Cyan Glow</small></span>
                                 </button>
-                                <button class="preset-btn" data-style="cyber" type="button" onclick="setSubtitleStyle('cyber')">
+                                <button class="preset-btn" data-style="cyber" type="button" onclick="setSubtitleStyle('cyber')" title="Green neon style">
                                     <div class="preset-preview style-p-cyber">GREEN</div>
-                                    <span>Cyber Glow</span>
+                                    <span>Cyber<br><small>Neon Green</small></span>
                                 </button>
-                                <button class="preset-btn" data-style="clean" type="button" onclick="setSubtitleStyle('clean')">
+                                <button class="preset-btn" data-style="clean" type="button" onclick="setSubtitleStyle('clean')" title="Simple white text">
                                     <div class="preset-preview style-p-clean">CLEAN</div>
-                                    <span>Minimal</span>
+                                    <span>Minimal<br><small>Clean White</small></span>
                                 </button>
                             </div>
                         </div>
 
+                        <!-- VIDEO LAYOUT -->
                         <div class="control-box">
-                            <label class="control-label">📐 9:16 Video Layout</label>
+                            <label class="control-label">
+                                📐 Video Frame Style
+                                <span class="label-hint">How the video fills the vertical frame</span>
+                            </label>
                             <div class="layout-toggle-group">
-                                <button class="layout-btn active" data-layout="crop" type="button" onclick="setLayout('crop')">
-                                    <span>✂️ Smart Crop</span>
+                                <button class="layout-btn active" data-layout="crop" type="button" onclick="setLayout('crop')" title="Cut sides to fill the vertical frame">
+                                    ✂️ Smart Crop
                                 </button>
-                                <button class="layout-btn" data-layout="blur" type="button" onclick="setLayout('blur')">
-                                    <span>✨ Blur Background</span>
+                                <button class="layout-btn" data-layout="blur" type="button" onclick="setLayout('blur')" title="Blurred background, centered video">
+                                    ✨ Blur Background
                                 </button>
-                                <button class="layout-btn" data-layout="fit" type="button" onclick="setLayout('fit')">
-                                    <span>🔲 Fit Letterbox</span>
+                                <button class="layout-btn" data-layout="fit" type="button" onclick="setLayout('fit')" title="Fit video with black bars">
+                                    🔲 Letterbox Fit
                                 </button>
                             </div>
                         </div>
 
+                        <!-- TRIM TIMES -->
                         <div class="control-box">
                             <div class="label-with-val">
-                                <label class="control-label">⏱️ Clip Boundaries (Trim)</label>
+                                <label class="control-label">⏱️ Adjust Clip Length</label>
                                 <span class="val-badge" id="trimDurationLabel">Duration: 40s</span>
                             </div>
+                            <p class="control-hint">Change start/end seconds to shorten or extend the clip</p>
                             <div class="trim-inputs">
                                 <div class="trim-field">
                                     <span>Start:</span>
-                                    <input type="number" id="trimStart" step="1" min="0" onchange="updateTrimTimes()">
+                                    <input type="number" id="trimStart" step="1" min="0" onchange="updateTrimTimes()" title="Start time in seconds">
                                     <span>s</span>
                                 </div>
                                 <div class="trim-field">
                                     <span>End:</span>
-                                    <input type="number" id="trimEnd" step="1" min="1" onchange="updateTrimTimes()">
+                                    <input type="number" id="trimEnd" step="1" min="1" onchange="updateTrimTimes()" title="End time in seconds">
                                     <span>s</span>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- TRANSCRIPT -->
                         <div class="control-box">
-                            <label class="control-label">📝 Full Transcript & Script</label>
-                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true" oninput="handleTranscriptEdit(event)">
-                                Full transcript will appear here...
+                            <label class="control-label">
+                                📝 Script / Transcript
+                                <span class="label-hint">Edit the words shown in captions</span>
+                            </label>
+                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true" oninput="handleTranscriptEdit(event)" spellcheck="false">
+                                Select a clip to see its transcript here…
                             </div>
                         </div>
 
-                        <!-- Export Actions -->
+                        <!-- ═══ EXPORT / DOWNLOAD ═══ -->
                         <div class="export-actions">
+                            <div class="export-title">Step 3: Download Your Short</div>
                             <button class="btn-download-mp4" type="button" onclick="downloadShortVideo()">
-                                <span>⚡ Download 9:16 Short (MP4)</span>
+                                <span class="dl-icon">⬇️</span>
+                                <span>Download Clip (WebM Video)</span>
                             </button>
+                            <p class="download-hint" id="downloadHintText">
+                                Uploaded file: downloads the actual video clip.<br>
+                                YouTube link: downloads SRT captions + script.
+                            </p>
                             <div class="secondary-actions">
-                                <button class="btn-secondary" type="button" onclick="downloadSrtCaptions()">
-                                    <span>📄 Export SRT</span>
+                                <button class="btn-secondary" type="button" onclick="downloadSrtCaptions()" title="Download subtitle file for editing">
+                                    📄 Download SRT Captions
                                 </button>
-                                <button class="btn-secondary" type="button" onclick="copyHookText()">
-                                    <span>📋 Copy Script</span>
+                                <button class="btn-secondary" type="button" onclick="copyHookText()" title="Copy script text to clipboard">
+                                    📋 Copy Script
                                 </button>
                             </div>
                         </div>
@@ -336,56 +396,56 @@
             </div>
         </section>
 
-        <!-- Features Showcase Section -->
-        <section class="features-section" id="features">
-            <div class="container">
-                <div class="section-badge">BUILT FOR CREATORS</div>
-                <h2 class="section-title">Everything you need to go viral on Shorts, Reels & TikTok</h2>
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <div class="feat-icon">🎯</div>
-                        <h3>AI Virality Detection</h3>
-                        <p>Our algorithm scans transcript momentum, hook strength in the first 3 seconds, speech density, and punchline payoff to extract only the most captivating 30-50s clips.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">📱</div>
-                        <h3>Intelligent 9:16 Reframing</h3>
-                        <p>Turn horizontal 16:9 YouTube streams and podcasts into flawless vertical shorts with smart auto-crop, podcast split blur, and centered focus.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">✨</div>
-                        <h3>Dynamic Hormozi Captions</h3>
-                        <p>Auto-generated word-by-word karaoke captions with high-contrast colors, pop-in emojis, and proven retention-boosting subtitle styles.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">🚀</div>
-                        <h3>100% Free & No Watermarks</h3>
-                        <p>No paywalls, no monthly subscription traps, and no ugly watermarks. You own all your shorts in full HD.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- How It Works Section -->
+        <!-- How It Works -->
         <section class="how-it-works-section" id="how-it-works">
             <div class="container">
-                <div class="section-badge">FAST 3-STEP PROCESS</div>
-                <h2 class="section-title">From Long Video to 10 Viral Shorts in Seconds</h2>
+                <div class="section-badge">SIMPLE 3-STEP PROCESS</div>
+                <h2 class="section-title">From Long Video to Viral Shorts in Seconds</h2>
                 <div class="steps-grid">
                     <div class="step-card">
                         <div class="step-number">01</div>
                         <h3>Paste Link or Upload Video</h3>
-                        <p>Drop any YouTube podcast, stream VOD, or upload your own MP4/MOV file directly.</p>
+                        <p>Drop any YouTube link, podcast, live stream, or upload your own MP4/MOV file. No account needed.</p>
                     </div>
                     <div class="step-card">
                         <div class="step-number">02</div>
-                        <h3>AI Finds Entertaining Clips</h3>
-                        <p>The virality engine flags spikes in emotion, humor, curiosity hooks, and high-retention segments.</p>
+                        <h3>AI Finds the Best Moments</h3>
+                        <p>Our AI scans for emotional peaks, funny moments, curiosity hooks, and high-retention segments automatically.</p>
                     </div>
                     <div class="step-card">
                         <div class="step-number">03</div>
-                        <h3>Preview, Style & Download</h3>
-                        <p>Pick your favorite caption style, adjust boundaries in the 9:16 mockup, and export immediately.</p>
+                        <h3>Preview, Style &amp; Download</h3>
+                        <p>Pick a caption style, preview in a 9:16 phone mockup, then download your ready-to-post short. No watermark!</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features -->
+        <section class="features-section" id="features">
+            <div class="container">
+                <div class="section-badge">BUILT FOR CREATORS</div>
+                <h2 class="section-title">Everything you need to go viral — completely free</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feat-icon">🎯</div>
+                        <h3>AI Virality Detection</h3>
+                        <p>Scores each clip 0–100 based on hook strength, speech emotion, curiosity gap, and estimated viewer retention.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">📱</div>
+                        <h3>Auto Vertical Reframing</h3>
+                        <p>Automatically converts horizontal 16:9 video to vertical 9:16 for TikTok, Reels, and YouTube Shorts.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">✨</div>
+                        <h3>Animated Karaoke Captions</h3>
+                        <p>Word-by-word captions that sync with speech — high contrast, pop-in emojis, proven to boost retention.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">🚀</div>
+                        <h3>100% Free · No Watermarks</h3>
+                        <p>No subscription, no hidden fees, no ugly watermarks. You own everything you export.</p>
                     </div>
                 </div>
             </div>
@@ -399,13 +459,13 @@
                 <span class="logo-icon">⚡</span>
                 <span class="logo-text">godd<span class="accent-text">.ai</span></span>
             </div>
-            <p class="footer-copy">Turn long videos into viral TikToks, Reels & Shorts. 100% Free Forever.</p>
+            <p class="footer-copy">Turn long videos into viral TikToks, Reels &amp; Shorts. 100% Free Forever.</p>
             <div class="footer-badge">Free Open Creator Engine</div>
         </div>
     </footer>
 
-    <!-- Notification Toast -->
-    <div class="toast" id="toast">Copied to clipboard!</div>
+    <!-- Toast notification -->
+    <div class="toast" id="toast">Copied!</div>
 
     <script src="app.js"></script>
 </body>

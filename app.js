@@ -976,51 +976,229 @@ function renderCanvasFrame() {
     }
 }
 
-// Download Short Video (MP4 / WebM with embedded dynamic subtitles)
+// Download Short Video — records actual video content (not canvas animations)
 function downloadShortVideo() {
-    if (!activeClip) return;
-    showToast('⚡ Rendering 9:16 short with dynamic captions...');
+    if (!activeClip) {
+        showToast('⚠️ Please select a clip first');
+        return;
+    }
 
+    // ── LOCAL UPLOADED VIDEO ──────────────────────────────────────────────────
+    if (currentVideoData && currentVideoData.isLocal && uploadedFileUrl) {
+        showDownloadProgress('Preparing your clip…', 0);
+
+        // Create a hidden video element to play the exact clip segment
+        const clipVideo = document.createElement('video');
+        clipVideo.src = uploadedFileUrl;
+        clipVideo.muted = false;
+        clipVideo.crossOrigin = 'anonymous';
+        clipVideo.preload = 'auto';
+
+        clipVideo.onloadedmetadata = () => {
+            clipVideo.currentTime = activeClip.start;
+        };
+
+        clipVideo.onseeked = () => {
+            // Now capture directly from the video element (actual frames!)
+            let stream;
+            try {
+                stream = clipVideo.captureStream(30);
+            } catch(e) {
+                // Fallback: canvas capture of the preview video
+                _downloadFromCanvas();
+                return;
+            }
+
+            const chunks = [];
+            let recorder;
+            try {
+                recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+            } catch(e) {
+                try {
+                    recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                } catch(e2) {
+                    _downloadFromCanvas();
+                    return;
+                }
+            }
+
+            const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress = Math.min(90, progress + (100 / (clipDurationMs / 300)));
+                showDownloadProgress(`Recording clip… ${Math.round(progress)}%`, progress);
+            }, 300);
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
+            };
+
+            recorder.onstop = () => {
+                clearInterval(progressInterval);
+                showDownloadProgress('Saving file…', 100);
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                a.download = `godd_ai_${safeName}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+                hideDownloadProgress();
+                showToast('✅ Clip downloaded! Check your Downloads folder.');
+            };
+
+            clipVideo.play().catch(() => {});
+            recorder.start(100); // collect data every 100ms
+
+            setTimeout(() => {
+                if (recorder.state === 'recording') recorder.stop();
+                clipVideo.pause();
+            }, clipDurationMs + 200);
+        };
+
+        clipVideo.onerror = () => {
+            hideDownloadProgress();
+            showToast('❌ Could not read video file. Please try re-uploading.');
+        };
+
+        return;
+    }
+
+    // ── YOUTUBE MODE ──────────────────────────────────────────────────────────
+    // Cannot download YouTube videos due to copyright/CORS restrictions
+    showYouTubeDownloadModal();
+}
+
+// Fallback: Canvas capture (includes subtitles overlay — lower quality but works)
+function _downloadFromCanvas() {
+    showToast('⚡ Rendering with subtitle overlay…');
+    pausePlayer();
+    currentTime = 0;
+    if (previewVideo && currentVideoData?.isLocal) {
+        previewVideo.currentTime = activeClip.start;
+    }
     startPlayer();
 
     try {
         const stream = canvas.captureStream(30);
-        let chunks = [];
+        const chunks = [];
         let recorder;
-
         try {
             recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-        } catch (e) {
+        } catch(e) {
             recorder = new MediaRecorder(stream);
         }
 
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
-        };
-
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
         recorder.onstop = () => {
             const blob = new Blob(chunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = `${activeClip.id}_godd_ai_short.webm`;
+            a.href = URL.createObjectURL(blob);
+            const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            a.download = `godd_ai_${safeName}.webm`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            showToast('✓ Short downloaded successfully!');
+            hideDownloadProgress();
+            showToast('✅ Clip downloaded!');
         };
 
+        const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
         recorder.start();
-        // Record 8 seconds sample of short
-        setTimeout(() => {
-            if (recorder.state === 'recording') {
-                recorder.stop();
-            }
-        }, 8000);
-    } catch (err) {
-        console.error('Canvas export error:', err);
-        showToast('✓ Download ready');
+        setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, clipDurationMs + 300);
+    } catch(err) {
+        hideDownloadProgress();
+        showToast('❌ Download failed. Try the SRT export instead.');
     }
+}
+
+// Progress bar helpers
+function showDownloadProgress(label, pct) {
+    let overlay = document.getElementById('downloadProgressOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'downloadProgressOverlay';
+        overlay.innerHTML = `
+            <div class="dl-progress-card">
+                <div class="dl-spinner">⏳</div>
+                <div id="dlProgressLabel" class="dl-label">Preparing…</div>
+                <div class="dl-bar-track"><div id="dlProgressBar" class="dl-bar-fill"></div></div>
+                <div class="dl-hint">Please wait — do not close this tab</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+    document.getElementById('dlProgressLabel').innerText = label;
+    document.getElementById('dlProgressBar').style.width = `${pct}%`;
+}
+
+function hideDownloadProgress() {
+    const overlay = document.getElementById('downloadProgressOverlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+// YouTube: show helpful modal instead of broken download
+function showYouTubeDownloadModal() {
+    let modal = document.getElementById('ytDownloadModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'ytDownloadModal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-card">
+                <div class="modal-icon">🎬</div>
+                <h3 class="modal-title">How to Download Your YouTube Clip</h3>
+                <p class="modal-body">Due to YouTube's rules, we can't download their videos directly in the browser — but here's exactly how to get your clip:</p>
+                <div class="modal-steps">
+                    <div class="modal-step"><span class="ms-num">1</span><span>Copy the timestamp below and open the video in YouTube at that moment.</span></div>
+                    <div class="modal-step"><span class="ms-num">2</span><span>Use a free tool like <strong>yt-dlp</strong> (desktop) or <strong>y2mate.com</strong> to download the video.</span></div>
+                    <div class="modal-step"><span class="ms-num">3</span><span>Trim using the timestamps, then re-upload here to add captions!</span></div>
+                </div>
+                <div class="modal-timestamp-box" id="modalTimestampBox"></div>
+                <div class="modal-actions">
+                    <button class="btn-modal-primary" onclick="copyClipTimestamp()">📋 Copy Timestamp &amp; Script</button>
+                    <button class="btn-modal-secondary" onclick="downloadSrtCaptions()">📄 Download SRT Captions</button>
+                    <button class="btn-modal-close" onclick="document.getElementById('ytDownloadModal').style.display='none'">✕ Close</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    // Populate timestamp info
+    if (activeClip && currentVideoData) {
+        const startFmt = formatSec(activeClip.start);
+        const endFmt = formatSec(activeClip.end);
+        const ytUrl = currentVideoData.url || '';
+        const ytId = extractYouTubeId(ytUrl);
+        const deepLink = ytId ? `https://youtu.be/${ytId}?t=${Math.floor(activeClip.start)}` : ytUrl;
+        document.getElementById('modalTimestampBox').innerHTML = `
+            <div class="ts-row"><strong>Clip:</strong> ${activeClip.title}</div>
+            <div class="ts-row"><strong>Start:</strong> ${startFmt} &nbsp;→&nbsp; <strong>End:</strong> ${endFmt}</div>
+            ${deepLink ? `<div class="ts-row"><a href="${deepLink}" target="_blank" rel="noopener" class="ts-link">▶ Open clip in YouTube at ${startFmt}</a></div>` : ''}
+        `;
+    }
+
+    modal.style.display = 'flex';
+}
+
+function copyClipTimestamp() {
+    if (!activeClip) return;
+    const startFmt = formatSec(activeClip.start);
+    const endFmt = formatSec(activeClip.end);
+    const ytUrl = currentVideoData?.url || '';
+    const ytId = extractYouTubeId(ytUrl);
+    const deepLink = ytId ? `https://youtu.be/${ytId}?t=${Math.floor(activeClip.start)}` : ytUrl;
+    const text = `🎬 ${activeClip.title}\nStart: ${startFmt} → End: ${endFmt}\nLink: ${deepLink}\n\nSCRIPT:\n${activeClip.full_text || ''}\n\nMade with godd.ai (Free)`;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('✅ Timestamp + script copied!');
+    }).catch(() => {
+        showToast('✅ Copied!');
+    });
 }
 
 // Export SRT Captions

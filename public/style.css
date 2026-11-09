@@ -1281,3 +1281,364 @@ body {
         justify-content: center;
     }
 }
+
+
+/* ═══════════════════════════════════════════════════════════
+   NEW BEGINNER-FRIENDLY UI ADDITIONS
+   ═══════════════════════════════════════════════════════════ */
+
+/* How-it-works mini steps on hero */
+.how-steps-mini {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 24px 0 32px;
+    flex-wrap: wrap;
+}
+.hsm-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 40px;
+    padding: 8px 18px;
+}
+.hsm-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-purple), var(--accent-indigo));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+}
+.hsm-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.hsm-arrow {
+    font-size: 20px;
+    color: var(--text-muted);
+}
+
+/* Tab hint text */
+.tab-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+/* Studio progress breadcrumb */
+.studio-steps-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    flex-wrap: wrap;
+}
+.ssb-step {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 20px;
+}
+.ssb-step.done {
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.1);
+}
+.ssb-step.active {
+    color: var(--accent-yellow);
+    background: rgba(250, 204, 21, 0.1);
+}
+.ssb-arrow {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* Panel hint */
+.panel-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 4px 0 12px;
+    font-style: italic;
+}
+
+/* Player label */
+.player-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+/* Control hint text */
+.control-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: -4px 0 10px;
+    font-style: italic;
+}
+
+/* Label with sub-hint */
+.label-hint {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 2px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* Preset btn sub-label */
+.preset-btn small {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* Export section header */
+.export-title {
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+/* Download hint text */
+.download-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 8px 0 12px;
+    line-height: 1.6;
+    font-style: italic;
+}
+
+/* Download button — make it big and green */
+.btn-download-mp4 {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #10B981, #059669);
+    color: #fff;
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.35);
+    transition: all 0.2s;
+    letter-spacing: 0.01em;
+}
+.btn-download-mp4:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(16, 185, 129, 0.5);
+    background: linear-gradient(135deg, #34D399, #10B981);
+}
+.dl-icon {
+    font-size: 20px;
+}
+
+/* Download progress overlay */
+#downloadProgressOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 6, 10, 0.88);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.dl-progress-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    padding: 40px 48px;
+    text-align: center;
+    min-width: 320px;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+.dl-spinner {
+    font-size: 36px;
+    animation: spin 1.5s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.dl-label {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.dl-bar-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 100px;
+    overflow: hidden;
+}
+.dl-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-purple), var(--accent-indigo));
+    border-radius: 100px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+.dl-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* YouTube download modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 6, 10, 0.88);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.modal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    padding: 36px 40px;
+    max-width: 500px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.modal-icon {
+    font-size: 40px;
+    text-align: center;
+}
+.modal-title {
+    font-size: 20px;
+    font-weight: 800;
+    text-align: center;
+    color: var(--text-primary);
+}
+.modal-body {
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.6;
+}
+.modal-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.modal-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+.ms-num {
+    min-width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--accent-purple);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+.modal-timestamp-box {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.ts-row {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.ts-link {
+    color: var(--accent-cyan);
+    text-decoration: none;
+    font-weight: 600;
+}
+.ts-link:hover { text-decoration: underline; }
+.modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.btn-modal-primary {
+    padding: 13px;
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-purple), var(--accent-indigo));
+    color: #fff;
+    transition: opacity 0.2s;
+}
+.btn-modal-primary:hover { opacity: 0.85; }
+.btn-modal-secondary {
+    padding: 11px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-secondary);
+    transition: background 0.2s;
+}
+.btn-modal-secondary:hover { background: rgba(255,255,255,0.1); }
+.btn-modal-close {
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-muted);
+}
+.btn-modal-close:hover { color: var(--text-secondary); }
