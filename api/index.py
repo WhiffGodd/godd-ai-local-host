@@ -143,6 +143,35 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(SAMPLE_VIDEOS).encode("utf-8"))
             return
 
+        # Serve static assets fallback
+        base_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        target_file = None
+        content_type = "text/plain"
+
+        if path in ["/", "/index.html"]:
+            target_file = os.path.join(base_root, "public", "index.html")
+            if not os.path.exists(target_file):
+                target_file = os.path.join(base_root, "index.html")
+            content_type = "text/html; charset=utf-8"
+        elif path == "/style.css":
+            target_file = os.path.join(base_root, "public", "style.css")
+            if not os.path.exists(target_file):
+                target_file = os.path.join(base_root, "style.css")
+            content_type = "text/css; charset=utf-8"
+        elif path == "/app.js":
+            target_file = os.path.join(base_root, "public", "app.js")
+            if not os.path.exists(target_file):
+                target_file = os.path.join(base_root, "app.js")
+            content_type = "application/javascript; charset=utf-8"
+
+        if target_file and os.path.exists(target_file):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.end_headers()
+            with open(target_file, "rb") as f:
+                self.wfile.write(f.read())
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
