@@ -1,9 +1,9 @@
 {
-  "cleanUrls": true,
+  "version": 2,
   "rewrites": [
     {
-      "source": "/api/download-srt",
-      "destination": "/api/download_srt"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     }
   ]
 }
