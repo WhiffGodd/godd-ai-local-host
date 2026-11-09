@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>godd ai | Turn Videos into Viral TikToks, Reels & Shorts (100% Free)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+</head>
+<body>
+    <!-- Background Ambient Glows -->
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+    <div class="ambient-glow glow-3"></div>
+
+    <!-- Top Navigation -->
+    <header class="navbar">
+        <div class="nav-container">
+            <div class="brand">
+                <div class="logo-icon">⚡</div>
+                <span class="logo-text">godd<span class="accent-text">.ai</span></span>
+                <span class="badge-free">100% FREE FOREVER</span>
+            </div>
+            <nav class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#how-it-works">How It Works</a>
+                <button class="btn-sample-nav" onclick="loadSampleVideo('sample_huberman')">Try Sample</button>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="hero-section" id="hero">
+            <div class="container">
+                <div class="hero-badge">
+                    <span class="pulse-dot"></span>
+                    <span>The #1 Free Alternative to Klap & Opus Clip</span>
+                </div>
+                <h1 class="hero-title">
+                    Turn long videos into <br>
+                    <span class="gradient-text">viral TikToks, Reels & Shorts</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Paste any YouTube video or live stream. <strong>godd ai</strong> automatically detects the most entertaining moments, crops to 9:16 vertical, adds animated karaoke subtitles, and exports ready-to-post clips.
+                </p>
+
+                <!-- Input Box -->
+                <div class="input-card">
+                    <div class="input-wrapper">
+                        <span class="yt-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                            </svg>
+                        </span>
+                        <input type="text" id="videoUrlInput" placeholder="Paste YouTube video or livestream link (e.g. https://www.youtube.com/watch?v=...)" autocomplete="off">
+                        <button class="btn-paste" onclick="pasteFromClipboard()" title="Paste from Clipboard">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span>Paste</span>
+                        </button>
+                    </div>
+                    <button class="btn-generate" id="btnGenerate" onclick="analyzeVideo()">
+                        <span class="btn-text">⚡ Generate Free Shorts</span>
+                        <span class="btn-sparkle">✨</span>
+                    </button>
+                </div>
+
+                <!-- Instant Try Samples -->
+                <div class="sample-pills">
+                    <span class="sample-label">Or try an instant sample:</span>
+                    <button class="sample-pill" onclick="loadSampleVideo('sample_huberman')">
+                        🎙️ Creative Genius Podcast
+                    </button>
+                    <button class="sample-pill" onclick="loadSampleVideo('sample_streamer')">
+                        🎮 Live Stream Record Clutch
+                    </button>
+                </div>
+
+                <!-- Feature Highlights -->
+                <div class="feature-strip">
+                    <div class="strip-item">
+                        <span class="strip-icon">🎯</span>
+                        <span>AI Virality Score (0-100)</span>
+                    </div>
+                    <div class="strip-item">
+                        <span class="strip-icon">📱</span>
+                        <span>Smart 9:16 Auto-Crop</span>
+                    </div>
+                    <div class="strip-item">
+                        <span class="strip-icon">🔥</span>
+                        <span>Hormozi Karaoke Captions</span>
+                    </div>
+                    <div class="strip-item">
+                        <span class="strip-icon">🚫</span>
+                        <span>No Watermark • 100% Free</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Processing Screen Modal / State -->
+        <section class="processing-section" id="processingSection" style="display: none;">
+            <div class="processing-card">
+                <div class="scanner-ring">
+                    <div class="ring ring-1"></div>
+                    <div class="ring ring-2"></div>
+                    <div class="center-ai-icon">⚡</div>
+                </div>
+                <h3 class="processing-title" id="processingTitle">Analyzing Video with godd.ai...</h3>
+                <p class="processing-subtitle" id="processingSubtitle">Scanning audio waveforms for viral hooks, laughter, and high-retention peaks</p>
+                
+                <div class="stepper-list">
+                    <div class="step-item step-active" id="step1">
+                        <div class="step-bullet">✓</div>
+                        <div class="step-text">Connecting to stream & fetching metadata</div>
+                    </div>
+                    <div class="step-item" id="step2">
+                        <div class="step-bullet">2</div>
+                        <div class="step-text">Transcribing speech & detecting timestamps</div>
+                    </div>
+                    <div class="step-item" id="step3">
+                        <div class="step-bullet">3</div>
+                        <div class="step-text">Virality Engine: scoring emotion, curiosity & punchlines</div>
+                    </div>
+                    <div class="step-item" id="step4">
+                        <div class="step-bullet">4</div>
+                        <div class="step-text">Reframing to 9:16 & generating animated captions</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Studio & Results Section -->
+        <section class="studio-section" id="studioSection" style="display: none;">
+            <div class="container">
+                <!-- Video Meta Banner -->
+                <div class="video-meta-bar">
+                    <div class="video-thumbnail-box">
+                        <img id="metaThumb" src="" alt="Thumbnail">
+                    </div>
+                    <div class="video-info">
+                        <h2 id="metaTitle">Video Title</h2>
+                        <div class="meta-tags">
+                            <span class="meta-tag" id="metaAuthor">Creator</span>
+                            <span class="meta-dot">•</span>
+                            <span class="meta-tag" id="metaDuration">Duration: 10:00</span>
+                            <span class="meta-dot">•</span>
+                            <span class="meta-tag highlight-tag" id="metaClipsCount">4 Viral Shorts Ready</span>
+                        </div>
+                    </div>
+                    <button class="btn-new-video" onclick="resetToHome()">+ Process Another Video</button>
+                </div>
+
+                <!-- Studio Workspace Grid -->
+                <div class="studio-grid">
+                    <!-- Left: Clips List -->
+                    <div class="clips-panel">
+                        <div class="panel-header">
+                            <h3>Detected Viral Clips</h3>
+                            <span class="badge-count" id="clipsBadge">4 clips</span>
+                        </div>
+                        <div class="clips-list" id="clipsListContainer">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Center: 9:16 Smartphone Mockup Player -->
+                    <div class="player-panel">
+                        <div class="phone-mockup">
+                            <div class="phone-screen">
+                                <!-- Real-time Canvas / Video Renderer -->
+                                <div class="canvas-wrapper" id="canvasWrapper">
+                                    <video id="previewVideo" playsinline crossorigin="anonymous" style="display:none;"></video>
+                                    <canvas id="shortsCanvas" width="720" height="1280"></canvas>
+                                    
+                                    <!-- Dynamic Animated Subtitles Overlay -->
+                                    <div class="captions-overlay" id="captionsOverlay">
+                                        <div class="caption-text-box style-hormozi" id="captionTextBox">
+                                            <span class="caption-word">WAIT</span>
+                                            <span class="caption-word active-word">UNTIL</span>
+                                            <span class="caption-word">YOU</span>
+                                            <span class="caption-word highlight-word">SEE 🔥</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Top Video Hook Tag -->
+                                    <div class="hook-banner" id="hookBanner">
+                                        <span id="hookBannerText">The Brutal Truth About Creative Genius 🧠</span>
+                                    </div>
+                                </div>
+
+                                <!-- In-Player Video Controls -->
+                                <div class="player-controls">
+                                    <button class="btn-play-pause" id="btnPlayPause" onclick="togglePlay()">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" id="playIcon">
+                                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                        </svg>
+                                    </button>
+                                    <div class="scrubber-bar" onclick="seekScrubber(event)">
+                                        <div class="scrubber-fill" id="scrubberFill"></div>
+                                    </div>
+                                    <span class="timestamp-label" id="timeLabel">0:00 / 0:40</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Editor & Customization Controls -->
+                    <div class="controls-panel">
+                        <div class="control-box">
+                            <label class="control-label">🔥 Subtitle Preset</label>
+                            <div class="style-presets-grid">
+                                <button class="preset-btn active" data-style="hormozi" onclick="setSubtitleStyle('hormozi')">
+                                    <div class="preset-preview style-p-hormozi">YELLOW</div>
+                                    <span>Hormozi</span>
+                                </button>
+                                <button class="preset-btn" data-style="mrbeast" onclick="setSubtitleStyle('mrbeast')">
+                                    <div class="preset-preview style-p-beast">CYAN</div>
+                                    <span>MrBeast</span>
+                                </button>
+                                <button class="preset-btn" data-style="cyber" onclick="setSubtitleStyle('cyber')">
+                                    <div class="preset-preview style-p-cyber">GREEN</div>
+                                    <span>Cyber Glow</span>
+                                </button>
+                                <button class="preset-btn" data-style="clean" onclick="setSubtitleStyle('clean')">
+                                    <div class="preset-preview style-p-clean">CLEAN</div>
+                                    <span>Minimal</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="control-box">
+                            <label class="control-label">📐 9:16 Video Layout</label>
+                            <div class="layout-toggle-group">
+                                <button class="layout-btn active" data-layout="crop" onclick="setLayout('crop')">
+                                    <span>✂️ Smart Crop</span>
+                                </button>
+                                <button class="layout-btn" data-layout="blur" onclick="setLayout('blur')">
+                                    <span>✨ Blur Background</span>
+                                </button>
+                                <button class="layout-btn" data-layout="fit" onclick="setLayout('fit')">
+                                    <span>🔲 Fit Letterbox</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="control-box">
+                            <div class="label-with-val">
+                                <label class="control-label">⏱️ Clip Boundaries (Trim)</label>
+                                <span class="val-badge" id="trimDurationLabel">Duration: 40s</span>
+                            </div>
+                            <div class="trim-inputs">
+                                <div class="trim-field">
+                                    <span>Start:</span>
+                                    <input type="number" id="trimStart" step="1" min="0" onchange="updateTrimTimes()">
+                                    <span>s</span>
+                                </div>
+                                <div class="trim-field">
+                                    <span>End:</span>
+                                    <input type="number" id="trimEnd" step="1" min="1" onchange="updateTrimTimes()">
+                                    <span>s</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="control-box">
+                            <label class="control-label">📝 Full Transcript & Script</label>
+                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true">
+                                Full transcript will appear here...
+                            </div>
+                        </div>
+
+                        <!-- Export Actions -->
+                        <div class="export-actions">
+                            <button class="btn-download-mp4" onclick="downloadShortVideo()">
+                                <span>⚡ Download 9:16 Short (MP4)</span>
+                            </button>
+                            <div class="secondary-actions">
+                                <button class="btn-secondary" onclick="downloadSrtCaptions()">
+                                    <span>📄 Export SRT</span>
+                                </button>
+                                <button class="btn-secondary" onclick="copyHookText()">
+                                    <span>📋 Copy Script</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Showcase Section -->
+        <section class="features-section" id="features">
+            <div class="container">
+                <div class="section-badge">BUILT FOR CREATORS</div>
+                <h2 class="section-title">Everything you need to go viral on Shorts, Reels & TikTok</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feat-icon">🎯</div>
+                        <h3>AI Virality Detection</h3>
+                        <p>Our algorithm scans transcript momentum, hook strength in the first 3 seconds, speech density, and punchline payoff to extract only the most captivating 30-50s clips.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">📱</div>
+                        <h3>Intelligent 9:16 Reframing</h3>
+                        <p>Turn horizontal 16:9 YouTube streams and podcasts into flawless vertical shorts with smart auto-crop, podcast split blur, and centered focus.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">✨</div>
+                        <h3>Dynamic Hormozi Captions</h3>
+                        <p>Auto-generated word-by-word karaoke captions with high-contrast colors, pop-in emojis, and proven retention-boosting subtitle styles.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feat-icon">🚀</div>
+                        <h3>100% Free & No Watermarks</h3>
+                        <p>No paywalls, no monthly subscription traps, and no ugly watermarks. You own all your shorts in full HD.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- How It Works Section -->
+        <section class="how-it-works-section" id="how-it-works">
+            <div class="container">
+                <div class="section-badge">FAST 3-STEP PROCESS</div>
+                <h2 class="section-title">From Long Video to 10 Viral Shorts in Seconds</h2>
+                <div class="steps-grid">
+                    <div class="step-card">
+                        <div class="step-number">01</div>
+                        <h3>Paste YouTube Link</h3>
+                        <p>Drop any podcast, live stream vod, challenge video, or interview link into godd ai.</p>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-number">02</div>
+                        <h3>AI Finds Entertaining Clips</h3>
+                        <p>The virality engine flags spikes in emotion, humor, curiosity hooks, and high-retention segments.</p>
+                    </div>
+                    <div class="step-card">
+                        <div class="step-number">03</div>
+                        <h3>Preview, Style & Download</h3>
+                        <p>Pick your favorite caption style, adjust boundaries in the 9:16 mockup, and export immediately.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-content">
+            <div class="brand">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">godd<span class="accent-text">.ai</span></span>
+            </div>
+            <p class="footer-copy">Turn long videos into viral TikToks, Reels & Shorts. 100% Free Forever.</p>
+            <div class="footer-badge">Free Open Creator Engine</div>
+        </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div class="toast" id="toast">Copied to clipboard!</div>
+
+    <script src="app.js"></script>
+</body>
+</html>
