@@ -9,6 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <!-- Official YouTube IFrame Player API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
     <!-- Ambient Background Lighting -->
@@ -26,6 +28,7 @@
             </div>
             <nav class="nav-links">
                 <a href="#how-it-works">How It Works</a>
+                <button class="btn-api-key-nav" type="button" onclick="openApiKeyModal()" title="Configure Official YouTube Data API Key">🔑 YouTube API</button>
                 <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">▶ Try Demo</button>
             </nav>
         </div>
@@ -252,9 +255,10 @@
                                     <!-- Native video for local uploads -->
                                     <video id="previewVideo" playsinline loop crossorigin="anonymous"></video>
 
-                                    <!-- YouTube iframe -->
+                                    <!-- YouTube Official Player API Container -->
                                     <div id="ytContainer" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden;">
-                                        <iframe id="ytIframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width: 300%; height: 100%; margin-left: -100%; pointer-events: none;"></iframe>
+                                        <div id="ytPlayerDiv" style="width: 300%; height: 100%; margin-left: -100%;"></div>
+                                        <iframe id="ytIframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width: 300%; height: 100%; margin-left: -100%; pointer-events: none; display: none;"></iframe>
                                     </div>
 
                                     <!-- Canvas for rendering -->
@@ -463,6 +467,36 @@
             <div class="footer-badge">Free Open Creator Engine</div>
         </div>
     </footer>
+
+    <!-- Official YouTube API Key Modal -->
+    <div class="modal-overlay" id="apiKeyModal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-icon">🔑</div>
+            <h3 class="modal-title">YouTube Data API v3 Setup</h3>
+            <p class="modal-body">
+                Connect the official Google YouTube API for real-time video metadata, higher rate limits, and chapter detection.
+            </p>
+            <div class="api-key-input-group">
+                <label for="apiKeyInput" style="font-size: 13px; font-weight: 700; color: var(--text-secondary);">Your YouTube API Key:</label>
+                <input type="text" id="apiKeyInput" placeholder="AIzaSy..." style="width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: #fff; font-family: monospace; font-size: 13px; margin-top: 6px;">
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                    Stored locally in your browser. Never shared or saved to external servers.
+                </div>
+            </div>
+            <div class="api-key-help-box" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                <strong>How to get a free API key:</strong><br>
+                1. Visit <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener" style="color: var(--accent-cyan);">Google Cloud Console</a><br>
+                2. Enable <strong>YouTube Data API v3</strong><br>
+                3. Go to <em>Credentials</em> → <em>Create Credentials</em> → <em>API Key</em><br>
+                4. Paste it above and click Save
+            </div>
+            <div class="modal-actions" style="margin-top: 10px;">
+                <button class="btn-modal-primary" type="button" onclick="saveApiKey()">Save API Key</button>
+                <button class="btn-modal-secondary" type="button" onclick="clearApiKey()">Clear / Use Default</button>
+                <button class="btn-modal-close" type="button" onclick="closeApiKeyModal()">✕ Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast notification -->
     <div class="toast" id="toast">Copied!</div>

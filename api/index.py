@@ -177,10 +177,11 @@ class handler(BaseHTTPRequestHandler):
 
         # 2. Main Video Analysis
         url = payload.get("url", "").strip()
+        api_key = payload.get("api_key", "").strip() or None
         video_id = extract_youtube_id(url) or "sample_test_vid"
 
         try:
-            meta = get_video_metadata(video_id, url)
+            meta = get_video_metadata(video_id, url, api_key=api_key)
             transcript = fetch_transcript_segments(video_id)
             clips = analyze_virality_and_cut_clips(
                 transcript=transcript,
@@ -198,7 +199,8 @@ class handler(BaseHTTPRequestHandler):
                     "thumbnail": meta.get("thumbnail", f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"),
                     "duration": meta.get("duration", 600),
                     "duration_formatted": f"{int(meta.get('duration', 600) // 60)}:{int(meta.get('duration', 600) % 60):02d}",
-                    "view_count": meta.get("view_count", 250000)
+                    "view_count": meta.get("view_count", 250000),
+                    "source": meta.get("source", "oembed")
                 },
                 "clips": clips
             }

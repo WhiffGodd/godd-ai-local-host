@@ -134,11 +134,83 @@ let currentStyle = 'hormozi';
 let currentLayout = 'crop';
 let isYouTubeMode = false;
 
-// DOM Elements
+// DOM Elements & Official YouTube API Player
 let canvas, ctx;
 let previewVideo;
 let ytContainer;
 let ytIframe;
+let ytPlayer = null;
+let ytPlayerReady = false;
+
+// Official YouTube IFrame Player API callback
+window.onYouTubeIframeAPIReady = function() {
+    ytPlayerReady = true;
+    console.log('[YouTube Player API] Ready');
+};
+
+function initOrUpdateYouTubePlayer(videoId, start, end) {
+    if (!ytContainer) return;
+    ytContainer.style.display = 'block';
+
+    if (window.YT && window.YT.Player) {
+        if (!ytPlayer) {
+            ytPlayer = new YT.Player('ytPlayerDiv', {
+                videoId: videoId,
+                playerVars: {
+                    start: Math.floor(start),
+                    end: Math.floor(end),
+                    autoplay: 1,
+                    controls: 0,
+                    modestbranding: 1,
+                    rel: 0,
+                    loop: 1,
+                    playlist: videoId,
+                    playsinline: 1
+                },
+                events: {
+                    onReady: (e) => {
+                        ytPlayerReady = true;
+                        e.target.seekTo(start, true);
+                        e.target.playVideo();
+                    },
+                    onStateChange: (e) => {
+                        if (e.data === YT.PlayerState.PLAYING) {
+                            isPlaying = true;
+                            updatePlayIcon(true);
+                        } else if (e.data === YT.PlayerState.PAUSED) {
+                            isPlaying = false;
+                            updatePlayIcon(false);
+                        } else if (e.data === YT.PlayerState.ENDED) {
+                            if (activeClip && ytPlayer) {
+                                ytPlayer.seekTo(activeClip.start, true);
+                                ytPlayer.playVideo();
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            try {
+                ytPlayer.loadVideoById({
+                    videoId: videoId,
+                    startSeconds: Math.floor(start),
+                    endSeconds: Math.floor(end)
+                });
+                ytPlayer.playVideo();
+            } catch(e) {
+                // Fallback to iframe src if player error
+                if (ytIframe) {
+                    ytIframe.style.display = 'block';
+                    ytIframe.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(start)}&end=${Math.floor(end)}&autoplay=1&mute=0&controls=0&loop=1&playlist=${videoId}`;
+                }
+            }
+        }
+    } else if (ytIframe) {
+        // Fallback standard iframe
+        ytIframe.style.display = 'block';
+        ytIframe.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(start)}&end=${Math.floor(end)}&autoplay=1&mute=0&controls=0&loop=1&playlist=${videoId}`;
+    }
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     canvas = document.getElementById('shortsCanvas');
@@ -436,6 +508,39 @@ function loadSampleVideo(sampleId) {
     simulateAnalysis(sample);
 }
 
+// Official YouTube API Key Management
+function openApiKeyModal() {
+    const modal = document.getElementById('apiKeyModal');
+    const input = document.getElementById('apiKeyInput');
+    if (modal) modal.style.display = 'flex';
+    if (input) input.value = localStorage.getItem('youtube_api_key') || '';
+}
+
+function closeApiKeyModal() {
+    const modal = document.getElementById('apiKeyModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function saveApiKey() {
+    const key = (document.getElementById('apiKeyInput')?.value || '').trim();
+    if (key) {
+        localStorage.setItem('youtube_api_key', key);
+        showToast('✅ YouTube Data API Key saved!');
+    } else {
+        localStorage.removeItem('youtube_api_key');
+        showToast('Using default YouTube API credentials');
+    }
+    closeApiKeyModal();
+}
+
+function clearApiKey() {
+    localStorage.removeItem('youtube_api_key');
+    const input = document.getElementById('apiKeyInput');
+    if (input) input.value = '';
+    showToast('YouTube API Key cleared');
+    closeApiKeyModal();
+}
+
 // Video Analysis for YouTube URL
 async function analyzeVideo() {
     const url = document.getElementById('videoUrlInput').value.trim();
@@ -446,6 +551,7 @@ async function analyzeVideo() {
 
     isYouTubeMode = true;
     const videoId = extractYouTubeId(url) || 'sample_vid';
+    const storedApiKey = localStorage.getItem('youtube_api_key') || '';
 
     // Show processing UI
     document.getElementById('hero').style.display = 'none';
@@ -457,7 +563,7 @@ async function analyzeVideo() {
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: url })
+            body: JSON.stringify({ url: url, api_key: storedApiKey })
         });
 
         if (response.ok) {
@@ -657,14 +763,11 @@ function selectClip(clipId) {
         previewVideo.src = currentVideoData.fileUrl;
         previewVideo.currentTime = activeClip.start;
     } else if (currentVideoData && currentVideoData.id && !currentVideoData.isLocal) {
-        // YouTube video embedding in 9:16 frame
+        // YouTube video via Official YouTube Player API
         const ytid = extractYouTubeId(currentVideoData.url) || currentVideoData.id;
         if (ytid && ytid.length === 11) {
             previewVideo.style.display = 'none';
-            if (ytContainer && ytIframe) {
-                ytContainer.style.display = 'block';
-                ytIframe.src = `https://www.youtube.com/embed/${ytid}?start=${Math.floor(activeClip.start)}&end=${Math.floor(activeClip.end)}&autoplay=1&mute=0&controls=0&loop=1&playlist=${ytid}`;
-            }
+            initOrUpdateYouTubePlayer(ytid, activeClip.start, activeClip.end);
         } else {
             previewVideo.style.display = 'none';
             if (ytContainer) ytContainer.style.display = 'none';
@@ -774,6 +877,8 @@ function startPlayer() {
 
     if (previewVideo && currentVideoData?.isLocal) {
         previewVideo.play().catch(() => {});
+    } else if (isYouTubeMode && ytPlayer && ytPlayerReady && typeof ytPlayer.playVideo === 'function') {
+        try { ytPlayer.playVideo(); } catch(e) {}
     }
     animationLoop();
 }
@@ -787,6 +892,8 @@ function pausePlayer() {
     }
     if (previewVideo && currentVideoData?.isLocal) {
         previewVideo.pause();
+    } else if (isYouTubeMode && ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
+        try { ytPlayer.pauseVideo(); } catch(e) {}
     }
 }
 
@@ -808,12 +915,29 @@ function animationLoop(timestamp) {
     lastTimestamp = timestamp;
 
     const clipDuration = activeClip ? (activeClip.end - activeClip.start) : 30;
-    currentTime += delta;
 
-    if (currentTime >= clipDuration) {
-        currentTime = 0;
-        if (previewVideo && currentVideoData?.isLocal) {
-            previewVideo.currentTime = activeClip.start;
+    if (isYouTubeMode && ytPlayer && ytPlayerReady && typeof ytPlayer.getCurrentTime === 'function') {
+        try {
+            const pTime = ytPlayer.getCurrentTime();
+            if (activeClip) {
+                if (pTime >= activeClip.end || pTime < activeClip.start) {
+                    ytPlayer.seekTo(activeClip.start, true);
+                    currentTime = 0;
+                } else {
+                    currentTime = Math.max(0, pTime - activeClip.start);
+                }
+            }
+        } catch(e) {
+            currentTime += delta;
+            if (currentTime >= clipDuration) currentTime = 0;
+        }
+    } else {
+        currentTime += delta;
+        if (currentTime >= clipDuration) {
+            currentTime = 0;
+            if (previewVideo && currentVideoData?.isLocal) {
+                previewVideo.currentTime = activeClip.start;
+            }
         }
     }
 
@@ -835,6 +959,10 @@ function seekScrubber(e) {
 
     if (previewVideo && currentVideoData?.isLocal) {
         previewVideo.currentTime = activeClip.start + currentTime;
+    } else if (isYouTubeMode && ytPlayer && ytPlayerReady && typeof ytPlayer.seekTo === 'function') {
+        try {
+            ytPlayer.seekTo(activeClip.start + currentTime, true);
+        } catch(e) {}
     }
 
     updatePlayerUI();

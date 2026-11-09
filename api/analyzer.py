@@ -2,6 +2,7 @@ import re
 import math
 import json
 import sys
+import os
 import urllib.request
 import urllib.parse
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -57,6 +58,90 @@ def extract_youtube_id(url: str) -> str:
             
     return ""
 
+def parse_iso8601_duration(duration_str: str) -> float:
+    """Parse ISO 8601 duration format (PT1H2M30S) into total seconds."""
+    if not duration_str:
+        return 600.0
+    match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_str)
+    if not match:
+        return 600.0
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+def extract_chapters_from_description(description: str) -> list:
+    """Extract chapter timestamps from video description (e.g. 01:23 Topic)."""
+    chapters = []
+    if not description:
+        return chapters
+    lines = description.split('\n')
+    for line in lines:
+        m = re.search(r'(?:(\d{1,2}):)?(\d{1,2}):(\d{2})', line)
+        if m:
+            hrs = int(m.group(1) or 0)
+            mins = int(m.group(2))
+            secs = int(m.group(3))
+            ts = hrs * 3600 + mins * 60 + secs
+            label = re.sub(r'[\(\[\{]?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[\)\]\}]?', '', line).strip(' -:|•')
+            if label:
+                chapters.append({"time": ts, "title": label})
+    return chapters
+
+def fetch_youtube_data_api(video_id: str, api_key: str = None) -> dict:
+    """
+    Official YouTube Data API v3 integration:
+    Fetches real title, channel, description, duration, thumbnails, and statistics.
+    """
+    key = api_key or os.environ.get("YOUTUBE_API_KEY", "").strip()
+    if not key:
+        return None
+
+    try:
+        api_url = (
+            f"https://www.googleapis.com/youtube/v3/videos?"
+            f"part=snippet,contentDetails,statistics&id={video_id}&key={key}"
+        )
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'godd-ai/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            items = data.get("items", [])
+            if not items:
+                return None
+
+            item = items[0]
+            snippet = item.get("snippet", {})
+            content = item.get("contentDetails", {})
+            stats = item.get("statistics", {})
+
+            # Pick highest resolution thumbnail available
+            thumbs = snippet.get("thumbnails", {})
+            thumb_url = (
+                thumbs.get("maxres", {}).get("url")
+                or thumbs.get("standard", {}).get("url")
+                or thumbs.get("high", {}).get("url")
+                or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+            )
+
+            dur_sec = parse_iso8601_duration(content.get("duration", ""))
+            desc = snippet.get("description", "")
+            chapters = extract_chapters_from_description(desc)
+
+            return {
+                "title": snippet.get("title", f"YouTube Video ({video_id})"),
+                "author": snippet.get("channelTitle", "Creator"),
+                "thumbnail": thumb_url,
+                "duration": dur_sec,
+                "description": desc[:500],
+                "view_count": int(stats.get("viewCount", 100000)),
+                "like_count": int(stats.get("likeCount", 5000)),
+                "chapters": chapters,
+                "source": "youtube_data_api_v3"
+            }
+    except Exception as e:
+        print(f"[YouTube Data API] Error fetching video {video_id}: {e}")
+        return None
+
 def fetch_oembed_metadata(video_id: str) -> dict:
     """Fallback metadata fetcher using YouTube oEmbed."""
     try:
@@ -78,8 +163,19 @@ def fetch_oembed_metadata(video_id: str) -> dict:
             "duration": 600
         }
 
-def get_video_metadata(video_id: str, url: str) -> dict:
-    """Retrieve full video metadata using yt-dlp or oEmbed."""
+def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
+    """
+    Retrieve video metadata.
+    Priority 1: Official YouTube Data API v3 (if API key available in payload or YOUTUBE_API_KEY env)
+    Priority 2: yt-dlp (if installed)
+    Priority 3: YouTube oEmbed fallback
+    """
+    # 1. Try Official YouTube Data API v3
+    official_meta = fetch_youtube_data_api(video_id, api_key)
+    if official_meta:
+        return official_meta
+
+    # 2. Try yt-dlp if available
     if yt_dlp:
         try:
             ydl_opts = {
@@ -100,7 +196,8 @@ def get_video_metadata(video_id: str, url: str) -> dict:
                 }
         except Exception as e:
             print(f"[Metadata] yt-dlp warning: {e}, falling back to oEmbed")
-            
+
+    # 3. Fast oEmbed fallback
     meta = fetch_oembed_metadata(video_id)
     return meta
 
