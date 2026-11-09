@@ -1,25 +1,9 @@
 {
-  "version": 2,
+  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/api/download-srt",
-      "destination": "/api/download_srt.py"
-    },
-    {
-      "source": "/api/samples",
-      "destination": "/api/samples.py"
-    },
-    {
-      "source": "/api/status",
-      "destination": "/api/status.py"
-    },
-    {
-      "source": "/api/analyze",
-      "destination": "/api/analyze.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/public/$1"
+      "destination": "/api/download_srt"
     }
   ]
 }
