@@ -327,6 +327,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         duration = float(payload.get("duration", 30))
         layout = payload.get("layout", "crop")
 
+        print(f"[VideoEngine] Rendering clip: URL={url}, Start={start_time}s, Dur={duration}s, Layout={layout}")
+
         try:
             rendered_path = download_and_clip_video(
                 video_url=url,
@@ -334,6 +336,23 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 duration=duration,
                 layout=layout
             )
+
+            # Stream the rendered MP4 file directly to the client
+            if payload.get("stream", True):
+                file_size = os.path.getsize(rendered_path)
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Disposition", f'attachment; filename="godd_ai_clip_{int(start_time)}.mp4"')
+                self.send_header("Content-Length", str(file_size))
+                self.end_headers()
+                with open(rendered_path, "rb") as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                return
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

@@ -1195,9 +1195,210 @@ function downloadShortVideo() {
         return;
     }
 
-    // ── YOUTUBE MODE ──────────────────────────────────────────────────────────
-    // Cannot download YouTube videos due to copyright/CORS restrictions
-    showYouTubeDownloadModal();
+    // ── YOUTUBE / ONLINE VIDEO: BACKEND FFmpeg RENDER (Klap / Opus Clip style) ──
+    renderClipViaBackendOrScreen();
+}
+
+// Backend FFmpeg Video Render (Klap/Opus Clip Architecture) with In-Browser Tab Capture Fallback
+async function renderClipViaBackendOrScreen() {
+    const videoUrl = currentVideoData?.url || (currentVideoData?.id ? `https://www.youtube.com/watch?v=${currentVideoData.id}` : '');
+    const startSec = activeClip.start;
+    const durSec = activeClip.duration_sec || Math.max(15, Math.round(activeClip.end - activeClip.start));
+    const layout = currentLayout || 'crop';
+
+    showDownloadProgress('⚡ Connecting to godd ai FFmpeg backend worker…', 20);
+
+    // Try backend endpoints in order:
+    // 1. Stored custom backend URL (if user configured one)
+    // 2. Relative endpoint /api/render-clip (if running on local server or custom backend)
+    // 3. http://localhost:8080/api/render-clip (standard local backend)
+    const customBackend = (localStorage.getItem('backend_api_url') || '').trim();
+    const candidateEndpoints = [];
+    if (customBackend) candidateEndpoints.push(`${customBackend.replace(/\/$/, '')}/api/render-clip`);
+    candidateEndpoints.push('/api/render-clip');
+    if (!window.location.origin.includes(':8080')) {
+        candidateEndpoints.push('http://localhost:8080/api/render-clip');
+    }
+
+    let backendSuccess = false;
+
+    for (const endpoint of candidateEndpoints) {
+        try {
+            showDownloadProgress('⚡ Rendering 9:16 short with FFmpeg backend…', 45);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for video render
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: videoUrl,
+                    start: startSec,
+                    duration: durSec,
+                    layout: layout,
+                    stream: true
+                }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                const ctype = res.headers.get('content-type') || '';
+                if (ctype.includes('video/') || ctype.includes('octet-stream')) {
+                    showDownloadProgress('Saving MP4 video file…', 95);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                    a.download = `godd_ai_${safeName}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 6000);
+                    hideDownloadProgress();
+                    showToast('✅ Viral 9:16 MP4 downloaded via backend!');
+                    backendSuccess = true;
+                    return;
+                }
+            }
+        } catch (err) {
+            console.log(`Backend attempt failed at ${endpoint}:`, err.message);
+        }
+    }
+
+    if (!backendSuccess) {
+        hideDownloadProgress();
+        // If backend is not running, prompt user to capture tab or run local server
+        promptDownloadOptions();
+    }
+}
+
+// Prompt download options when cloud backend is unavailable
+function promptDownloadOptions() {
+    let modal = document.getElementById('dlOptionsModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dlOptionsModal';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="modal-card">
+            <div class="modal-icon">⚡</div>
+            <h3 class="modal-title">Download Your 9:16 Clip</h3>
+            <p class="modal-body">Choose how you'd like to get your actual video file:</p>
+            <div class="modal-actions" style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn-modal-primary" type="button" onclick="startOneClickTabRecorder()" style="padding: 14px; font-size: 14px; background: linear-gradient(135deg, #10B981, #059669);">
+                    🎥 1-Click Screen/Tab Record (Instant • No Server Needed)
+                </button>
+                <button class="btn-modal-secondary" type="button" onclick="showLocalBackendInstructions()" style="padding: 12px; font-size: 13px;">
+                    🖥️ Use Local Python/FFmpeg Backend (Klap Style)
+                </button>
+                <button class="btn-modal-close" type="button" onclick="document.getElementById('dlOptionsModal').style.display='none'">✕ Cancel</button>
+            </div>
+        </div>
+    `;
+    modal.style.display = 'flex';
+}
+
+// Instant 1-Click Screen/Tab Clip Recorder (Works immediately without any backend!)
+async function startOneClickTabRecorder() {
+    const modal = document.getElementById('dlOptionsModal');
+    if (modal) modal.style.display = 'none';
+
+    showToast('🎬 Select this tab in the browser prompt to record!');
+
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { displaySurface: 'browser' },
+            audio: true,
+            preferCurrentTab: true
+        });
+
+        showDownloadProgress('🔴 Recording 9:16 clip in real-time…', 10);
+        const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
+
+        const chunks = [];
+        let recorder;
+        try {
+            recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+        } catch(e) {
+            recorder = new MediaRecorder(stream);
+        }
+
+        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            showDownloadProgress('Saving recorded clip…', 100);
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            a.download = `godd_ai_${safeName}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 6000);
+            hideDownloadProgress();
+            showToast('✅ Clip recorded and downloaded!');
+        };
+
+        // Seek and play clip
+        if (isYouTubeMode && ytPlayer && ytPlayerReady) {
+            ytPlayer.seekTo(activeClip.start, true);
+            ytPlayer.playVideo();
+        }
+
+        recorder.start(100);
+
+        let progress = 10;
+        const pInterval = setInterval(() => {
+            progress = Math.min(95, progress + (100 / (clipDurationMs / 500)));
+            showDownloadProgress(`🔴 Recording clip… ${Math.round(progress)}%`, progress);
+        }, 500);
+
+        setTimeout(() => {
+            clearInterval(pInterval);
+            if (recorder.state === 'recording') recorder.stop();
+            if (isYouTubeMode && ytPlayer && ytPlayerReady) ytPlayer.pauseVideo();
+        }, clipDurationMs + 300);
+
+    } catch (err) {
+        hideDownloadProgress();
+        showToast('Recording cancelled');
+        showYouTubeDownloadModal();
+    }
+}
+
+// Show Local Backend Instructions
+function showLocalBackendInstructions() {
+    const modal = document.getElementById('dlOptionsModal');
+    if (!modal) return;
+    modal.innerHTML = `
+        <div class="modal-card">
+            <div class="modal-icon">🖥️</div>
+            <h3 class="modal-title">Run Local godd.ai FFmpeg Backend</h3>
+            <p class="modal-body" style="font-size: 13px; text-align: left; line-height: 1.6;">
+                For unlimited 1080x1920 MP4 exports just like Klap &amp; Opus Clip, run the local backend engine included in your project folder:
+            </p>
+            <div style="background: rgba(0,0,0,0.5); padding: 12px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; color: #34D399; margin: 10px 0;">
+                1. Double click <strong>start.bat</strong> in your project folder<br>
+                2. Or run: <strong>python server.py</strong><br>
+                3. Open <strong>http://localhost:8080</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); text-align: left;">
+                The backend uses your computer's FFmpeg and yt-dlp to crop, reframe, and save 1080p MP4 files in seconds.
+            </p>
+            <div class="modal-actions" style="margin-top: 14px;">
+                <button class="btn-modal-primary" type="button" onclick="startOneClickTabRecorder()">🎥 Use 1-Click Screen Record Instead</button>
+                <button class="btn-modal-close" type="button" onclick="document.getElementById('dlOptionsModal').style.display='none'">✕ Close</button>
+            </div>
+        </div>
+    `;
 }
 
 // Fallback: Canvas capture (includes subtitles overlay — lower quality but works)
