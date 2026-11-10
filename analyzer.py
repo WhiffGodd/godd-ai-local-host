@@ -245,10 +245,23 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
     meta = fetch_oembed_metadata(video_id)
     return meta
 
-def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
+def detect_video_language(video_title: str = "", description: str = "") -> str:
     """
-    Fetch real timed text subtitles directly from YouTube timedtext API via yt-dlp.
-    Extracts the exact spoken words with millisecond timestamps.
+    Detect whether the video is in English, Hindi, or another language.
+    If the text has significant Devanagari script (\u0900-\u097F), returns 'hi'.
+    Otherwise, defaults to 'en' (English).
+    """
+    text = (video_title or "") + " " + (description or "")
+    devanagari = len(re.findall(r'[\u0900-\u097F]', text))
+    latin = len(re.findall(r'[A-Za-z]', text))
+    if devanagari > 4 and devanagari > latin * 0.25:
+        return 'hi'
+    return 'en'
+
+def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None, is_english: bool = True) -> list:
+    """
+    Direct extractor for timed captions from YouTube's timedtext service via yt-dlp.
+    Prioritizes the correct language matching the video's actual spoken audio.
     """
     if not yt_dlp:
         return []
@@ -265,9 +278,14 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
             subs = info.get('subtitles') or {}
             auto_subs = info.get('automatic_captions') or {}
 
-            # Prioritize Hindi/Hinglish, then Indian English, then English
+            # Prioritize matching the video's original spoken language
+            if is_english:
+                lang_order = ['en', 'en-US', 'en-GB', 'en-CA', 'en-IN', 'en-AU']
+            else:
+                lang_order = ['hi', 'hi-Latn', 'en-IN', 'en']
+
             chosen_sub_formats = None
-            for lang in ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB']:
+            for lang in lang_order:
                 if lang in subs:
                     chosen_sub_formats = subs[lang]
                     break
@@ -315,13 +333,21 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
         print(f"[yt-dlp Captions] Notice: {e}")
         return []
 
-def fetch_transcript_segments(video_id: str, url: str = None) -> list:
+def fetch_transcript_segments(video_id: str, url: str = None, video_title: str = "") -> list:
     """
     Fetch REAL transcripts spoken in the video:
-    1. Try YouTubeTranscriptApi (manual creator tracks & auto-generated tracks)
-    2. Try yt-dlp direct timedtext extractor (bypasses blocks via mobile client)
+    - If English podcast/video -> guarantees English subtitles!
+    - If Hindi video -> fetches Hindi/Hinglish subtitles.
     """
     results = []
+    lang = detect_video_language(video_title)
+    is_english = (lang == 'en')
+    print(f"[Transcript] Target language for '{video_title[:35]}...': {'English (en)' if is_english else 'Hindi (hi)'}")
+
+    if is_english:
+        preferred_langs = ['en', 'en-US', 'en-GB', 'en-CA', 'en-IN', 'en-AU']
+    else:
+        preferred_langs = ['hi', 'hi-Latn', 'en-IN', 'en']
 
     # Method 1: YouTubeTranscriptApi
     try:
@@ -329,29 +355,44 @@ def fetch_transcript_segments(video_id: str, url: str = None) -> list:
         try:
             t_list = api.list(video_id)
             transcript_data = None
-            for preferred in [['hi', 'hi-Latn', 'en-IN', 'en', 'en-US'], ['hi', 'hi-Latn', 'en-IN'], ['en', 'en-US']]:
-                try:
-                    t = t_list.find_manually_created_transcript(preferred)
-                    transcript_data = t.fetch()
-                    break
-                except Exception:
-                    pass
-                try:
-                    t = t_list.find_generated_transcript(preferred)
-                    transcript_data = t.fetch()
-                    break
-                except Exception:
-                    pass
-            if not transcript_data:
-                for t in t_list:
-                    try:
-                        transcript_data = t.fetch()
-                        break
-                    except Exception:
-                        pass
-        except Exception:
+
+            # 1. Try manual transcript in preferred language
             try:
-                transcript_data = api.fetch(video_id, languages=['hi', 'hi-Latn', 'en-IN', 'en'])
+                t = t_list.find_manually_created_transcript(preferred_langs)
+                transcript_data = t.fetch()
+            except Exception:
+                pass
+
+            # 2. Try auto-generated transcript in preferred language
+            if not transcript_data:
+                try:
+                    t = t_list.find_generated_transcript(preferred_langs)
+                    transcript_data = t.fetch()
+                except Exception:
+                    pass
+
+            # 3. If English requested, check any transcript code starting with 'en'
+            if not transcript_data and is_english:
+                for t in t_list:
+                    if str(t.language_code).lower().startswith('en'):
+                        try:
+                            transcript_data = t.fetch()
+                            break
+                        except Exception:
+                            pass
+
+            if not transcript_data and not is_english:
+                for t in t_list:
+                    if str(t.language_code).lower().startswith('hi'):
+                        try:
+                            transcript_data = t.fetch()
+                            break
+                        except Exception:
+                            pass
+
+        except Exception as e:
+            try:
+                transcript_data = api.fetch(video_id, languages=preferred_langs)
             except Exception:
                 try:
                     transcript_data = api.fetch(video_id)
@@ -374,13 +415,42 @@ def fetch_transcript_segments(video_id: str, url: str = None) -> list:
 
     # Method 2: If YouTubeTranscriptApi returned 0 or < 5 segments, use yt-dlp timedtext
     if len(results) < 5:
-        print(f"[Transcript] Trying yt-dlp timedtext extraction for {video_id}...")
-        ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url)
+        print(f"[Transcript] Trying yt-dlp timedtext extraction for {video_id} (is_english={is_english})...")
+        ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url, is_english=is_english)
         if len(ytdlp_segments) > len(results):
             results = ytdlp_segments
 
     print(f"[Transcript] Total real spoken segments extracted: {len(results)}")
     return results
+
+def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
+    """Extract word-level subtitle timings from real spoken transcript segments."""
+    if not segments:
+        return []
+    clip_segs = [s for s in segments if s.get("end", 0) >= clip_start and s.get("start", 0) <= clip_end]
+    if not clip_segs:
+        return []
+
+    subtitles = []
+    for seg in clip_segs:
+        s_start = max(clip_start, float(seg.get("start", 0)))
+        s_end = min(clip_end, float(seg.get("end", s_start + 1.0)))
+        raw_words = [w.strip() for w in str(seg.get("text", "")).split() if w.strip()]
+        if not raw_words:
+            continue
+        seg_dur = max(0.2, s_end - s_start)
+        t_per_word = seg_dur / len(raw_words)
+        cur = s_start
+        for w in raw_words:
+            w_end = min(s_end, cur + t_per_word)
+            subtitles.append({
+                "word": w,
+                "start": round(cur, 2),
+                "end": round(w_end, 2),
+                "highlight": any(k in w.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest"])
+            })
+            cur = w_end
+    return subtitles
 
 def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list:
     """Generate fine-grained word timings for animated karaoke subtitles."""
@@ -476,7 +546,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 "viral_reasons": ["Creator Chapter Topic", f"Content: {ch_title[:32]}"],
                 "tags": ["Key Chapter", "Deep Dive", "Must Watch"],
                 "full_text": full_text,
-                "subtitles": [],
+                "subtitles": generate_word_subtitles_from_segments(transcript, start_time, end_time) or generate_word_subtitles(start_time, end_time, full_text),
                 "has_real_captions": bool(ch_words)
             })
             
@@ -580,7 +650,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "viral_reasons": clip["reasons"],
             "tags": clip["tags"],
             "full_text": clip["text"],
-            "subtitles": [],
+            "subtitles": generate_word_subtitles_from_segments(transcript, clip["start"], clip["end"]) or generate_word_subtitles(clip["start"], clip["end"], clip["text"]),
             "has_real_captions": True
         })
         
@@ -808,7 +878,7 @@ def synthesize_viral_clips(video_duration: float, title: str, chapters: list = N
             "viral_reasons": ["High engagement window", f"Topic: {topic[:30]}"],
             "tags": ["Key Insight", "Must Watch", "Algorithm Pick"],
             "full_text": item["hook"],
-            "subtitles": [],
+            "subtitles": generate_word_subtitles(start_time, end_time, item["hook"]),
             "has_real_captions": False
         })
     return formatted

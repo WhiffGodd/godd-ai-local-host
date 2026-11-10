@@ -305,7 +305,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             meta = get_video_metadata(video_id, url)
             
             # 2. Fetch transcript using YouTube API + yt-dlp real timedtext
-            transcript = fetch_transcript_segments(video_id, url=url)
+            transcript = fetch_transcript_segments(video_id, url=url, video_title=meta.get("title", ""))
             
             # 3. Analyze virality and generate clips (timestamps + YouTube ASR subtitles)
             clips = analyze_virality_and_cut_clips(

@@ -242,7 +242,7 @@ function makeContentClip(videoId, metaTitle, topic, rank, start, end) {
     tags: ['Key Insight', 'Deep Dive', 'High Retention'],
     full_text: hooks[(rank - 1) % hooks.length],
     has_real_captions: false,
-    subtitles: []
+    subtitles: genWordSubs(start, end, hooks[(rank - 1) % hooks.length])
   };
 }
 
@@ -557,15 +557,51 @@ function scrubSeek(e) {
   renderSubtitles(currentTime);
 }
 
-// ─── SUBTITLES (TURNED OFF) ─────────────────────────────────────────────────
+// ─── SUBTITLES ────────────────────────────────────────────────────────────────
 function genWordSubs(startSec, endSec, text) {
-  return [];
+  const words = (text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const dur = Math.max(1, endSec - startSec);
+  const tpw = dur / words.length;
+  const highlightWords = ['important', 'key', 'secret', 'never', 'why', 'how', 'truth', 'future', 'mind', 'huge'];
+
+  return words.map((w, i) => ({
+    word: w,
+    start: Math.round((startSec + i * tpw) * 100) / 100,
+    end:   Math.round((startSec + (i + 1) * tpw) * 100) / 100,
+    highlight: highlightWords.some(k => w.toLowerCase().includes(k)) || (i % 4 === 2)
+  }));
 }
 
 function renderSubtitles(curOffset) {
   const box = document.getElementById('subsBox');
-  if (box) box.innerHTML = '';
-  return;
+  if (!box || !activeClip) return;
+  const subs = activeClip.subtitles;
+  if (!subs || !subs.length) {
+    box.innerHTML = '';
+    return;
+  }
+
+  const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
+  const targetTime = isAbsolute ? (activeClip.start + curOffset) : curOffset;
+
+  let ai = subs.findIndex(s => targetTime >= s.start && targetTime < s.end);
+  if (ai < 0) {
+    for (let i = subs.length - 1; i >= 0; i--) {
+      if (targetTime >= subs[i].start) { ai = i; break; }
+    }
+  }
+  if (ai < 0) ai = 0;
+
+  const lo = Math.max(0, ai - 2);
+  const hi = Math.min(subs.length, lo + 6);
+  const visible = subs.slice(lo, hi);
+
+  box.innerHTML = visible.map((s, idx) => {
+    const isActive = (lo + idx) === ai;
+    const isHl     = s.highlight && !isActive;
+    return `<span class="sw${isActive ? ' active' : ''}${isHl ? ' hl' : ''}">${escHtml(s.word)}</span>`;
+  }).join(' ');
 }
 
 function escHtml(s) {
@@ -667,7 +703,7 @@ async function downloadClip() {
         duration: durSec,
         layout: currentLayout || 'split',
         title: clipTitle,
-        subtitles: [], // SUBTITLES TURNED OFF AS REQUESTED
+        subtitles: activeClip.subtitles || [],
         stream: true
       }),
       signal: ctrl.signal
