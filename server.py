@@ -6,6 +6,7 @@ import os
 import sys
 import mimetypes
 import traceback
+import re
 from analyzer import (
     extract_youtube_id,
     get_video_metadata,
