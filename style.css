@@ -302,25 +302,85 @@ input  { font-family: inherit; outline: none; }
 }
 .preview-wrap {
   position: relative;
-  /* 9:16 aspect ratio, constrained to available height */
-  height: min(calc(100% - 36px), calc((100vw - 280px - 320px - 32px) * 16/9));
-  aspect-ratio: 9/16;
+  width: 100%;
+  max-width: 320px;
+  height: 560px;
   max-height: calc(100vh - 160px);
+  aspect-ratio: 9/16;
   background: #000;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
-.yt-player-div {
-  position: absolute; inset: 0;
-  /* YouTube iframe is 300% wide to hide controls/sidebar — centered */
-  width: 300%; height: 100%;
+.yt-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+.yt-container #ytPlayerDiv,
+.yt-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+/* Layout variants */
+.yt-container.layout-crop #ytPlayerDiv,
+.yt-container.layout-crop iframe {
+  width: 300%;
+  height: 100%;
   margin-left: -100%;
+}
+.yt-container.layout-fit #ytPlayerDiv,
+.yt-container.layout-fit iframe {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16/9;
+  max-height: 100%;
+}
+.yt-container.layout-blur #ytPlayerDiv,
+.yt-container.layout-blur iframe {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16/9;
+}
+
+/* Center Play Overlay (Klap/Reels style) */
+.center-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.35);
+  z-index: 15;
+  transition: opacity 0.2s ease;
   pointer-events: none;
 }
-.yt-player-div iframe {
-  width: 100%; height: 100%;
-  border: none; pointer-events: none;
+.center-play-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.big-play-btn {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 30px rgba(124, 58, 237, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 4px;
 }
 
 /* Subtitle overlay */

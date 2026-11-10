@@ -238,45 +238,87 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     # Use yt-dlp to obtain stream URL directly without needing to download gigabytes of long video
     try:
         ydl_opts = {
-            'format': 'best[ext=mp4]/best',
+            'format': 'best[ext=mp4]/best/bestvideo+bestaudio',
             'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
             'quiet': True,
             'no_warnings': True,
         }
         stream_url = None
+        video_stream_url = None
+        audio_stream_url = None
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
-            stream_url = info.get("url")
+            
+            # Check if direct combined stream url is available
+            direct_url = info.get("url")
+            if direct_url and info.get("vcodec") not in ("none", None) and info.get("acodec") not in ("none", None):
+                stream_url = direct_url
 
-            # If separated audio/video formats
-            if not stream_url and "formats" in info:
-                for f in reversed(info["formats"]):
-                    if f.get("url") and f.get("protocol", "").startswith("http"):
+            formats = info.get("formats", [])
+            if not stream_url:
+                # Find progressive format with both video and audio
+                for f in reversed(formats):
+                    if f.get("url") and f.get("vcodec") not in ("none", None) and f.get("acodec") not in ("none", None):
                         stream_url = f.get("url")
                         break
-                        
-        if not stream_url:
-            raise RuntimeError("Could not find direct playable stream URL")
+
+            if not stream_url:
+                # Find best video stream
+                for f in reversed(formats):
+                    if f.get("url") and f.get("vcodec") not in ("none", None):
+                        video_stream_url = f.get("url")
+                        break
+                # Find best audio stream
+                for f in reversed(formats):
+                    if f.get("url") and f.get("acodec") not in ("none", None):
+                        audio_stream_url = f.get("url")
+                        break
+
+        if not stream_url and not video_stream_url:
+            raise RuntimeError("Could not find playable video stream URL")
 
         # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-ss", str(start_time),
-            "-i", stream_url,
-            "-t", str(duration),
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", "0:a?",
-            "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-movflags", "+faststart",
-            output_path
-        ]
+        if stream_url:
+            cmd = [
+                FFMPEG_PATH,
+                "-y",
+                "-ss", str(start_time),
+                "-i", stream_url,
+                "-t", str(duration),
+                "-filter_complex", filter_complex,
+                "-map", "[outv]",
+                "-map", "0:a?",
+                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                output_path
+            ]
+        else:
+            cmd = [
+                FFMPEG_PATH,
+                "-y",
+                "-ss", str(start_time),
+                "-i", video_stream_url,
+                "-ss", str(start_time),
+                "-i", audio_stream_url if audio_stream_url else video_stream_url,
+                "-t", str(duration),
+                "-filter_complex", filter_complex,
+                "-map", "[outv]",
+                "-map", "1:a?",
+                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                output_path
+            ]
 
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         if result.returncode != 0:

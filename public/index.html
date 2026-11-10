@@ -107,22 +107,32 @@
 
     <!-- CENTER: Video Preview -->
     <div class="col-preview">
-      <div class="preview-wrap" id="previewWrap">
+      <div class="preview-wrap" id="previewWrap" onclick="togglePlay()">
 
-        <!-- YouTube IFrame fills this -->
-        <div id="ytPlayerDiv" class="yt-player-div"></div>
+        <!-- YouTube Video Container -->
+        <div id="ytContainer" class="yt-container layout-crop">
+          <div id="ytPlayerDiv"></div>
+          <iframe id="fallbackIframe" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display:none; width:100%; height:100%;"></iframe>
+        </div>
+
+        <!-- Big Play Button Overlay (Klap / Reels style) -->
+        <div class="center-play-overlay" id="centerPlayOverlay">
+          <div class="big-play-btn">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="#FFFFFF"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          </div>
+        </div>
 
         <!-- Subtitle overlay -->
         <div class="subs-overlay" id="subsOverlay">
-          <div class="subs-box" id="subsBox"></div>
+          <div class="subs-box s-bold" id="subsBox"></div>
         </div>
 
         <!-- Hook title top -->
         <div class="preview-top-label" id="previewTopLabel"></div>
 
         <!-- Player controls bottom -->
-        <div class="preview-controls">
-          <button class="ctrl-play" id="playBtn" onclick="togglePlay()">
+        <div class="preview-controls" onclick="event.stopPropagation()">
+          <button class="ctrl-play" id="playBtn" onclick="togglePlay()" title="Play/Pause">
             <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           </button>
           <div class="ctrl-scrubber" id="scrubber" onclick="scrubSeek(event)">
@@ -133,7 +143,7 @@
       </div>
 
       <!-- Preview label -->
-      <div class="preview-label">📱 9:16 Vertical Preview</div>
+      <div class="preview-label">📱 9:16 Vertical Preview • Click to Play/Pause</div>
     </div>
 
     <!-- RIGHT: Controls -->
