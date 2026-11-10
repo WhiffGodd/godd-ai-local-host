@@ -149,3 +149,16 @@ To publish: connect Render, select the existing `godd-ai` service and deploy the
 latest `main` commit, or create a Blueprint from the repository. Keep the Free
 instance selected. Share the service's assigned HTTPS URL after `/healthz` shows
 version `1.3.0` and a browser export has been verified.
+
+
+### YouTube playback verification on Render
+
+The image includes bgutil-ytdlp-pot-provider 2.0.2 and its matching Node script,
+as recommended in yt-dlp's PO Token Guide. It runs on demand during extraction,
+then exits before encoding and speech recognition. Mobile-web, Safari and
+embedded playback clients are configured, and FFmpeg preserves the selected
+stream's HTTP playback headers. No personal account cookies are bundled.
+
+Playback verification can improve access but cannot guarantee access from a
+blocked datacenter IP or to a video requiring sign-in. Treat a download as
+verified only after the affected video's export succeeds on the deployed host.

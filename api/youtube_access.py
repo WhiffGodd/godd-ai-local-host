@@ -28,6 +28,16 @@ def youtube_options(options=None):
             raise RuntimeError('Unsupported configured YouTube cookie browser.')
         result['cookiesfrombrowser'] = (browser,)
     result.update(options or {})
+    home = os.environ.get('YOUTUBE_PO_PROVIDER_HOME', '').strip()
+    if home and os.path.isfile(os.path.join(home, 'build', 'generate_once.js')):
+        # Provider is invoked only for extraction, so it does not compete with
+        # FFmpeg or speech recognition for memory on the free host.
+        args = dict(result.get('extractor_args') or {})
+        args['youtubepot-bgutilscript'] = {'server_home': [home]}
+        youtube_args = dict(args.get('youtube') or {})
+        youtube_args['player_client'] = ['mweb', 'web_safari', 'web_embedded']
+        args['youtube'] = youtube_args
+        result['extractor_args'] = args
     return result
 
 
@@ -40,8 +50,8 @@ def download_error_response(error):
     if any(term in text for term in ('confirm you', 'not a bot', 'sign in', '429', 'too many requests')):
         return 429, 'YOUTUBE_ACCESS_BLOCKED', (
             'YouTube blocked access to this video before rendering could start. '
-            'Wait before retrying. If it persists, configure a local YouTube cookies file; '
-            'refreshing the page or changing subtitle presets will not resolve this restriction.')
+            'Playback verification was attempted, but YouTube may still restrict this server or video. '
+            'Please try again later. Some videos require authenticated access that this public service does not have.')
     return 500, 'CLIP_RENDER_FAILED', str(error)
 
 

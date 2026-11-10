@@ -24,6 +24,24 @@ class YoutubeAccessTests(unittest.TestCase):
         self.assertEqual(download_error_response(Exception('Sign in to confirm you are not a bot'))[:2], (429, 'YOUTUBE_ACCESS_BLOCKED'))
         self.assertEqual(download_error_response(Exception('Failed to decrypt with DPAPI'))[:2], (403, 'YOUTUBE_BROWSER_COOKIES_UNAVAILABLE'))
 
+    def test_playback_provider_configured_only_when_script_is_present(self):
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, 'build'))
+            with open(os.path.join(home, 'build', 'generate_once.js'), 'w') as f:
+                f.write('// provider fixture')
+            with patch.dict(os.environ, {'YOUTUBE_PO_PROVIDER_HOME': home}):
+                opts = youtube_options()
+        self.assertEqual(opts['extractor_args']['youtubepot-bgutilscript']['server_home'], [home])
+        self.assertIn('mweb', opts['extractor_args']['youtube']['player_client'])
+
+    def test_ffmpeg_uses_the_selected_stream_headers(self):
+        from video_engine import stream_http_input_args
+        info = {'http_headers': {'User-Agent': 'fallback'}, 'formats': [
+            {'url': 'video', 'http_headers': {'User-Agent': 'selected', 'Referer': 'https://www.youtube.com/'}}]}
+        args = stream_http_input_args(info, 'video')
+        self.assertIn('User-Agent: selected', args[1])
+        self.assertNotIn('fallback', args[1])
+
 
 class ExtractionCacheTests(unittest.TestCase):
     def setUp(self):

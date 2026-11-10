@@ -3,8 +3,19 @@
 
 FROM node:24-bookworm-slim AS node_runtime
 
+# Generate playback verification tokens on demand, then exit before encoding.
+FROM node:24-bookworm-slim AS token_provider
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil
+WORKDIR /opt/bgutil/server
+RUN npm ci --no-audit --no-fund && npx tsc && npm prune --omit=dev
+
 FROM python:3.11-slim-bookworm
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=token_provider /opt/bgutil/server /opt/bgutil/server
+COPY --from=token_provider /opt/bgutil/LICENSE /opt/bgutil/LICENSE
+ENV YOUTUBE_PO_PROVIDER_HOME=/opt/bgutil/server
 
 # Avoid interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-dejavu-core \
     fonts-noto-core \
+    libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*

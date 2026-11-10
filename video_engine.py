@@ -120,6 +120,17 @@ def select_export_streams(info):
     return video["url"], audio["url"], video["url"] != audio["url"]
 
 
+def stream_http_input_args(info, stream_url):
+    """Keep the extractor's playback headers when FFmpeg fetches its URLs."""
+    selected = next((fmt for fmt in info.get("formats", []) if fmt.get("url") == stream_url), info)
+    headers = selected.get("http_headers") or info.get("http_headers") or {}
+    # Headers come from the extractor, not the web request payload. Remove line
+    # breaks so a header value cannot introduce another FFmpeg HTTP header.
+    values = [(str(key), str(value)) for key, value in headers.items()
+              if "\r" not in str(key) + str(value) and "\n" not in str(key) + str(value)]
+    return ["-headers", "".join(f"{key}: {value}\r\n" for key, value in values)] if values else []
+
+
 # Locate FFmpeg binary (System PATH -> imageio_ffmpeg -> fallback)
 FFMPEG_PATH = shutil.which("ffmpeg")
 if not FFMPEG_PATH and imageio_ffmpeg:
@@ -385,9 +396,9 @@ def download_and_clip_video(
         encoder_flags = get_video_encoder_flags()
         # Accurate seeks on both inputs share the same clip origin. Resample against
         # timestamps to correct drift and pad a late-starting audio stream.
-        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), "-i", target_stream]
+        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), *stream_http_input_args(info, target_stream), "-i", target_stream]
         if separate_audio:
-            cmd += ["-ss", str(start_time), "-i", selected_audio]
+            cmd += ["-ss", str(start_time), *stream_http_input_args(info, selected_audio), "-i", selected_audio]
         cmd += ["-t", str(duration), "-filter_complex", filter_complex,
                 "-map", "[outv]", "-map", "1:a:0" if separate_audio else "0:a:0",
                 "-af", "aresample=async=1:first_pts=0,apad",
