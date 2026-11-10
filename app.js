@@ -20,7 +20,7 @@ let animId      = null;
 let lastTs      = 0;
 
 let currentStyle  = 'bold';
-let currentLayout = 'crop';
+let currentLayout = 'split';
 
 // ─── YouTube IFrame API callback ──────────────────────────────────────────────
 window.onYouTubeIframeAPIReady = function () {
@@ -335,11 +335,17 @@ function selectClip(clipId) {
   const tBox = document.getElementById('transcriptBox');
   if (tBox) tBox.textContent = clip.full_text || '';
 
+  // Update streamer cam preview image in split mode
+  const camFeed = document.getElementById('camPreviewFeed');
+  if (camFeed && activeVideoId) {
+    camFeed.style.backgroundImage = `url('https://img.youtube.com/vi/${activeVideoId}/maxresdefault.jpg'), url('${ytThumb(activeVideoId)}')`;
+  }
+
   // Load YouTube player
   loadYTPlayer(activeVideoId, clip.start, clip.end);
 
   // Subtitles & Scrubber
-  renderSubtitles(clip.start);
+  renderSubtitles(0);
   updateScrubber();
 }
 
@@ -503,7 +509,7 @@ function animLoop(ts) {
 
   updateScrubber();
   if (activeClip) {
-    renderSubtitles(activeClip.start + currentTime);
+    renderSubtitles(currentTime);
   }
 
   animId = requestAnimationFrame(animLoop);
@@ -529,7 +535,7 @@ function scrubSeek(e) {
     try { ytPlayer.seekTo(activeClip.start + currentTime, true); } catch(_) {}
   }
   updateScrubber();
-  renderSubtitles(activeClip.start + currentTime);
+  renderSubtitles(currentTime);
 }
 
 // ─── SUBTITLES ────────────────────────────────────────────────────────────────
@@ -548,7 +554,7 @@ function genWordSubs(startSec, endSec, text) {
   }));
 }
 
-function renderSubtitles(absTime) {
+function renderSubtitles(curOffset) {
   const box = document.getElementById('subsBox');
   if (!box || !activeClip) return;
   const subs = activeClip.subtitles;
@@ -557,16 +563,21 @@ function renderSubtitles(absTime) {
     return;
   }
 
-  let ai = subs.findIndex(s => absTime >= s.start && absTime < s.end);
+  // curOffset is time elapsed in the clip (0 to clipDur)
+  // Check if subs have absolute timestamps (e.g. 620+) or relative (0 to 35)
+  const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
+  const targetTime = isAbsolute ? (activeClip.start + curOffset) : curOffset;
+
+  let ai = subs.findIndex(s => targetTime >= s.start && targetTime < s.end);
   if (ai < 0) {
     for (let i = subs.length - 1; i >= 0; i--) {
-      if (absTime >= subs[i].start) { ai = i; break; }
+      if (targetTime >= subs[i].start) { ai = i; break; }
     }
   }
   if (ai < 0) ai = 0;
 
-  const lo = Math.max(0, ai - 1);
-  const hi = Math.min(subs.length, lo + 5);
+  const lo = Math.max(0, ai - 2);
+  const hi = Math.min(subs.length, lo + 6);
   const visible = subs.slice(lo, hi);
 
   box.innerHTML = visible.map((s, idx) => {
@@ -626,7 +637,7 @@ function refreshSubsFromEditor() {
   const text = document.getElementById('transcriptBox').textContent || '';
   activeClip.full_text = text;
   activeClip.subtitles = genWordSubs(activeClip.start, activeClip.end, text);
-  renderSubtitles(activeClip.start + currentTime);
+  renderSubtitles(currentTime);
   showToast('✓ Subtitles updated from editor!');
 }
 
@@ -668,7 +679,8 @@ async function downloadClip() {
         url: videoUrl,
         start: startSec,
         duration: durSec,
-        layout: currentLayout,
+        layout: currentLayout || 'split',
+        subtitles: activeClip.subtitles || [],
         stream: true
       }),
       signal: ctrl.signal

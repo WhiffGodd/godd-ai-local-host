@@ -648,12 +648,32 @@ def synthesize_viral_clips(video_duration: float, title: str) -> list:
     clean_title = re.sub(r'[^\w\s-]', '', title).strip() or "Live Stream Highlight"
     short_title = clean_title[:32]
     
-    # 4 high-retention windows across the video
+    # 4 high-retention windows across the video with streamer Hinglish dialogues
     intervals = [
-        {"offset": 0.08, "dur": 35.0, "rank": 1, "score": 98, "tag": "Opening Hook"},
-        {"offset": 0.32, "dur": 38.0, "rank": 2, "score": 95, "tag": "Peak Action"},
-        {"offset": 0.58, "dur": 40.0, "rank": 3, "score": 92, "tag": "Climax Moment"},
-        {"offset": 0.80, "dur": 32.0, "rank": 4, "score": 89, "tag": "Highlight Finale"}
+        {
+            "offset": 0.08, "dur": 35.0, "rank": 1, "score": 98, "tag": "Opening Hook",
+            "title": f"Bhai Yeh Kya Clutch Tha 🤯",
+            "hook": "Chat dekho mere haath literally kaanp rahe hain abhi…",
+            "dialogue": "Chat dekho mere haath literally kaanp rahe hain abhi! Agar yeh clutch miss ho gaya pura match khatam. Teen, do, ek... BHAI KYA MARA HAI! RECORD TOD DIYA! LET'S GOOO! 🔥"
+        },
+        {
+            "offset": 0.32, "dur": 38.0, "rank": 2, "score": 95, "tag": "Peak Action",
+            "title": f"Streamer Reaction: Record Tod Diya ⚡",
+            "hook": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush…",
+            "dialogue": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT! ⚡"
+        },
+        {
+            "offset": 0.58, "dur": 40.0, "rank": 3, "score": 92, "tag": "Climax Moment",
+            "title": f"Chat Dekho Yeh Kya Ho Gaya 🔥",
+            "hook": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat?…",
+            "dialogue": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko pehle spectate karte hain... bhai are you serious?! 🤯"
+        },
+        {
+            "offset": 0.80, "dur": 32.0, "rank": 4, "score": 89, "tag": "Highlight Finale",
+            "title": f"Yaar Tu Believe Nahi Karega 😱",
+            "hook": "Zone shrink ho raha hai aur pura squad rush kar raha hai!…",
+            "dialogue": "Zone shrink ho raha hai aur pura squad rush kar raha hai! Smoke daal smoke daal! Medkit laga raha hu... chalo chalo push karo abhi sab khatam! 💣"
+        }
     ]
     
     formatted = []
@@ -662,9 +682,9 @@ def synthesize_viral_clips(video_duration: float, title: str) -> list:
         end_time = round(min(video_dur - 1, start_time + item["dur"]), 1)
         actual_dur = round(end_time - start_time, 1)
         
-        clip_title = f"{short_title} - Clip #{item['rank']} 🔥"
-        hook_text = f"Highlight from {short_title}"
-        subtitle_text = f"{short_title} live highlight. Type or edit streamer words here!"
+        clip_title = item["title"]
+        hook_text = item["hook"]
+        subtitle_text = item["dialogue"]
         
         subtitles = generate_word_subtitles(start_time, end_time, subtitle_text)
         

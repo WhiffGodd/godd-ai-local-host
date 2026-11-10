@@ -175,18 +175,25 @@ if not FFMPEG_PATH and imageio_ffmpeg:
 if not FFMPEG_PATH:
     FFMPEG_PATH = "ffmpeg"
 
-def generate_srt(subtitles: list) -> str:
-    """Generate SubRip (.srt) caption file content."""
+def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
+    """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
     lines = []
-    # Group words into 3-5 word subtitle lines for readability
     chunk_size = 4
     for i in range(0, len(subtitles), chunk_size):
         group = subtitles[i:i + chunk_size]
         if not group:
             continue
-        start_sec = group[0]["start"]
-        end_sec = group[-1]["end"]
-        text = " ".join(item["word"] for item in group)
+        raw_start = float(group[0].get("start", 0))
+        raw_end = float(group[-1].get("end", raw_start + 1.0))
+        if raw_start >= clip_start and clip_start > 0:
+            start_sec = max(0.0, raw_start - clip_start)
+            end_sec = max(start_sec + 0.6, raw_end - clip_start)
+        else:
+            start_sec = max(0.0, raw_start)
+            end_sec = max(start_sec + 0.6, raw_end)
+        text = " ".join(str(item.get("word", "")).strip() for item in group).strip()
+        if not text:
+            continue
         
         index = (i // chunk_size) + 1
         start_srt = format_srt_timestamp(start_sec)
@@ -206,12 +213,13 @@ def format_srt_timestamp(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
     return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
-def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "crop", output_path: str = None) -> str:
+def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "split", subtitles: list = None, output_path: str = None) -> str:
     """
     Download and render a 9:16 short using FFmpeg.
     Layouts:
-    - 'crop': Smart center crop to 9:16 (1080x1920)
-    - 'blur': Blurred 9:16 background with centered video (popular podcast style)
+    - 'split': Streamer facecam on top (720x520) + Full 16:9 gameplay below (720x405, 100% visible)
+    - 'crop': Smart center crop to 9:16 (720x1280)
+    - 'blur': Blurred 9:16 background with centered video
     - 'fit': Fitted 16:9 on 9:16 canvas with clean black bars
     """
     if not output_path:
@@ -222,18 +230,43 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     if not yt_dlp:
         raise RuntimeError("yt-dlp is not installed")
 
+    # Generate SRT file if subtitles are provided
+    srt_filter = ""
+    srt_temp_file = None
+    if subtitles and len(subtitles) > 0:
+        try:
+            srt_temp_file = os.path.join(tempfile.gettempdir(), f"subs_{int(start_time)}_{int(duration)}.srt")
+            with open(srt_temp_file, "w", encoding="utf-8") as f:
+                f.write(generate_srt(subtitles, clip_start=start_time))
+            esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
+            # Position at bottom of screen with bold yellow text and black border
+            srt_filter = f",subtitles='{esc_srt}':force_style='FontName=Arial,FontSize=22,Bold=1,PrimaryColour=&H0024BFFB,OutlineColour=&H00000000,BorderStyle=1,Outline=2.5,Shadow=1,Alignment=2,MarginV=55'"
+        except Exception as se:
+            print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
+            srt_filter = ""
+
     # Filter graph based on layout (720x1280 vertical resolution for speed & HD quality)
-    if layout == "blur":
+    if layout == "split":
+        # Streamer Facecam Top (720x520) + Full 16:9 Game Screen in Middle (720x405, 100% visible) + Subtitles below
+        filter_complex = (
+            "[0:v]split=2[cam_src][game_src];"
+            "[cam_src]crop=iw*0.48:ih*0.5:0:0,scale=720:520:force_original_aspect_ratio=increase,crop=720:520[cam];"
+            "[game_src]scale=720:405[game];"
+            f"color=c=#0B0C10:s=720x1280:d={duration}[bg];"
+            "[bg][cam]overlay=0:0:shortest=1[bg_cam];"
+            f"[bg_cam][game]overlay=0:525:shortest=1{srt_filter}[outv]"
+        )
+    elif layout == "blur":
         filter_complex = (
             "[0:v]split=2[bg][fg];"
             "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg_blurred];"
             "[fg]scale=720:-1[fg_scaled];"
-            "[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2[outv]"
+            f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2{srt_filter}[outv]"
         )
     elif layout == "fit":
-        filter_complex = "scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black[outv]"
+        filter_complex = f"scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black{srt_filter}[outv]"
     else: # Default: 'crop'
-        filter_complex = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280[outv]"
+        filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280{srt_filter}[outv]"
 
     # Use yt-dlp to obtain stream URL directly without needing to download gigabytes of long video
     try:
