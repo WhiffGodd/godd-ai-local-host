@@ -14,6 +14,157 @@ try:
 except ImportError:
     yt_dlp = None
 
+try:
+    from faster_whisper import WhisperModel
+    _whisper_model = None
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WhisperModel = None
+    _whisper_model = None
+    WHISPER_AVAILABLE = False
+
+
+def _get_whisper_model():
+    """Lazy-load Whisper tiny model (cached globally for reuse across requests)."""
+    global _whisper_model
+    if _whisper_model is None and WHISPER_AVAILABLE:
+        print("[Whisper] Loading faster-whisper tiny model...")
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        print("[Whisper] Model loaded.")
+    return _whisper_model
+
+
+def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: float) -> list:
+    """
+    Download only the audio track for the given segment and transcribe it with
+    faster-whisper (tiny model, CPU int8 — fast and low-RAM).
+
+    Returns a list of dicts: [{text, start, duration, end}, ...]
+    relative to 0.0 (not to video absolute time — caller adds offset).
+    """
+    if not WHISPER_AVAILABLE:
+        print("[Whisper] faster-whisper not available, skipping.")
+        return []
+    if not yt_dlp:
+        print("[Whisper] yt-dlp not available, skipping.")
+        return []
+
+    duration_sec = max(1.0, end_sec - start_sec)
+    tmp_dir = os.path.join(tempfile.gettempdir(), "godd_ai_audio")
+    os.makedirs(tmp_dir, exist_ok=True)
+    wav_path = os.path.join(tmp_dir, f"seg_{int(start_sec)}_{int(end_sec)}.wav")
+
+    try:
+        # 1. Get audio-only stream URL via yt-dlp (no video download)
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
+            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            audio_url = info.get("url")
+            if not audio_url and "formats" in info:
+                # Pick best audio-only format
+                for fmt in reversed(info["formats"]):
+                    if fmt.get("acodec") != "none" and fmt.get("vcodec") in (None, "none", ""):
+                        audio_url = fmt.get("url")
+                        break
+                if not audio_url:
+                    # Fallback: any stream
+                    for fmt in reversed(info["formats"]):
+                        if fmt.get("url"):
+                            audio_url = fmt["url"]
+                            break
+
+        if not audio_url:
+            print("[Whisper] Could not obtain audio stream URL.")
+            return []
+
+        # 2. Download only the segment's audio as 16kHz mono WAV
+        # Apply aggressive vocal-frequency boost: highpass 100Hz, boost 1800Hz presence
+        # This emphasizes human voice (streamer mic) and cuts low-frequency game rumble
+        cmd = [
+            FFMPEG_PATH, "-y",
+            "-ss", str(start_sec),
+            "-i", audio_url,
+            "-t", str(duration_sec),
+            "-vn",                                        # no video
+            "-af", (
+                "highpass=f=100,"                         # cut bass/rumble below 100Hz
+                "lowpass=f=8000,"                         # cut harsh highs above 8kHz
+                "equalizer=f=1800:width_type=h:width=1200:g=5,"  # boost voice presence
+                "equalizer=f=300:width_type=h:width=200:g=-4,"   # cut muddy low-mids
+                "acompressor=threshold=-20dB:ratio=3:attack=5:release=100,"  # level streamer voice
+                "volume=2.0"                              # extra gain for quiet mics
+            ),
+            "-ar", "16000",   # 16kHz required by Whisper
+            "-ac", "1",       # mono
+            "-f", "wav",
+            wav_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
+        if result.returncode != 0:
+            print(f"[Whisper] FFmpeg audio extraction failed: {result.stderr[:300]}")
+            return []
+
+        if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
+            print("[Whisper] WAV file too small or missing, skipping.")
+            return []
+
+        # 3. Transcribe with faster-whisper
+        model = _get_whisper_model()
+        if not model:
+            return []
+
+        # Try Hindi first (streamer Hinglish), fall back to multilingual auto-detect
+        segments_out = []
+        for lang in ["hi", None]:
+            try:
+                kwargs = {"beam_size": 1, "temperature": 0.0, "vad_filter": True}
+                if lang:
+                    kwargs["language"] = lang
+                seg_gen, info_obj = model.transcribe(wav_path, **kwargs)
+                raw_segments = list(seg_gen)
+
+                if not raw_segments:
+                    continue
+
+                for seg in raw_segments:
+                    text = (seg.text or "").strip()
+                    if not text or text in ("[BLANK_AUDIO]", "[SILENCE]", "(Music)", "[Music]"):
+                        continue
+                    # Skip very short noise bursts
+                    if len(text) < 3:
+                        continue
+                    segments_out.append({
+                        "text": text,
+                        "start": round(float(seg.start), 2),
+                        "duration": round(float(seg.end) - float(seg.start), 2),
+                        "end": round(float(seg.end), 2)
+                    })
+
+                if segments_out:
+                    print(f"[Whisper] Transcribed {len(segments_out)} segments (lang={lang or 'auto'}).")
+                    break
+            except Exception as e:
+                print(f"[Whisper] Transcription attempt (lang={lang}) error: {e}")
+                continue
+
+        return segments_out
+
+    except Exception as e:
+        print(f"[Whisper] transcribe_audio_with_whisper error: {e}")
+        return []
+    finally:
+        # Clean up temp wav to save disk space on Render free tier
+        try:
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+        except Exception:
+            pass
+
 # Locate FFmpeg binary (System PATH -> imageio_ffmpeg -> fallback)
 FFMPEG_PATH = shutil.which("ffmpeg")
 if not FFMPEG_PATH and imageio_ffmpeg:

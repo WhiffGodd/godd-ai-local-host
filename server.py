@@ -13,7 +13,7 @@ from analyzer import (
     analyze_virality_and_cut_clips,
     synthesize_viral_clips
 )
-from video_engine import generate_srt, download_and_clip_video
+from video_engine import generate_srt, download_and_clip_video, transcribe_audio_with_whisper, WHISPER_AVAILABLE
 
 if sys.platform == "win32":
     try:
@@ -275,15 +275,55 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             # 1. Fetch metadata
             meta = get_video_metadata(video_id, url)
             
-            # 2. Fetch or synthesize transcript using YouTube API + yt-dlp real timedtext
+            # 2. Fetch transcript using YouTube API + yt-dlp real timedtext
             transcript = fetch_transcript_segments(video_id, url=url)
             
-            # 3. Analyze virality and generate clips
+            # 3. Analyze virality and generate clips (timestamps + YouTube ASR subtitles)
             clips = analyze_virality_and_cut_clips(
                 transcript=transcript,
                 video_duration=meta.get("duration", 600),
                 title=meta.get("title", "")
             )
+
+            # 4. ─── WHISPER REAL VOICE TRANSCRIPTION ───────────────────────────
+            # For each clip, extract just that segment's audio and run Whisper to
+            # get the streamer's actual spoken words (not YouTube ASR which mixes
+            # game audio + streamer voice).
+            if WHISPER_AVAILABLE:
+                print(f"[godd ai] Running Whisper transcription on {len(clips)} clips...")
+                for clip in clips:
+                    clip_start = clip.get("start", 0.0)
+                    clip_end   = clip.get("end", clip_start + 40.0)
+                    try:
+                        whisper_segs = transcribe_audio_with_whisper(url, clip_start, clip_end)
+                        if whisper_segs:
+                            # Build full_text from real Whisper segments
+                            full_text = " ".join(s["text"] for s in whisper_segs)
+                            clip["full_text"] = full_text
+                            clip["has_real_captions"] = True
+
+                            # Build word-level subtitles from Whisper segments
+                            # Each Whisper segment already has a time range; distribute
+                            # words evenly within each segment for karaoke timing.
+                            from analyzer import generate_word_subtitles, HOOK_KEYWORDS, HIGH_ENERGY_WORDS
+                            new_subtitles = []
+                            for wseg in whisper_segs:
+                                seg_abs_start = clip_start + wseg["start"]
+                                seg_abs_end   = clip_start + wseg["end"]
+                                seg_words = generate_word_subtitles(seg_abs_start, seg_abs_end, wseg["text"])
+                                new_subtitles.extend(seg_words)
+
+                            if new_subtitles:
+                                clip["subtitles"] = new_subtitles
+                            print(f"[Whisper] Clip {clip.get('id')} → {len(whisper_segs)} real segments, {len(clip.get('subtitles', []))} word timings")
+                        else:
+                            # Whisper returned nothing (silence / music-only segment)
+                            # Keep YouTube ASR subtitles but mark honestly
+                            if not clip.get("has_real_captions"):
+                                clip["full_text"] = "[No speech detected] Edit subtitles here"
+                    except Exception as we:
+                        print(f"[Whisper] Clip {clip.get('id')} error: {we}")
+            # ─────────────────────────────────────────────────────────────────────
 
             response_data = {
                 "success": True,
