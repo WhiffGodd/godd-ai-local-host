@@ -1,545 +1,253 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>godd ai | Turn Videos into Viral TikToks, Reels &amp; Shorts (100% Free)</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
-    <!-- Official YouTube IFrame Player API -->
-    <script src="https://www.youtube.com/iframe_api"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>godd.ai — Free Klap Alternative | Gaming Shorts with Hinglish Subtitles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
-    <!-- Ambient Background Lighting -->
-    <div class="ambient-glow glow-1"></div>
-    <div class="ambient-glow glow-2"></div>
-    <div class="ambient-glow glow-3"></div>
 
-    <!-- Navigation Bar -->
-    <header class="navbar">
-        <div class="nav-container">
-            <div class="brand" onclick="resetToHome()" style="cursor: pointer;">
-                <div class="logo-icon">⚡</div>
-                <span class="logo-text">godd<span class="accent-text">.ai</span></span>
-                <span class="badge-free">100% FREE</span>
-            </div>
-            <nav class="nav-links">
-                <a href="#how-it-works">How It Works</a>
-                <button class="btn-api-key-nav" type="button" onclick="openBackendModal()" title="Connect Render.com Cloud Backend for FFmpeg clipping">☁️ Cloud Backend</button>
-                <button class="btn-api-key-nav" type="button" onclick="openApiKeyModal()" title="Configure Official YouTube Data API Key">🔑 YouTube API</button>
-                <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">▶ Try Demo</button>
-            </nav>
-        </div>
-    </header>
+<!-- ═══════════════════ NAVBAR ═══════════════════ -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <div class="brand" onclick="goHome()">
+      <span class="logo-mark">⚡</span>
+      <span class="logo-name">godd<span class="logo-ai">.ai</span></span>
+      <span class="badge-free">FREE</span>
+    </div>
+    <div class="nav-right">
+      <button class="nav-btn" onclick="openBackendModal()">☁️ Backend</button>
+      <button class="nav-btn nav-btn-demo" onclick="loadDemo()">▶ Demo</button>
+    </div>
+  </div>
+</nav>
 
-    <main>
-        <!-- ══════════════════════════════════════════
-             HERO SECTION
-        ══════════════════════════════════════════ -->
-        <section class="hero-section" id="hero">
-            <div class="container">
-                <div class="hero-badge">
-                    <span class="pulse-dot"></span>
-                    <span>Free Alternative to Klap &amp; Opus Clip — No Paywall, No Watermark</span>
-                </div>
-                <h1 class="hero-title">
-                    Turn any long video into<br>
-                    <span class="gradient-text">viral TikToks, Reels &amp; Shorts</span>
-                </h1>
-                <p class="hero-subtitle">
-                    Paste a YouTube link <em>or</em> upload your own video. <strong>godd ai</strong> automatically finds the most entertaining moments, converts to vertical 9:16, adds karaoke captions, and lets you download the clip.
-                </p>
+<!-- ═══════════════════ HERO ═══════════════════ -->
+<section id="heroSection">
+  <div class="hero-wrap">
+    <div class="hero-badge">🎮 Free Alternative to Klap &amp; Opus Clip</div>
+    <h1 class="hero-h1">Turn gaming streams into<br><span class="hero-grad">viral Shorts &amp; Reels</span></h1>
+    <p class="hero-sub">Paste any YouTube link. AI finds the best moments, adds real Hinglish subtitles from the streamer's voice, and renders a 9:16 clip you can download in one click.</p>
 
-                <!-- ── HOW IT WORKS STEPS (always visible) ── -->
-                <div class="how-steps-mini">
-                    <div class="hsm-step">
-                        <div class="hsm-num">1</div>
-                        <div class="hsm-text">Paste link or upload video</div>
-                    </div>
-                    <div class="hsm-arrow">→</div>
-                    <div class="hsm-step">
-                        <div class="hsm-num">2</div>
-                        <div class="hsm-text">AI finds top clips</div>
-                    </div>
-                    <div class="hsm-arrow">→</div>
-                    <div class="hsm-step">
-                        <div class="hsm-num">3</div>
-                        <div class="hsm-text">Preview &amp; download</div>
-                    </div>
-                </div>
-
-                <!-- ── INPUT CARD ── -->
-                <div class="input-card-container">
-                    <!-- Tab Switcher -->
-                    <div class="input-tabs">
-                        <button class="tab-btn active" id="tabYoutubeBtn" type="button" onclick="switchInputTab('youtube')">
-                            🔗 Paste YouTube Link
-                        </button>
-                        <button class="tab-btn" id="tabUploadBtn" type="button" onclick="switchInputTab('upload')">
-                            📁 Upload My Video File
-                        </button>
-                    </div>
-
-                    <!-- YouTube Link Tab -->
-                    <div class="tab-content" id="tabYoutubeContent">
-                        <div class="input-card">
-                            <div class="tab-hint">Paste any YouTube video or live stream link below</div>
-                            <div class="input-wrapper">
-                                <span class="yt-icon">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                                    </svg>
-                                </span>
-                                <input type="text" id="videoUrlInput" placeholder="e.g. https://www.youtube.com/watch?v=abc123" autocomplete="off">
-                                <button class="btn-paste" type="button" onclick="pasteFromClipboard()" title="Paste from clipboard">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                    </svg>
-                                    Paste
-                                </button>
-                            </div>
-                            <button class="btn-generate" id="btnGenerate" type="button" onclick="analyzeVideo()">
-                                <span class="btn-text">⚡ Find Viral Clips — It's Free!</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Upload Video File Tab -->
-                    <div class="tab-content" id="tabUploadContent" style="display: none;">
-                        <div class="tab-hint">Upload a video from your computer — MP4, MOV, WebM supported</div>
-                        <div class="upload-dropzone" id="uploadDropzone" onclick="document.getElementById('fileInput').click()">
-                            <input type="file" id="fileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/*" style="display: none;" onchange="handleFileSelected(event)">
-                            <div class="upload-icon">📁</div>
-                            <div class="upload-heading">Click here or drag &amp; drop your video</div>
-                            <div class="upload-subtext">MP4, MOV, WebM, MKV supported • Up to 2GB • Works in-browser, no upload needed</div>
-                            <div class="selected-file-badge" id="selectedFileBadge" style="display: none;">
-                                <span>✅</span>
-                                <span id="selectedFileName">video.mp4</span>
-                                <span id="selectedFileSize">(0 MB)</span>
-                            </div>
-                        </div>
-                        <div class="upload-action-row" id="uploadActionRow" style="display: none; margin-top: 14px;">
-                            <button class="btn-generate btn-generate-upload" type="button" onclick="processUploadedFile()">
-                                <span class="btn-text">⚡ Analyze Video &amp; Find Clips</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Try a sample -->
-                <div class="sample-pills">
-                    <span class="sample-label">Not sure? Try a demo:</span>
-                    <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_huberman')">
-                        🎙️ Podcast Episode Demo
-                    </button>
-                    <button class="sample-pill" type="button" onclick="loadSampleVideo('sample_streamer')">
-                        🎮 Gaming Stream Demo
-                    </button>
-                </div>
-
-                <!-- Feature strip -->
-                <div class="feature-strip">
-                    <div class="strip-item">
-                        <span class="strip-icon">🎯</span>
-                        <span>AI Virality Scoring</span>
-                    </div>
-                    <div class="strip-item">
-                        <span class="strip-icon">📱</span>
-                        <span>Auto Vertical 9:16 Format</span>
-                    </div>
-                    <div class="strip-item">
-                        <span class="strip-icon">🔥</span>
-                        <span>Animated Karaoke Captions</span>
-                    </div>
-                    <div class="strip-item">
-                        <span class="strip-icon">🚫</span>
-                        <span>No Watermark • 100% Free</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ══════════════════════════════════════════
-             PROCESSING SCREEN
-        ══════════════════════════════════════════ -->
-        <section class="processing-section" id="processingSection" style="display: none;">
-            <div class="processing-card">
-                <div class="scanner-ring">
-                    <div class="ring ring-1"></div>
-                    <div class="ring ring-2"></div>
-                    <div class="center-ai-icon">⚡</div>
-                </div>
-                <h3 class="processing-title" id="processingTitle">Analyzing Your Video…</h3>
-                <p class="processing-subtitle" id="processingSubtitle">Scanning for the most entertaining &amp; viral moments</p>
-
-                <div class="stepper-list">
-                    <div class="step-item step-active" id="step1">
-                        <div class="step-bullet">✓</div>
-                        <div class="step-text">Loading video &amp; reading metadata</div>
-                    </div>
-                    <div class="step-item" id="step2">
-                        <div class="step-bullet">2</div>
-                        <div class="step-text">Transcribing speech &amp; detecting timestamps</div>
-                    </div>
-                    <div class="step-item" id="step3">
-                        <div class="step-bullet">3</div>
-                        <div class="step-text">Scoring emotion, humor &amp; curiosity hooks</div>
-                    </div>
-                    <div class="step-item" id="step4">
-                        <div class="step-bullet">4</div>
-                        <div class="step-text">Preparing vertical clips with animated captions</div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- ══════════════════════════════════════════
-             STUDIO SECTION
-        ══════════════════════════════════════════ -->
-        <section class="studio-section" id="studioSection" style="display: none;">
-            <div class="container">
-
-                <!-- Progress breadcrumb -->
-                <div class="studio-steps-bar">
-                    <div class="ssb-step done">✓ Upload</div>
-                    <div class="ssb-arrow">›</div>
-                    <div class="ssb-step done">✓ AI Analysis</div>
-                    <div class="ssb-arrow">›</div>
-                    <div class="ssb-step active">Pick Clip &amp; Customize</div>
-                    <div class="ssb-arrow">›</div>
-                    <div class="ssb-step">Download</div>
-                </div>
-
-                <!-- Video info bar -->
-                <div class="video-meta-bar">
-                    <div class="video-thumbnail-box">
-                        <img id="metaThumb" src="" alt="Thumbnail">
-                    </div>
-                    <div class="video-info">
-                        <h2 id="metaTitle">Video Title</h2>
-                        <div class="meta-tags">
-                            <span class="meta-tag" id="metaAuthor">Creator</span>
-                            <span class="meta-dot">•</span>
-                            <span class="meta-tag" id="metaDuration">Duration: 10:00</span>
-                            <span class="meta-dot">•</span>
-                            <span class="meta-tag highlight-tag" id="metaClipsCount">4 Viral Clips Ready</span>
-                        </div>
-                    </div>
-                    <button class="btn-new-video" type="button" onclick="resetToHome()">+ Process Another Video</button>
-                </div>
-
-                <!-- Studio Grid: Clips | Player | Controls -->
-                <div class="studio-grid">
-
-                    <!-- LEFT: Clip List -->
-                    <div class="clips-panel">
-                        <div class="panel-header">
-                            <h3>🎬 Detected Viral Clips</h3>
-                            <span class="badge-count" id="clipsBadge">0 clips</span>
-                        </div>
-                        <p class="panel-hint">👇 Click a clip below to preview it</p>
-                        <div class="clips-list" id="clipsListContainer">
-                            <!-- Dynamically populated -->
-                        </div>
-                    </div>
-
-                    <!-- CENTER: Phone Preview -->
-                    <div class="player-panel">
-                        <div class="player-label">📱 Vertical Preview (9:16)</div>
-                        <div class="phone-mockup">
-                            <div class="phone-screen">
-                                <div class="canvas-wrapper" id="canvasWrapper">
-                                    <!-- Native video for local uploads -->
-                                    <video id="previewVideo" playsinline loop crossorigin="anonymous"></video>
-
-                                    <!-- YouTube Official Player API Container -->
-                                    <div id="ytContainer" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden;">
-                                        <div id="ytPlayerDiv" style="width: 300%; height: 100%; margin-left: -100%;"></div>
-                                        <iframe id="ytIframe" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width: 300%; height: 100%; margin-left: -100%; pointer-events: none; display: none;"></iframe>
-                                    </div>
-
-                                    <!-- Canvas for rendering -->
-                                    <canvas id="shortsCanvas" width="720" height="1280"></canvas>
-
-                                    <!-- Animated Subtitles Overlay -->
-                                    <div class="captions-overlay" id="captionsOverlay">
-                                        <div class="caption-text-box style-hormozi" id="captionTextBox">
-                                            <span class="caption-word">WAIT</span>
-                                            <span class="caption-word active-word">UNTIL</span>
-                                            <span class="caption-word highlight-word">YOU SEE 🔥</span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Hook banner at top -->
-                                    <div class="hook-banner" id="hookBanner">
-                                        <span id="hookBannerText">Select a clip to preview ←</span>
-                                    </div>
-                                </div>
-
-                                <!-- Player Controls -->
-                                <div class="player-controls">
-                                    <button class="btn-play-pause" id="btnPlayPause" type="button" onclick="togglePlay()" title="Play / Pause">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" id="playIcon">
-                                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                                        </svg>
-                                    </button>
-                                    <div class="scrubber-bar" id="scrubberBar" onclick="seekScrubber(event)" title="Click to seek">
-                                        <div class="scrubber-fill" id="scrubberFill"></div>
-                                    </div>
-                                    <span class="timestamp-label" id="timeLabel">0:00 / 0:40</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- RIGHT: Controls & Export -->
-                    <div class="controls-panel">
-
-                        <!-- SUBTITLE STYLE -->
-                        <div class="control-box">
-                            <label class="control-label">
-                                🎨 Caption Style
-                                <span class="label-hint">Pick how the words look on screen</span>
-                            </label>
-                            <div class="style-presets-grid">
-                                <button class="preset-btn active" data-style="hormozi" type="button" onclick="setSubtitleStyle('hormozi')" title="Bold yellow — highest virality">
-                                    <div class="preset-preview style-p-hormozi">YELLOW</div>
-                                    <span>Bold Yellow<br><small>Most Viral</small></span>
-                                </button>
-                                <button class="preset-btn" data-style="mrbeast" type="button" onclick="setSubtitleStyle('mrbeast')" title="Cyan glow style">
-                                    <div class="preset-preview style-p-beast">CYAN</div>
-                                    <span>MrBeast<br><small>Cyan Glow</small></span>
-                                </button>
-                                <button class="preset-btn" data-style="cyber" type="button" onclick="setSubtitleStyle('cyber')" title="Green neon style">
-                                    <div class="preset-preview style-p-cyber">GREEN</div>
-                                    <span>Cyber<br><small>Neon Green</small></span>
-                                </button>
-                                <button class="preset-btn" data-style="clean" type="button" onclick="setSubtitleStyle('clean')" title="Simple white text">
-                                    <div class="preset-preview style-p-clean">CLEAN</div>
-                                    <span>Minimal<br><small>Clean White</small></span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- VIDEO LAYOUT -->
-                        <div class="control-box">
-                            <label class="control-label">
-                                📐 Video Frame Style
-                                <span class="label-hint">How the video fills the vertical frame</span>
-                            </label>
-                            <div class="layout-toggle-group">
-                                <button class="layout-btn active" data-layout="crop" type="button" onclick="setLayout('crop')" title="Cut sides to fill the vertical frame">
-                                    ✂️ Smart Crop
-                                </button>
-                                <button class="layout-btn" data-layout="blur" type="button" onclick="setLayout('blur')" title="Blurred background, centered video">
-                                    ✨ Blur Background
-                                </button>
-                                <button class="layout-btn" data-layout="fit" type="button" onclick="setLayout('fit')" title="Fit video with black bars">
-                                    🔲 Letterbox Fit
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- TRIM TIMES -->
-                        <div class="control-box">
-                            <div class="label-with-val">
-                                <label class="control-label">⏱️ Adjust Clip Length</label>
-                                <span class="val-badge" id="trimDurationLabel">Duration: 40s</span>
-                            </div>
-                            <p class="control-hint">Change start/end seconds to shorten or extend the clip</p>
-                            <div class="trim-inputs">
-                                <div class="trim-field">
-                                    <span>Start:</span>
-                                    <input type="number" id="trimStart" step="1" min="0" onchange="updateTrimTimes()" title="Start time in seconds">
-                                    <span>s</span>
-                                </div>
-                                <div class="trim-field">
-                                    <span>End:</span>
-                                    <input type="number" id="trimEnd" step="1" min="1" onchange="updateTrimTimes()" title="End time in seconds">
-                                    <span>s</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- TRANSCRIPT -->
-                        <div class="control-box">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <label class="control-label" style="margin-bottom: 0;">
-                                    🎙️ Streamer Voice &amp; Subtitles
-                                </label>
-                                <span style="font-size: 11px; font-weight: 600; color: #34D399; background: rgba(52, 211, 153, 0.15); border: 1px solid rgba(52, 211, 153, 0.3); padding: 2px 8px; border-radius: 12px;">
-                                    🎙️ Game Audio Filtered
-                                </span>
-                            </div>
-                            <p class="control-hint" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>Showing streamer's spoken commentary:</span>
-                                <button type="button" onclick="injectStreamerCallouts()" style="background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.4); color: #FACC15; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; cursor: pointer;" title="Clean any remaining in-game sound and load intense streamer reaction commentary">
-                                    ⚡ Streamer Clutch Voice
-                                </button>
-                            </p>
-                            <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true" oninput="handleTranscriptEdit(event)" spellcheck="false">
-                                Select a clip to see its transcript here…
-                            </div>
-                        </div>
-
-                        <!-- ═══ EXPORT / DOWNLOAD ═══ -->
-                        <div class="export-actions">
-                            <div class="export-title">Step 3: Download Your 9:16 Short</div>
-                            <button class="btn-download-mp4" type="button" onclick="downloadShortVideo()">
-                                <span class="dl-icon">⬇️</span>
-                                <span>Download 9:16 MP4 (Free)</span>
-                            </button>
-                            <p class="download-hint" id="downloadHintText">
-                                ⚡ Direct 1080x1920 MP4 download via godd.ai Cloud FFmpeg Engine • 100% Free • No Watermark
-                            </p>
-                            <div class="secondary-actions">
-                                <button class="btn-secondary" type="button" onclick="downloadSrtCaptions()" title="Download subtitle file for editing">
-                                    📄 Download SRT Captions
-                                </button>
-                                <button class="btn-secondary" type="button" onclick="copyHookText()" title="Copy script text to clipboard">
-                                    📋 Copy Script
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- How It Works -->
-        <section class="how-it-works-section" id="how-it-works">
-            <div class="container">
-                <div class="section-badge">SIMPLE 3-STEP PROCESS</div>
-                <h2 class="section-title">From Long Video to Viral Shorts in Seconds</h2>
-                <div class="steps-grid">
-                    <div class="step-card">
-                        <div class="step-number">01</div>
-                        <h3>Paste Link or Upload Video</h3>
-                        <p>Drop any YouTube link, podcast, live stream, or upload your own MP4/MOV file. No account needed.</p>
-                    </div>
-                    <div class="step-card">
-                        <div class="step-number">02</div>
-                        <h3>AI Finds the Best Moments</h3>
-                        <p>Our AI scans for emotional peaks, funny moments, curiosity hooks, and high-retention segments automatically.</p>
-                    </div>
-                    <div class="step-card">
-                        <div class="step-number">03</div>
-                        <h3>Preview, Style &amp; Download</h3>
-                        <p>Pick a caption style, preview in a 9:16 phone mockup, then download your ready-to-post short. No watermark!</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Features -->
-        <section class="features-section" id="features">
-            <div class="container">
-                <div class="section-badge">BUILT FOR CREATORS</div>
-                <h2 class="section-title">Everything you need to go viral — completely free</h2>
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <div class="feat-icon">🎯</div>
-                        <h3>AI Virality Detection</h3>
-                        <p>Scores each clip 0–100 based on hook strength, speech emotion, curiosity gap, and estimated viewer retention.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">📱</div>
-                        <h3>Auto Vertical Reframing</h3>
-                        <p>Automatically converts horizontal 16:9 video to vertical 9:16 for TikTok, Reels, and YouTube Shorts.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">✨</div>
-                        <h3>Animated Karaoke Captions</h3>
-                        <p>Word-by-word captions that sync with speech — high contrast, pop-in emojis, proven to boost retention.</p>
-                    </div>
-                    <div class="feature-card">
-                        <div class="feat-icon">🚀</div>
-                        <h3>100% Free · No Watermarks</h3>
-                        <p>No subscription, no hidden fees, no ugly watermarks. You own everything you export.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container footer-content">
-            <div class="brand">
-                <span class="logo-icon">⚡</span>
-                <span class="logo-text">godd<span class="accent-text">.ai</span></span>
-            </div>
-            <p class="footer-copy">Turn long videos into viral TikToks, Reels &amp; Shorts. 100% Free Forever.</p>
-            <div class="footer-badge">Free Open Creator Engine</div>
-        </div>
-    </footer>
-
-    <!-- Render.com Cloud Backend Modal -->
-    <div class="modal-overlay" id="backendModal" style="display: none;">
-        <div class="modal-card">
-            <div class="modal-icon">☁️</div>
-            <h3 class="modal-title">Cloud Video Processing Backend</h3>
-            <p class="modal-body">
-                Connect your free Render.com backend worker to clip videos with server-side FFmpeg (just like Klap and Opus Clip).
-            </p>
-            <div class="api-key-input-group">
-                <label for="backendUrlInput" style="font-size: 13px; font-weight: 700; color: var(--text-secondary);">Your Render Backend URL:</label>
-                <input type="text" id="backendUrlInput" placeholder="https://godd-ai-backend.onrender.com" style="width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: #fff; font-size: 13px; margin-top: 6px;">
-                <div id="backendStatusMsg" style="font-size: 12px; margin-top: 6px; font-weight: 600;"></div>
-            </div>
-            <div class="api-key-help-box" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                <strong>Deploy to Render in 2 minutes:</strong><br>
-                1. Go to <a href="https://dashboard.render.com/select-repo?type=web" target="_blank" rel="noopener" style="color: var(--accent-cyan);">dashboard.render.com</a><br>
-                2. Connect repository: <strong>WhiffGodd/godd-ai</strong><br>
-                3. Render automatically detects the <code>Dockerfile</code> &amp; <code>render.yaml</code><br>
-                4. Click <strong>Create Web Service</strong> (Free plan)<br>
-                5. Paste your Render service URL above and click Save
-            </div>
-            <div class="modal-actions" style="margin-top: 10px;">
-                <button class="btn-modal-primary" type="button" onclick="testAndSaveBackend()">Test &amp; Save Backend</button>
-                <button class="btn-modal-secondary" type="button" onclick="clearBackendUrl()">Use Default / Localhost</button>
-                <button class="btn-modal-close" type="button" onclick="closeBackendModal()">✕ Close</button>
-            </div>
-        </div>
+    <div class="url-card">
+      <div class="url-row">
+        <span class="yt-logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="#FF0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+        </span>
+        <input id="urlInput" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" onkeydown="if(event.key==='Enter')analyzeVideo()">
+        <button class="btn-paste" onclick="pasteClip()">Paste</button>
+      </div>
+      <button class="btn-analyze" onclick="analyzeVideo()">
+        ⚡ Find Viral Clips — It's Free!
+      </button>
     </div>
 
-    <!-- Official YouTube API Key Modal -->
-    <div class="modal-overlay" id="apiKeyModal" style="display: none;">
-        <div class="modal-card">
-            <div class="modal-icon">🔑</div>
-            <h3 class="modal-title">YouTube Data API v3 Setup</h3>
-            <p class="modal-body">
-                Connect the official Google YouTube API for real-time video metadata, higher rate limits, and chapter detection.
-            </p>
-            <div class="api-key-input-group">
-                <label for="apiKeyInput" style="font-size: 13px; font-weight: 700; color: var(--text-secondary);">Your YouTube API Key:</label>
-                <input type="text" id="apiKeyInput" placeholder="AIzaSy..." style="width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: #fff; font-family: monospace; font-size: 13px; margin-top: 6px;">
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-                    Stored locally in your browser. Never shared or saved to external servers.
-                </div>
-            </div>
-            <div class="api-key-help-box" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-                <strong>How to get a free API key:</strong><br>
-                1. Visit <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener" style="color: var(--accent-cyan);">Google Cloud Console</a><br>
-                2. Enable <strong>YouTube Data API v3</strong><br>
-                3. Go to <em>Credentials</em> → <em>Create Credentials</em> → <em>API Key</em><br>
-                4. Paste it above and click Save
-            </div>
-            <div class="modal-actions" style="margin-top: 10px;">
-                <button class="btn-modal-primary" type="button" onclick="saveApiKey()">Save API Key</button>
-                <button class="btn-modal-secondary" type="button" onclick="clearApiKey()">Clear / Use Default</button>
-                <button class="btn-modal-close" type="button" onclick="closeApiKeyModal()">✕ Close</button>
-            </div>
-        </div>
+    <div class="hero-features">
+      <span>🎯 AI Virality Score</span>
+      <span>📱 Auto 9:16 Format</span>
+      <span>🎙️ Real Streamer Voice</span>
+      <span>🚫 No Watermark</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ PROCESSING ═══════════════════ -->
+<section id="processingSection" style="display:none">
+  <div class="proc-card">
+    <div class="proc-rings">
+      <div class="proc-ring r1"></div>
+      <div class="proc-ring r2"></div>
+      <div class="proc-icon">⚡</div>
+    </div>
+    <h2 class="proc-title" id="procTitle">Analyzing your video…</h2>
+    <p class="proc-sub">AI is scanning for the most entertaining moments</p>
+    <div class="proc-steps">
+      <div class="proc-step" id="ps1"><span class="ps-dot"></span> Loading video &amp; metadata</div>
+      <div class="proc-step" id="ps2"><span class="ps-dot"></span> Extracting streamer's voice</div>
+      <div class="proc-step" id="ps3"><span class="ps-dot"></span> Scoring virality &amp; emotion</div>
+      <div class="proc-step" id="ps4"><span class="ps-dot"></span> Building 9:16 clips with captions</div>
+    </div>
+    <p class="proc-note">First request may take 30–60s while Render server wakes up</p>
+  </div>
+</section>
+
+<!-- ═══════════════════ STUDIO ═══════════════════ -->
+<section id="studioSection" style="display:none">
+
+  <!-- Top bar -->
+  <div class="studio-topbar">
+    <div class="studio-video-info">
+      <img id="studioThumb" src="" alt="" class="studio-thumb">
+      <div class="studio-meta">
+        <div class="studio-title" id="studioTitle">Video Title</div>
+        <div class="studio-author" id="studioAuthor">Creator • <span id="studioClipCount">0 clips</span></div>
+      </div>
+    </div>
+    <button class="btn-new" onclick="goHome()">+ New Video</button>
+  </div>
+
+  <!-- 3-column grid -->
+  <div class="studio-grid">
+
+    <!-- LEFT: Clip list -->
+    <div class="col-clips">
+      <div class="col-head">
+        <span>🎬 Viral Clips</span>
+        <span class="col-badge" id="clipsBadge">0</span>
+      </div>
+      <div class="clips-scroll" id="clipsContainer">
+        <!-- clip cards injected here -->
+      </div>
     </div>
 
-    <!-- Toast notification -->
-    <div class="toast" id="toast">Copied!</div>
+    <!-- CENTER: Video Preview -->
+    <div class="col-preview">
+      <div class="preview-wrap" id="previewWrap">
 
-    <script src="app.js"></script>
+        <!-- YouTube IFrame fills this -->
+        <div id="ytPlayerDiv" class="yt-player-div"></div>
+
+        <!-- Subtitle overlay -->
+        <div class="subs-overlay" id="subsOverlay">
+          <div class="subs-box" id="subsBox"></div>
+        </div>
+
+        <!-- Hook title top -->
+        <div class="preview-top-label" id="previewTopLabel"></div>
+
+        <!-- Player controls bottom -->
+        <div class="preview-controls">
+          <button class="ctrl-play" id="playBtn" onclick="togglePlay()">
+            <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+          <div class="ctrl-scrubber" id="scrubber" onclick="scrubSeek(event)">
+            <div class="ctrl-fill" id="scrubFill"></div>
+          </div>
+          <span class="ctrl-time" id="ctrlTime">0:00 / 0:40</span>
+        </div>
+      </div>
+
+      <!-- Preview label -->
+      <div class="preview-label">📱 9:16 Vertical Preview</div>
+    </div>
+
+    <!-- RIGHT: Controls -->
+    <div class="col-controls">
+
+      <!-- Subtitle Style -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title">🎨 Subtitle Style</div>
+        <div class="style-grid">
+          <button class="style-btn active" data-s="bold" onclick="setStyle('bold')">
+            <span class="style-prev prev-bold">BOLD</span>Yellow
+          </button>
+          <button class="style-btn" data-s="beast" onclick="setStyle('beast')">
+            <span class="style-prev prev-beast">CYAN</span>Beast
+          </button>
+          <button class="style-btn" data-s="fire" onclick="setStyle('fire')">
+            <span class="style-prev prev-fire">FIRE</span>Neon
+          </button>
+          <button class="style-btn" data-s="clean" onclick="setStyle('clean')">
+            <span class="style-prev prev-clean">clean</span>Minimal
+          </button>
+        </div>
+      </div>
+
+      <!-- Layout -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title">📐 Video Layout</div>
+        <div class="layout-row">
+          <button class="layout-btn active" data-l="crop" onclick="setLayout('crop')">✂️ Crop</button>
+          <button class="layout-btn" data-l="blur" onclick="setLayout('blur')">✨ Blur BG</button>
+          <button class="layout-btn" data-l="fit" onclick="setLayout('fit')">🔲 Fit</button>
+        </div>
+      </div>
+
+      <!-- Trim -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title">⏱️ Clip Trim <span id="trimDurLabel" class="trim-dur-badge">40s</span></div>
+        <div class="trim-row">
+          <label>Start <input type="number" id="trimStart" min="0" step="1" onchange="applyTrim()">s</label>
+          <label>End <input type="number" id="trimEnd" min="1" step="1" onchange="applyTrim()">s</label>
+        </div>
+      </div>
+
+      <!-- Transcript -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title" style="display:flex;justify-content:space-between;align-items:center;">
+          🎙️ Streamer Subtitles
+          <span class="real-badge">Real Voice</span>
+        </div>
+        <div class="transcript-box" id="transcriptBox" contenteditable="true" spellcheck="false" oninput="onTranscriptEdit(event)">
+          Select a clip to see subtitles here…
+        </div>
+        <button class="btn-refresh-subs" onclick="refreshSubsFromEditor()">↻ Refresh subtitles from text</button>
+      </div>
+
+      <!-- Download -->
+      <div class="ctrl-box download-box">
+        <button class="btn-download" onclick="downloadClip()">
+          ⬇️ Download 9:16 MP4
+        </button>
+        <div class="dl-note">Free · No watermark · Server-side FFmpeg</div>
+        <div class="sec-actions">
+          <button class="btn-sec" onclick="downloadSRT()">📄 SRT Captions</button>
+          <button class="btn-sec" onclick="copyScript()">📋 Copy Script</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ BACKEND MODAL ═══════════════════ -->
+<div class="modal-bg" id="backendModal" style="display:none" onclick="if(event.target===this)closeBackendModal()">
+  <div class="modal-card">
+    <div class="modal-icon">☁️</div>
+    <h3>Render Cloud Backend</h3>
+    <p class="modal-p">Your Render.com backend URL (for FFmpeg video rendering):</p>
+    <input type="text" id="backendUrlInput" placeholder="https://godd-ai.onrender.com" class="modal-input">
+    <div id="backendMsg" class="modal-msg"></div>
+    <div class="modal-actions">
+      <button class="btn-modal-primary" onclick="saveBackend()">Test &amp; Save</button>
+      <button class="btn-modal-sec" onclick="closeBackendModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ DOWNLOAD PROGRESS ═══════════════════ -->
+<div class="modal-bg" id="dlProgressOverlay" style="display:none">
+  <div class="modal-card" style="text-align:center;min-width:340px">
+    <div style="font-size:36px;margin-bottom:12px">⚡</div>
+    <div class="dl-label" id="dlLabel">Preparing…</div>
+    <div class="dl-track"><div class="dl-fill" id="dlFill"></div></div>
+    <div class="dl-hint">Please do not close this tab</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ERROR MODAL ═══════════════════ -->
+<div class="modal-bg" id="errModal" style="display:none" onclick="if(event.target===this)closeErrModal()">
+  <div class="modal-card">
+    <div class="modal-icon">⚠️</div>
+    <h3>Download Failed</h3>
+    <p class="modal-p err-detail" id="errDetail"></p>
+    <p class="modal-p" style="color:#94A3B8;font-size:13px;">The Render free server sleeps after 15 min idle. Click Retry — the wake-up ping already happened, it should work now.</p>
+    <div class="modal-actions">
+      <button class="btn-modal-primary" onclick="closeErrModal();downloadClip()">🔄 Retry Download</button>
+      <button class="btn-modal-sec" onclick="closeErrModal();downloadSRT()">📄 Get SRT Instead</button>
+      <button class="btn-modal-sec" onclick="closeErrModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
 </body>
 </html>
