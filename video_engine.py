@@ -175,6 +175,30 @@ if not FFMPEG_PATH and imageio_ffmpeg:
 if not FFMPEG_PATH:
     FFMPEG_PATH = "ffmpeg"
 
+_DETECTED_ENCODER = None
+
+def get_video_encoder_flags():
+    """Detect whether NVIDIA NVENC GPU acceleration is available on this system."""
+    global _DETECTED_ENCODER
+    if _DETECTED_ENCODER is not None:
+        return _DETECTED_ENCODER
+        
+    try:
+        probe = subprocess.run(
+            [FFMPEG_PATH, "-f", "lavfi", "-i", "nullsrc=s=256x256,format=yuv420p", "-c:v", "h264_nvenc", "-t", "0.05", "-f", "null", "-"],
+            capture_output=True, timeout=3
+        )
+        if probe.returncode == 0:
+            print("[VideoEngine] 🚀 NVIDIA NVENC GPU Hardware Acceleration DETECTED & ACTIVE!")
+            _DETECTED_ENCODER = ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-b:v", "6M"]
+            return _DETECTED_ENCODER
+    except Exception:
+        pass
+        
+    print("[VideoEngine] Using CPU libx264 encoder.")
+    _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+    return _DETECTED_ENCODER
+
 def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
     """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
     lines = []
@@ -311,6 +335,8 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
         if not stream_url and not video_stream_url:
             raise RuntimeError("Could not find playable video stream URL")
 
+        encoder_flags = get_video_encoder_flags()
+
         # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement
         if stream_url:
             cmd = [
@@ -323,9 +349,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-map", "[outv]",
                 "-map", "0:a?",
                 "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "23",
+                *encoder_flags,
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",
@@ -344,9 +368,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-map", "[outv]",
                 "-map", "1:a?",
                 "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "23",
+                *encoder_flags,
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",

@@ -40,6 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
 function getBackend() {
   const custom = localStorage.getItem('godd_backend');
   if (custom && custom.trim()) return custom.trim().replace(/\/$/, '');
+  // If running locally, ALWAYS use local backend on RTX GPU!
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return window.location.origin;
+  }
   // If running on render directly, use same-origin
   if (window.location.origin.includes('onrender.com')) {
     return window.location.origin;
