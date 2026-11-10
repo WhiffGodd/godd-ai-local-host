@@ -367,8 +367,9 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         duration = float(payload.get("duration", 30))
         layout = payload.get("layout", "split")
         subtitles = payload.get("subtitles", [])
+        subtitle_style = payload.get("subtitle_style", "beast")
 
-        print(f"[VideoEngine] Rendering clip: URL={url}, Start={start_time}s, Dur={duration}s, Layout={layout}, Subtitles={len(subtitles)} words")
+        print(f"[VideoEngine] Rendering 1080p clip: URL={url}, Start={start_time}s, Dur={duration}s, Layout={layout}, Style={subtitle_style}, Subtitles={len(subtitles)} words")
 
         try:
             rendered_path = download_and_clip_video(
@@ -376,7 +377,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 start_time=start_time,
                 duration=duration,
                 layout=layout,
-                subtitles=subtitles
+                subtitles=subtitles,
+                subtitle_style=subtitle_style
             )
 
             # Stream the rendered MP4 file directly to the client with clean title filename

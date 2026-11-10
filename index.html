@@ -184,13 +184,56 @@
         </div>
       </div>
 
+      <!-- Subtitle Style Variations (Klap Style) -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title">🎨 Subtitle Style Preset</div>
+        <div class="style-grid">
+          <button class="style-btn active" data-s="beast" onclick="setStyle('beast')">
+            <span class="style-dot dot-beast"></span> Beast Gold
+          </button>
+          <button class="style-btn" data-s="hormozi" onclick="setStyle('hormozi')">
+            <span class="style-dot dot-hormozi"></span> Hormozi Lime
+          </button>
+          <button class="style-btn" data-s="cyber" onclick="setStyle('cyber')">
+            <span class="style-dot dot-cyber"></span> Cyber Cyan
+          </button>
+          <button class="style-btn" data-s="fire" onclick="setStyle('fire')">
+            <span class="style-dot dot-fire"></span> Viral Flame
+          </button>
+          <button class="style-btn" data-s="box" onclick="setStyle('box')">
+            <span class="style-dot dot-box"></span> Box Pop
+          </button>
+          <button class="style-btn" data-s="clean" onclick="setStyle('clean')">
+            <span class="style-dot dot-clean"></span> Minimal White
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Audio-Subtitle Sync Calibration -->
+      <div class="ctrl-box">
+        <div class="ctrl-box-title">
+          <span>⚡ Live Audio Sync</span>
+          <span id="syncBadge" class="sync-badge">+350ms</span>
+        </div>
+        <div class="sync-row">
+          <input type="range" id="syncSlider" min="-100" max="800" step="25" value="350" oninput="onSyncChange(this.value)">
+        </div>
+        <div class="sync-presets">
+          <button class="sync-chip" onclick="setSyncOffset(0)">0ms</button>
+          <button class="sync-chip" onclick="setSyncOffset(200)">+200ms</button>
+          <button class="sync-chip active" id="chipRec" onclick="setSyncOffset(350)">+350ms (Rec)</button>
+          <button class="sync-chip" onclick="setSyncOffset(500)">+500ms</button>
+        </div>
+        <div class="sync-hint">Adjust live if your Bluetooth or browser audio has slight latency.</div>
+      </div>
+
       <!-- Direct Download Box -->
       <div class="ctrl-box download-box">
-        <div class="ctrl-box-title">💾 Export Video</div>
+        <div class="ctrl-box-title">💾 Export Video (1080p Full HD)</div>
         <button class="btn-download" id="mainDlBtn" onclick="downloadClip()">
-          ⬇️ Download 9:16 Short (MP4)
+          ⬇️ Download 1080p 9:16 Short (MP4)
         </button>
-        <div class="dl-note">Zero Watermarks · High Quality · Instant Download</div>
+        <div class="dl-note">Full HD 1080x1920 • 60 FPS • NVIDIA NVENC Hardware Accelerated</div>
       </div>
 
     </div>

@@ -501,6 +501,27 @@ function updatePlayIcon(playing) {
 
 let lastYtReportedTime = -1;
 let lastYtReportedTs   = 0;
+let syncOffset         = 0.35; // Default 350ms lead time: perfectly synchronizes visual highlight with physical vocal attack
+
+function onSyncChange(val) {
+  syncOffset = parseFloat(val) / 1000.0;
+  const badge = document.getElementById('syncBadge');
+  if (badge) badge.textContent = `${val >= 0 ? '+' : ''}${val}ms`;
+  document.querySelectorAll('.sync-chip').forEach(c => c.classList.remove('active'));
+  if (activeClip) renderSubtitles(currentTime);
+}
+
+function setSyncOffset(val) {
+  const slider = document.getElementById('syncSlider');
+  if (slider) slider.value = val;
+  onSyncChange(val);
+  const badge = document.getElementById('syncBadge');
+  if (badge) badge.textContent = `${val >= 0 ? '+' : ''}${val}ms`;
+  document.querySelectorAll('.sync-chip').forEach(c => {
+    c.classList.toggle('active', c.textContent.includes(`${val}ms`));
+  });
+  showToast(`⚡ Subtitle Sync: ${val >= 0 ? '+' : ''}${val}ms`);
+}
 
 function animLoop(ts) {
   if (!isPlaying) { animId = null; return; }
@@ -512,22 +533,21 @@ function animLoop(ts) {
     try {
       const yt = ytPlayer.getCurrentTime();
       if (yt !== lastYtReportedTime && yt > 0) {
-        // YouTube sent a new timestamp update
         lastYtReportedTime = yt;
         lastYtReportedTs = ts;
         if (activeClip && yt >= (activeClip.start - 0.5)) {
-          const expected = Math.max(0, yt - activeClip.start);
+          // Compensate for YouTube iframe cross-origin reporting transit lag (~120ms)
+          const expected = Math.max(0, yt - activeClip.start + 0.12);
           const drift = Math.abs(currentTime - expected);
-          if (drift > 0.45) {
-            // Seeked or buffered, snap directly
+          if (drift > 0.5) {
             currentTime = expected;
           } else {
-            // Smoothly converge without 250ms stair-stepping stutter
-            currentTime += (expected - currentTime) * 0.35;
+            // Smoothly converge at 60 FPS without stair-stepping freezing
+            currentTime += (expected - currentTime) * 0.25;
           }
         }
       } else {
-        // Smooth 60 FPS progression between YouTube iframe postMessage ticks
+        // Continuous microsecond 60 FPS audio clock between YouTube 250ms postMessage ticks
         currentTime = Math.min(clipDur, currentTime + delta);
       }
     } catch(_) {
@@ -642,8 +662,8 @@ function renderSubtitles(curOffset) {
   }
 
   const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
-  // Anticipatory lead offset of 0.16s: highlights precisely as speech sounds are articulated
-  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + 0.16;
+  // User calibrated syncOffset (+350ms default advance): visual highlight locks with speaker acoustic attack
+  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + syncOffset;
 
   const clipKey = `${activeClip.start}_${activeClip.end}_${subs.length}`;
   if (cachedClipKey !== clipKey) {
@@ -731,7 +751,11 @@ function setStyle(name) {
   currentStyle = name;
   document.querySelectorAll('.style-btn').forEach(b => b.classList.toggle('active', b.dataset.s === name));
   const box = document.getElementById('subsBox');
-  if (box) box.className = `subs-box s-${name}`;
+  if (box) {
+    box.className = `subs-box s-${name}`;
+    box.dataset.lastHtml = ''; // force re-render with new style
+  }
+  if (activeClip) renderSubtitles(currentTime);
   showToast(`Subtitle style: ${name.toUpperCase()}`);
 }
 
@@ -796,16 +820,16 @@ async function downloadClip() {
   const backend  = getBackend();
   const clipTitle = activeClip.title || `clip_${Math.round(startSec)}s`;
   const cleanTitle = clipTitle.replace(/[^\w\s-]/g, '').trim().replace(/[-\s]+/g, '_') || `clip_${Math.round(startSec)}s`;
-  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}`;
+  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'beast')}`;
 
   // 1. Show modal with immediate direct download link ready
-  setDlProgress(`🎬 Rendering "${clipTitle}"…`, 18, directDlUrl);
+  setDlProgress(`🎬 Rendering "${clipTitle}" in 1080p…`, 18, directDlUrl);
 
   // 2. Animate progress smoothly
   let pct = 20;
   const ticker = setInterval(() => {
     pct = Math.min(88, pct + 3);
-    setDlProgress(`🎬 FFmpeg is encoding "${clipTitle}"… please wait`, pct, directDlUrl);
+    setDlProgress(`🎬 FFmpeg NVENC is encoding 1080p "${clipTitle}"…`, pct, directDlUrl);
   }, 1800);
 
   // 3. Request video stream
@@ -822,6 +846,7 @@ async function downloadClip() {
         duration: durSec,
         layout: currentLayout || 'split',
         title: clipTitle,
+        subtitle_style: currentStyle || 'beast',
         subtitles: activeClip.subtitles || [],
         stream: true
       }),

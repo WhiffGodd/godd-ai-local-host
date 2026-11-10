@@ -190,14 +190,14 @@ def get_video_encoder_flags():
             capture_output=True, timeout=3
         )
         if probe.returncode == 0:
-            print("[VideoEngine] 🚀 NVIDIA NVENC GPU Hardware Acceleration DETECTED & ACTIVE!")
-            _DETECTED_ENCODER = ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-b:v", "6M"]
+            print("[VideoEngine] 🚀 NVIDIA NVENC GPU Hardware Acceleration DETECTED & ACTIVE (1080p 12M preset)!")
+            _DETECTED_ENCODER = ["-c:v", "h264_nvenc", "-preset", "p6", "-tune", "hq", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "24M"]
             return _DETECTED_ENCODER
     except Exception:
         pass
         
-    print("[VideoEngine] Using CPU libx264 encoder.")
-    _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+    print("[VideoEngine] Using CPU libx264 encoder (CRF 18 visually lossless).")
+    _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", "fast", "-crf", "18", "-b:v", "10M"]
     return _DETECTED_ENCODER
 
 def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
@@ -322,15 +322,15 @@ def detect_facecam_in_stream(stream_url: str, timestamp: float = 10.0) -> dict:
         print(f"[FaceCam] Detection notice: {e}")
         return {"has_face": False}
 
-def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "split", subtitles: list = None, output_path: str = None) -> str:
+def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "split", subtitles: list = None, output_path: str = None, subtitle_style: str = "beast") -> str:
     """
-    Download and render a 9:16 short using FFmpeg.
+    Download and render a Full HD 1080p (1080x1920) 9:16 short using FFmpeg.
     Layouts:
-    - 'split': If streamer facecam is detected -> upper facecam zoomed & centered (720x520) + full 16:9 gameplay below.
-               If NO facecam is detected -> automatically uses unified single-section 9:16 (no duplicate 2 sections).
-    - 'crop': Smart center crop to 9:16 (720x1280)
-    - 'blur': Blurred 9:16 ambient background with centered 16:9 video
-    - 'fit': Fitted 16:9 on 9:16 canvas with clean black bars
+    - 'split': If streamer facecam is detected -> upper facecam zoomed & centered (1080x780) + full 16:9 gameplay below.
+               If NO facecam is detected -> automatically uses unified single-section 1080p (no duplicate sections).
+    - 'crop': Smart center crop to 1080x1920 Full HD
+    - 'blur': Blurred ambient background (1080x1920) with crisp centered 16:9 video
+    - 'fit': Fitted 16:9 on 1080x1920 canvas with clean letterbox
     """
     if not output_path:
         tmp_dir = os.path.join(tempfile.gettempdir(), "godd_ai_clips")
@@ -340,7 +340,18 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     if not yt_dlp:
         raise RuntimeError("yt-dlp is not installed")
 
-    # Generate SRT file if subtitles are provided
+    # Map subtitle styles to ASS / SRT color palettes
+    style_colors = {
+        "beast": "&H001ED2FF",     # High-intensity Neon Gold (#FFD21E)
+        "hormozi": "&H002EC55E",   # Electric Lime Green (#5EC52E)
+        "cyber": "&H00FFF000",     # Electric Cyan (#00F0FF)
+        "fire": "&H00303BFF",      # Vivid Coral Red (#FF3B30)
+        "clean": "&H00FFFFFF",     # Crisp White (#FFFFFF)
+        "box": "&H001ED2FF",       # Box Highlight
+    }
+    primary_color = style_colors.get(subtitle_style, "&H001ED2FF")
+
+    # Generate SRT file if subtitles are provided (scaled for 1080p canvas)
     srt_filter = ""
     srt_temp_file = None
     if subtitles and len(subtitles) > 0:
@@ -349,15 +360,15 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             with open(srt_temp_file, "w", encoding="utf-8") as f:
                 f.write(generate_srt(subtitles, clip_start=start_time))
             esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=720,PlayResY=1280,FontName=Arial,FontSize=36,Bold=1,PrimaryColour=&H001ED2FF,OutlineColour=&H00000000,BorderStyle=1,Outline=3.5,Shadow=1.5,Alignment=2,MarginV=115'"
+            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=1080,PlayResY=1920,FontName=Arial,FontSize=52,Bold=1,PrimaryColour={primary_color},OutlineColour=&H00000000,BorderStyle=1,Outline=4.5,Shadow=2,Alignment=2,MarginV=180'"
         except Exception as se:
             print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
             srt_filter = ""
 
-    # Use yt-dlp to obtain stream URL directly without needing to download gigabytes of long video
+    # Use yt-dlp to obtain stream URL: prioritize 1080p adaptive streams for crystal-clear quality
     try:
         ydl_opts = {
-            'format': 'best[ext=mp4]/best/bestvideo+bestaudio',
+            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
             'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
             'quiet': True,
             'no_warnings': True,
@@ -368,46 +379,53 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
-            
-            # Check if direct combined stream url is available
-            direct_url = info.get("url")
-            if direct_url and info.get("vcodec") not in ("none", None) and info.get("acodec") not in ("none", None):
-                stream_url = direct_url
-
             formats = info.get("formats", [])
-            if not stream_url:
-                # Find progressive format with both video and audio
-                for f in reversed(formats):
-                    if f.get("url") and f.get("vcodec") not in ("none", None) and f.get("acodec") not in ("none", None):
-                        stream_url = f.get("url")
-                        break
 
-            if not stream_url:
-                # Find best video stream
-                for f in reversed(formats):
-                    if f.get("url") and f.get("vcodec") not in ("none", None):
-                        video_stream_url = f.get("url")
-                        break
-                # Find best audio stream
-                for f in reversed(formats):
-                    if f.get("url") and f.get("acodec") not in ("none", None):
-                        audio_stream_url = f.get("url")
-                        break
+            # 1. Search for best 1080p video stream
+            best_v = None
+            for f in formats:
+                if f.get("url") and f.get("vcodec") not in ("none", None):
+                    h = f.get("height") or 0
+                    if h <= 1080 and (best_v is None or h > (best_v.get("height") or 0)):
+                        best_v = f
+
+            # 2. Search for best pristine audio stream
+            best_a = None
+            for f in formats:
+                if f.get("url") and f.get("acodec") not in ("none", None) and f.get("vcodec") in ("none", None, ""):
+                    abr = f.get("abr") or 0
+                    if best_a is None or abr > (best_a.get("abr") or 0):
+                        best_a = f
+
+            if best_v:
+                video_stream_url = best_v.get("url")
+                print(f"[VideoEngine] 1080p Video Stream selected: {best_v.get('format_id')} ({best_v.get('width')}x{best_v.get('height')})")
+            if best_a:
+                audio_stream_url = best_a.get("url")
+                print(f"[VideoEngine] Pristine Audio Stream selected: {best_a.get('format_id')} ({best_a.get('abr')}k)")
+
+            # Fallback to direct URL if separate streams not found
+            if not video_stream_url:
+                stream_url = info.get("url")
+                if not stream_url:
+                    for f in reversed(formats):
+                        if f.get("url") and f.get("vcodec") not in ("none", None) and f.get("acodec") not in ("none", None):
+                            stream_url = f.get("url")
+                            break
 
         if not stream_url and not video_stream_url:
             raise RuntimeError("Could not find playable video stream URL")
 
-        target_stream = stream_url or video_stream_url
+        target_stream = video_stream_url or stream_url
 
         # Check whether streamer facecam exists in this video
         face_info = {"has_face": False}
         if layout == "split":
             face_info = detect_facecam_in_stream(target_stream, start_time + 1.5)
 
-        # Filter graph based on layout & facecam detection
+        # Full HD 1080x1920 Filter graph based on layout & facecam detection
         if layout == "split":
             if face_info.get("has_face"):
-                # Streamer Facecam IS present: tightly frame and zoom into the streamer's face!
                 fx = face_info["x"]
                 fy = face_info["y"]
                 fw = face_info["w"]
@@ -415,52 +433,71 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 orig_w = face_info.get("orig_w", 1920)
                 orig_h = face_info.get("orig_h", 1080)
 
-                # Head and shoulders framing: facecam fills the 720x520 upper section prominently
+                # Head and shoulders framing: facecam fills the 1080x780 upper section prominently
                 cam_crop_h = int(fh * 2.6)
-                cam_crop_w = int(cam_crop_h * (720.0 / 520.0))
+                cam_crop_w = int(cam_crop_h * (1080.0 / 780.0))
                 cam_crop_w = max(cam_crop_w, int(orig_w * 0.20))
-                cam_crop_w = min(cam_crop_w, int(orig_w * 0.40))
-                cam_crop_h = int(cam_crop_w * (520.0 / 720.0))
+                cam_crop_w = min(cam_crop_w, int(orig_w * 0.45))
+                cam_crop_h = int(cam_crop_w * (780.0 / 1080.0))
 
                 crop_x = max(0, min(orig_w - cam_crop_w, int(fx + fw/2 - cam_crop_w/2)))
                 crop_y = max(0, min(orig_h - cam_crop_h, int(fy + fh/2 - cam_crop_h/2)))
 
-                cam_filter = f"crop={cam_crop_w}:{cam_crop_h}:{crop_x}:{crop_y},scale=720:520"
-                print(f"[VideoEngine] Framing streamer facecam: {cam_filter}")
+                cam_filter = f"crop={cam_crop_w}:{cam_crop_h}:{crop_x}:{crop_y},scale=1080:780"
+                print(f"[VideoEngine] Framing 1080p streamer facecam: {cam_filter}")
 
                 filter_complex = (
                     "[0:v]split=2[cam_src][game_src];"
                     f"[cam_src]{cam_filter}[cam];"
-                    "[game_src]scale=720:405[game];"
-                    f"color=c=#0B0C10:s=720x1280:d={duration}[bg];"
+                    "[game_src]scale=1080:608[game];"
+                    f"color=c=#0B0C10:s=1080x1920:d={duration}[bg];"
                     "[bg][cam]overlay=0:0:shortest=1[bg_cam];"
-                    f"[bg_cam][game]overlay=0:525:shortest=1{srt_filter}[outv]"
+                    f"[bg_cam][game]overlay=0:788:shortest=1{srt_filter}[outv]"
                 )
             else:
-                # User requirement: "if there is no streamer face cam in the clip then no need of 2 sections in the clip"
-                print("[VideoEngine] No streamer facecam found — rendering unified single-section 9:16 short.")
+                # Unified single-section 1080p 9:16 short
+                print("[VideoEngine] No streamer facecam found — rendering unified single-section 1080p short.")
                 filter_complex = (
                     "[0:v]split=2[bg][fg];"
-                    "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=25:5[bg_blurred];"
-                    "[fg]scale=720:405[fg_scaled];"
-                    f"[bg_blurred][fg_scaled]overlay=0:(1280-405)/2{srt_filter}[outv]"
+                    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg_blurred];"
+                    "[fg]scale=1080:608[fg_scaled];"
+                    f"[bg_blurred][fg_scaled]overlay=0:(1920-608)/2{srt_filter}[outv]"
                 )
         elif layout == "blur":
             filter_complex = (
                 "[0:v]split=2[bg][fg];"
-                "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg_blurred];"
-                "[fg]scale=720:405[fg_scaled];"
-                f"[bg_blurred][fg_scaled]overlay=0:(1280-405)/2{srt_filter}[outv]"
+                "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg_blurred];"
+                "[fg]scale=1080:608[fg_scaled];"
+                f"[bg_blurred][fg_scaled]overlay=0:(1920-608)/2{srt_filter}[outv]"
             )
         elif layout == "fit":
-            filter_complex = f"scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black{srt_filter}[outv]"
+            filter_complex = f"scale=1080:-1,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black{srt_filter}[outv]"
         else: # Default: 'crop'
-            filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280{srt_filter}[outv]"
+            filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920:flags=lanczos{srt_filter}[outv]"
 
         encoder_flags = get_video_encoder_flags()
 
         # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement
-        if stream_url:
+        if video_stream_url and audio_stream_url:
+            cmd = [
+                FFMPEG_PATH,
+                "-y",
+                "-ss", str(start_time),
+                "-i", video_stream_url,
+                "-ss", str(start_time),
+                "-i", audio_stream_url,
+                "-t", str(duration),
+                "-filter_complex", filter_complex,
+                "-map", "[outv]",
+                "-map", "1:a?",
+                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                *encoder_flags,
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-movflags", "+faststart",
+                output_path
+            ]
+        elif stream_url:
             cmd = [
                 FFMPEG_PATH,
                 "-y",
@@ -473,7 +510,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
                 *encoder_flags,
                 "-c:a", "aac",
-                "-b:a", "128k",
+                "-b:a", "192k",
                 "-movflags", "+faststart",
                 output_path
             ]
@@ -483,16 +520,14 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-y",
                 "-ss", str(start_time),
                 "-i", video_stream_url,
-                "-ss", str(start_time),
-                "-i", audio_stream_url if audio_stream_url else video_stream_url,
                 "-t", str(duration),
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
-                "-map", "1:a?",
+                "-map", "0:a?",
                 "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
                 *encoder_flags,
                 "-c:a", "aac",
-                "-b:a", "128k",
+                "-b:a", "192k",
                 "-movflags", "+faststart",
                 output_path
             ]
