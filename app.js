@@ -127,7 +127,7 @@ async function analyzeVideo() {
   document.getElementById('studioSection').style.display = 'none';
   document.getElementById('processingSection').style.display = 'flex';
   animateProcessing();
-  setProcStatus('Analyzing video & finding streamer moments…');
+  setProcStatus('Analyzing video & finding key content moments…');
 
   // Candidate endpoints (prefer Render backend, fallback to relative /api/analyze)
   const endpoints = [
@@ -154,7 +154,7 @@ async function analyzeVideo() {
         if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
           setProcStatus('Done! Loading Klap studio…');
           displayStudio(data.video, data.clips);
-          showToast('✅ Viral clips extracted with real streamer subtitles!');
+          showToast('✅ Meaningful content clips extracted with titles!');
           return;
         }
       }
@@ -163,11 +163,11 @@ async function analyzeVideo() {
     }
   }
 
-  // ── FAST FALLBACK: Real YT metadata via oEmbed + Hinglish Streamer Clips ─────
-  setProcStatus('Generating viral Hinglish clips…');
+  // ── FAST FALLBACK: Real YT metadata via oEmbed + Content-Focused Clips ─────
+  setProcStatus('Generating content-focused viral clips…');
 
-  let metaTitle = videoId ? `Gaming Stream (${videoId})` : 'Gaming Stream';
-  let metaAuthor = 'Streamer';
+  let metaTitle = videoId ? `Video (${videoId})` : 'Video Content';
+  let metaAuthor = 'Creator';
   let metaDur = 600;
 
   if (videoId) {
@@ -184,19 +184,12 @@ async function analyzeVideo() {
     } catch (_) {}
   }
 
+  const topic = extractContentTopic(metaTitle);
   const placeholderClips = [
-    makeHinglishClip(videoId, metaTitle, 1, 15, 52,
-      "Chat dekho mere haath literally kaanp rahe hain abhi! Agar yeh jump miss ho gaya pura speedrun khatam. Teen, do, ek... BHAI KAR DIYA! RECORD TOD DIYA! LET'S GOOO! 🔥"
-    ),
-    makeHinglishClip(videoId, metaTitle, 2, 65, 102,
-      "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT! ⚡"
-    ),
-    makeHinglishClip(videoId, metaTitle, 3, 130, 168,
-      "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko pehle spectate karte hain... bhai are you serious?! 🤯"
-    ),
-    makeHinglishClip(videoId, metaTitle, 4, 210, 245,
-      "Zone shrink ho raha hai aur pura squad rush kar raha hai! Smoke daal smoke daal! Medkit laga raha hu... chalo chalo push karo abhi sab khatam! 💣"
-    )
+    makeContentClip(videoId, metaTitle, topic, 1, 15, 52),
+    makeContentClip(videoId, metaTitle, topic, 2, 65, 105),
+    makeContentClip(videoId, metaTitle, topic, 3, 130, 172),
+    makeContentClip(videoId, metaTitle, topic, 4, 210, 248)
   ];
 
   displayStudio({
@@ -209,17 +202,32 @@ async function analyzeVideo() {
     duration_formatted: '10:00'
   }, placeholderClips);
 
-  showToast('⚡ Clips ready! Click Play to watch with Hinglish subtitles.');
+  showToast('⚡ Content clips ready! Click to preview and render on your GPU.');
 }
 
-function makeHinglishClip(videoId, title, rank, start, end, hinglishDialogue) {
+function extractContentTopic(title) {
+  if (!title) return "This Topic";
+  const clean = title.replace(/[^\w\s-]/g, '').trim();
+  const words = clean.split(/\s+/).filter(w => w.length > 2 && !/^(video|full|stream|live|episode|podcast|part|with|from|the|and|official|clip|highlight|gameplay)$/i.test(w));
+  return words.slice(0, 4).join(' ') || "This Key Concept";
+}
+
+function makeContentClip(videoId, metaTitle, topic, rank, start, end) {
   const dur = end - start;
   const titles = [
-    "Bhai Yeh Kya Clutch Tha 🤯",
-    "Chat Dekho Yeh Kya Ho Gaya 🔥",
-    "Streamer Reaction: Record Tod Diya ⚡",
-    "Yaar Tu Believe Nahi Karega 😱"
+    `The Core Truth About ${topic} 🧠`,
+    `Why ${topic} Changes Everything 💡`,
+    `The Exact Moment Everything Shifted ⚡`,
+    `What Nobody Realizes About ${topic} 🎯`
   ];
+  const hooks = [
+    `The biggest realization from ${topic}…`,
+    `Why most people get ${topic} completely wrong…`,
+    `The major turning point in ${topic}…`,
+    `The final critical takeaway about ${topic}…`
+  ];
+  const badges = ['🔥 Core Highlight', '💡 Key Insight', '⚡ Turning Point', '🎯 Main Takeaway'];
+
   return {
     id: `clip_${rank}`,
     rank,
@@ -228,13 +236,13 @@ function makeHinglishClip(videoId, title, rank, start, end, hinglishDialogue) {
     duration: fmtSec(dur),
     duration_sec: dur,
     title: titles[(rank - 1) % titles.length],
-    hook: hinglishDialogue.slice(0, 50) + "…",
+    hook: hooks[(rank - 1) % hooks.length],
     virality_score: 98 - (rank - 1) * 3,
-    virality_badge: '🔥 Viral Hit',
-    tags: ['Streamer Voice', 'Clutch Moment', 'High Energy'],
-    full_text: hinglishDialogue,
-    has_real_captions: true,
-    subtitles: genWordSubs(start, end, hinglishDialogue)
+    virality_badge: badges[(rank - 1) % badges.length],
+    tags: ['Key Insight', 'Deep Dive', 'High Retention'],
+    full_text: hooks[(rank - 1) % hooks.length],
+    has_real_captions: false,
+    subtitles: []
   };
 }
 
@@ -751,7 +759,7 @@ function downloadSRT() {
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${activeClip.id}_hinglish_captions.srt`;
+  a.download = `${activeClip.id}_captions.srt`;
   a.click();
   showToast('✓ SRT captions downloaded!');
 }

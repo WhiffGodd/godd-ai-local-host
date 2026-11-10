@@ -224,13 +224,19 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                desc = info.get("description") or ""
+                chapters = info.get("chapters") or []
+                if not chapters:
+                    chapters = extract_chapters_from_description(desc)
+
                 return {
                     "title": info.get("title", f"Video {video_id}"),
                     "author": info.get("uploader", info.get("channel", "Creator")),
                     "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
                     "duration": info.get("duration", 600),
-                    "description": (info.get("description") or "")[:300],
-                    "view_count": info.get("view_count", 150000)
+                    "description": desc[:500],
+                    "view_count": info.get("view_count", 150000),
+                    "chapters": chapters
                 }
         except Exception as e:
             print(f"[Metadata] yt-dlp warning: {e}, falling back to oEmbed")
@@ -422,18 +428,64 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
         
     return subtitles
 
-def analyze_virality_and_cut_clips(transcript: list, video_duration: float, title: str) -> list:
+def analyze_virality_and_cut_clips(transcript: list, video_duration: float, title: str, chapters: list = None) -> list:
     """
-    AI Virality Detection Engine:
-    Identifies high-retention 30-60 second clips using:
-    - First 3-second hook strength
-    - Sentiment and emotional arousal keywords
-    - Speech density (WPM)
-    - Pacing and climax conclusion
+    AI Content & Virality Detection Engine (Klap-style):
+    Identifies high-value, meaningful clips using:
+    - Creator chapter markers & structured topics
+    - Questions, insights, revelations & storytelling arcs
+    - Spoken speech density & complete narrative thoughts
     """
+    # 1. PRIORITY: If creator provided chapter timestamps, use these real curated content moments!
+    if chapters and len(chapters) >= 2:
+        ignore_words = ["intro", "outro", "sponsor", "welcome", "subscribe", "disclaimer", "patreon", "merch", "credits"]
+        filtered_chapters = [
+            ch for ch in chapters 
+            if not any(w in str(ch.get("title", "")).lower() for w in ignore_words)
+        ]
+        if not filtered_chapters:
+            filtered_chapters = chapters
+            
+        meaningful_clips = []
+        for idx, ch in enumerate(filtered_chapters[:5]):
+            start_time = float(ch.get("time", ch.get("start_time", 0)))
+            ch_title = str(ch.get("title", f"Key Moment #{idx+1}")).strip()
+            
+            clip_dur = 38.0
+            if start_time + clip_dur > video_duration:
+                start_time = max(0.0, video_duration - clip_dur)
+            end_time = min(video_duration, start_time + clip_dur)
+            
+            # Words spoken during this chapter window
+            ch_words = [s["text"] for s in (transcript or []) if s.get("start", 0) >= start_time and s.get("end", 0) <= end_time]
+            full_text = " ".join(ch_words) if ch_words else ch_title
+            
+            clip_title = generate_meaningful_content_title(clip_text=full_text, video_title=title, chapter_title=ch_title, rank=idx+1)
+            
+            meaningful_clips.append({
+                "id": f"clip_{idx+1}",
+                "rank": idx + 1,
+                "title": clip_title,
+                "hook": ch_title,
+                "start": round(start_time, 1),
+                "end": round(end_time, 1),
+                "duration": format_duration(clip_dur),
+                "duration_sec": clip_dur,
+                "virality_score": 98 - idx * 2,
+                "virality_badge": "🔥 Core Highlight" if idx == 0 else "⚡ Key Insight",
+                "viral_reasons": ["Creator Chapter Topic", f"Content: {ch_title[:32]}"],
+                "tags": ["Key Chapter", "Deep Dive", "Must Watch"],
+                "full_text": full_text,
+                "subtitles": [],
+                "has_real_captions": bool(ch_words)
+            })
+            
+        if meaningful_clips:
+            return meaningful_clips
+
     if not transcript or len(transcript) < 5:
-        # If no transcript was fetched (e.g., auto-captions off), synthesize high-potential segments based on video length
-        return synthesize_viral_clips(video_duration, title)
+        # If no transcript was fetched (e.g., auto-captions off), synthesize content-focused segments based on video title
+        return synthesize_viral_clips(video_duration, title, chapters=chapters)
         
     target_clip_length = 40.0 # ~40 seconds per short
     min_clip_length = 25.0
@@ -510,10 +562,9 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     formatted = []
     for idx, clip in enumerate(selected_clips):
         words = clip["text"].split()
-        subtitles = generate_word_subtitles(clip["start"], clip["end"], clip["text"])
         
-        # Generate punchy short title
-        viral_title = generate_viral_title(clip["hook"], clip["tags"], idx + 1)
+        # Generate punchy, content-focused short title based on actual spoken topic
+        viral_title = generate_meaningful_content_title(clip_text=clip["text"], video_title=title, rank=idx + 1)
         
         formatted.append({
             "id": f"clip_{idx+1}",
@@ -529,108 +580,184 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "viral_reasons": clip["reasons"],
             "tags": clip["tags"],
             "full_text": clip["text"],
-            "subtitles": subtitles,
+            "subtitles": [],
             "has_real_captions": True
         })
         
     return formatted
 
+# Content and insight keywords for podcast, education, tech, and storytelling
+CONTENT_INSIGHT_KEYWORDS = [
+    "realize", "realized", "truth", "secret", "mistake", "system", "strategy",
+    "problem", "solution", "framework", "lesson", "rule", "future", "result",
+    "reason", "explain", "understand", "difference", "concept", "breakdown",
+    "money", "dollar", "percent", "growth", "build", "company", "career",
+    "code", "algorithm", "learn", "teach", "advice", "success", "fail"
+]
+
 def score_segment(start_time: float, duration: float, text: str, first_phrase: str) -> tuple:
-    """Calculate 0-100 Virality Score prioritizing streamer microphone commentary over in-game narrative."""
+    """Calculate 0-100 Virality Score prioritizing meaningful content, curiosity hooks, and clarity."""
     lower_text = text.lower()
     lower_hook = first_phrase.lower()
     
-    score = 70.0 # Base score
+    score = 72.0 # Base score
     reasons = []
     tags = []
     
-    # 1. STREAMER MIC VOICE PRIORITY (Massive Boost for Streamer Commentary)
-    streamer_matches = [w for w in STREAMER_KEYWORDS if w in lower_text or w in lower_hook]
-    if streamer_matches:
-        score += 25.0
-        reasons.append(f"Streamer mic commentary & live reaction ('{streamer_matches[0]}')")
-        tags.append("Streamer Voice")
-        tags.append("Live Clutch")
-    
-    # 2. IN-GAME SCRIPTED NARRATIVE SUPPRESSION
-    in_game_matches = [w for w in IN_GAME_GAMEPLAY_BLACKLIST if w in lower_text]
-    if in_game_matches and not streamer_matches:
-        score -= 28.0 # Heavily deprioritize in-game NPC/cutscene dialogue
-    
-    # 3. Hook Strength in first 3-5 seconds
-    hook_matches = [w for w in HOOK_KEYWORDS if w in lower_hook]
+    # 1. Spoken Questions & Curiosity Loops in First 4 Seconds
+    if "?" in lower_hook or any(lower_hook.startswith(q) for q in ["why ", "how ", "what if ", "can we ", "is it ", "have you "]):
+        score += 15.0
+        reasons.append("Opening curiosity question grabs immediate retention")
+        tags.append("Curiosity Loop")
+    elif any(char in lower_hook for char in ["?", "!"]):
+        score += 8.0
+        reasons.append("Opening phrase creates tension")
+        tags.append("Strong Hook")
+
+    # 2. Viral & Curiosity Hook Keywords
+    hook_matches = [w for w in HOOK_KEYWORDS if w in lower_hook or w in lower_text[:80]]
     if hook_matches:
         score += 12.0
-        reasons.append(f"Instant curiosity hook: '{hook_matches[0]}'")
+        reasons.append(f"High-impact hook keyword: '{hook_matches[0]}'")
         if "Strong Hook" not in tags:
             tags.append("Strong Hook")
-    elif any(char in lower_hook for char in ["?", "!"]):
-        score += 7.0
-        reasons.append("Opening reaction creates curiosity")
-        if "Curiosity Loop" not in tags:
-            tags.append("Curiosity Loop")
-    else:
-        score += 3.0
-        
-    # 4. Emotional and High Energy keywords
+
+    # 3. Content Insight & Value Keywords (Podcasts, Tech, Lessons, Stories)
+    insight_matches = [w for w in CONTENT_INSIGHT_KEYWORDS if w in lower_text]
+    if insight_matches:
+        score += 10.0
+        reasons.append(f"Substantive insight topic ('{insight_matches[0]}')")
+        tags.append("Key Insight")
+
+    # 4. Streamer & Live Commentary Excitement
+    streamer_matches = [w for w in STREAMER_KEYWORDS if w in lower_text or w in lower_hook]
+    if streamer_matches:
+        score += 10.0
+        reasons.append(f"High-energy live reaction ('{streamer_matches[0]}')")
+        tags.append("Streamer Voice")
+
+    # 5. Emotional and High Energy Keywords
     energy_matches = [w for w in HIGH_ENERGY_WORDS if w in lower_text]
     if energy_matches:
-        score += 8.0
-        reasons.append(f"High energy reaction ('{energy_matches[0]}')")
-        tags.append("High Energy")
-        
-    # 5. Humor / Entertainment triggers
+        score += 6.0
+        reasons.append(f"Peak energy moment ('{energy_matches[0]}')")
+        if "High Energy" not in tags:
+            tags.append("High Energy")
+
+    # 6. Humor & Banter Triggers
     humor_matches = [w for w in HUMOR_KEYWORDS if w in lower_text]
     if humor_matches:
-        score += 6.0
+        score += 5.0
         reasons.append("Spontaneous humor & banter")
         tags.append("Entertaining")
-        
-    # 6. Pacing & Speech Density (Words Per Minute)
+
+    # 7. Speech Cadence & Density (Words Per Minute)
     word_count = len(text.split())
     wpm = (word_count / max(1.0, duration)) * 60
-    if 130 <= wpm <= 190:
+    if 120 <= wpm <= 185:
         score += 5.0
-        reasons.append(f"Punchy streamer pacing ({int(wpm)} WPM)")
-    elif wpm > 190:
+        reasons.append(f"Optimal speech cadence ({int(wpm)} WPM)")
+    elif wpm > 185:
         score += 3.0
-        reasons.append("Fast-paced live callouts")
-    else:
-        score += 1.0
-        
-    # 7. Optimal Shorts/Reels duration (30s - 45s)
-    if 30 <= duration <= 50:
+
+    # 8. Ideal Short Duration (30s - 45s)
+    if 30 <= duration <= 48:
         score += 4.0
         tags.append("Algorithm Pick")
-        
-    final_score = max(50, min(99, int(round(score))))
+
+    final_score = max(55, min(99, int(round(score))))
     
-    # Extract concise hook
+    # Extract clean hook
     clean_hook = first_phrase.strip().capitalize()
     if len(clean_hook) > 60:
         clean_hook = clean_hook[:57] + "..."
         
     if not tags:
-        tags = ["Streamer Voice", "Highlight"]
+        tags = ["Key Insight", "Highlight"]
         
     return final_score, reasons[:3], tags[:3], clean_hook
 
-def generate_viral_title(hook: str, tags: list, rank: int) -> str:
-    """Generate high-CTR TikTok/Reels headline in Hinglish focusing on streamer commentary."""
-    emojis = ["🤯", "🔥", "🚀", "😱", "⚠️", "⚡"]
+def extract_meaningful_topic_phrase(text: str) -> str:
+    """Extract the most prominent concept or noun phrase from spoken clip text."""
+    if not text:
+        return ""
+    stopwords = {
+        'the', 'this', 'that', 'these', 'those', 'what', 'when', 'where', 'which', 'who',
+        'whom', 'whose', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most',
+        'other', 'some', 'such', 'than', 'too', 'very', 'can', 'will', 'just', 'should',
+        'now', 'also', 'into', 'only', 'other', 'then', 'them', 'their', 'there', 'they',
+        'have', 'been', 'were', 'being', 'having', 'with', 'from', 'about', 'like', 'know',
+        'think', 'people', 'thing', 'things', 'going', 'gonna', 'wanna', 'really', 'actually',
+        'literally', 'basically', 'kind', 'sort', 'yeah', 'okay', 'right', 'well', 'said',
+        'want', 'need', 'look', 'make', 'take', 'come', 'give', 'tell', 'even', 'much'
+    }
+    clean = re.sub(r'[^\w\s]', ' ', text).lower()
+    words = [w for w in clean.split() if len(w) > 3 and w not in stopwords]
+    if not words:
+        return ""
+    counts = {}
+    for w in words:
+        counts[w] = counts.get(w, 0) + 1
+    sorted_words = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    top_words = [w[0].capitalize() for w in sorted_words[:2]]
+    return " ".join(top_words)
+
+def generate_meaningful_content_title(clip_text: str = "", video_title: str = "", chapter_title: str = "", rank: int = 1) -> str:
+    """Generate meaningful, high-retention content titles that reflect the actual topic and substance."""
+    emojis = ["💡", "🧠", "⚡", "🎯", "🔥", "🚀", "🤯", "💎"]
     emoji = emojis[(rank - 1) % len(emojis)]
-    
-    clean_hook = hook.replace('"', '').replace("'", '').strip()
-    if len(clean_hook) > 40:
-        words = clean_hook.split()[:6]
-        clean_hook = " ".join(words)
-        
+
+    # 1. Use real creator chapter title if present
+    if chapter_title and len(chapter_title) > 3:
+        clean = re.sub(r'^\d+[\.\:\-]?\s*', '', chapter_title).strip()
+        clean = re.sub(r'^(Topic|Part|Chapter|Step)\s*\d*[\:\-]?\s*', '', clean, flags=re.IGNORECASE).strip()
+        if len(clean) > 4:
+            return f"{clean[:45]} {emoji}"
+
+    # 2. Extract opening question or compelling hook statement from spoken text
+    if clip_text:
+        # Check for direct questions in the clip
+        questions = re.findall(r'([^.!?\n]+(?:\?))', clip_text)
+        for q in questions:
+            q_clean = q.strip()
+            q_clean = re.sub(r'^(so|and|but|like|you know|honestly|actually)\s*,?\s*', '', q_clean, flags=re.IGNORECASE).strip()
+            if 15 <= len(q_clean) <= 55:
+                words = q_clean.split()
+                title_cased = " ".join(w.capitalize() if not w.isupper() else w for w in words)
+                return f"{title_cased} {emoji}"
+
+        # Check for strong declarative hook sentences
+        sentences = re.split(r'[\.\!\?]\s+', clip_text.strip())
+        hook_starters = [
+            'the secret is', 'the real reason', 'why nobody', 'how to', 'the biggest mistake',
+            'what if', 'the truth about', 'this is how', 'if you want', 'the problem with',
+            'i realized that', 'never make this', 'stop doing this', 'the only way'
+        ]
+        for s in sentences[:4]:
+            s_clean = s.strip()
+            s_lower = s_clean.lower()
+            for hs in hook_starters:
+                if hs in s_lower and 15 <= len(s_clean) <= 55:
+                    words = s_clean.split()
+                    title_cased = " ".join(w.capitalize() if not w.isupper() else w for w in words)
+                    return f"{title_cased} {emoji}"
+
+    # 3. Extract prominent concept from this specific clip text
+    clip_concept = extract_meaningful_topic_phrase(clip_text)
+
+    # 4. Derive general topic from video title as fallback
+    clean_v = re.sub(r'[^\w\s-]', '', video_title or '').strip()
+    words = [w for w in clean_v.split() if len(w) > 2 and w.lower() not in ['video', 'full', 'stream', 'live', 'episode', 'podcast', 'part', 'with', 'from', 'the', 'and', 'official', 'clip', 'highlight']]
+    general_topic = " ".join(words[:3]) if words else "This Insight"
+
+    topic = clip_concept if clip_concept and len(clip_concept) > 4 else general_topic
+
     templates = [
-        f"Bhai Yeh Kya Clutch Tha {emoji}",
-        f"Chat Dekho Yeh Kya Ho Gaya {emoji}",
-        f"{clean_hook}... End Tak Ruk Jaa {emoji}",
-        f"Streamer Reaction: Record Tod Diya {emoji}",
-        f"Yaar Tu Believe Nahi Karega {emoji}"
+        f"The Truth About {topic} 🧠",
+        f"Why {topic} Changes Everything 💡",
+        f"The Exact Strategy Behind {topic} ⚡",
+        f"What Nobody Realizes About {topic} 🎯",
+        f"The Turning Point In {topic} 🚀"
     ]
     return templates[(rank - 1) % len(templates)]
 
@@ -639,71 +766,49 @@ def format_duration(seconds: float) -> str:
     secs = int(seconds % 60)
     return f"{mins}:{secs:02d}"
 
-def synthesize_viral_clips(video_duration: float, title: str) -> list:
-    """
-    Intelligent timestamp cutting when YouTube auto-captions are not available.
-    Cuts high-potential segments across the video based on duration without fabricating fake text.
-    """
+def synthesize_viral_clips(video_duration: float, title: str, chapters: list = None) -> list:
+    """Intelligent timestamp cutting producing meaningful, content-focused clips based on video topic."""
     video_dur = max(60.0, float(video_duration))
-    clean_title = re.sub(r'[^\w\s-]', '', title).strip() or "Live Stream Highlight"
-    short_title = clean_title[:32]
-    
-    # 4 high-retention windows across the video with streamer Hinglish dialogues
+    clean_v = re.sub(r'[^\w\s-]', '', title or '').strip()
+    words = [w for w in clean_v.split() if len(w) > 2 and w.lower() not in ['video', 'full', 'stream', 'live', 'episode', 'podcast', 'part', 'with', 'from', 'the', 'and', 'official', 'clip']]
+    topic = " ".join(words[:4]) if words else "This Insight"
+
     intervals = [
-        {
-            "offset": 0.08, "dur": 35.0, "rank": 1, "score": 98, "tag": "Opening Hook",
-            "title": f"Bhai Yeh Kya Clutch Tha 🤯",
-            "hook": "Chat dekho mere haath literally kaanp rahe hain abhi…",
-            "dialogue": "Chat dekho mere haath literally kaanp rahe hain abhi! Agar yeh clutch miss ho gaya pura match khatam. Teen, do, ek... BHAI KYA MARA HAI! RECORD TOD DIYA! LET'S GOOO! 🔥"
-        },
-        {
-            "offset": 0.32, "dur": 38.0, "rank": 2, "score": 95, "tag": "Peak Action",
-            "title": f"Streamer Reaction: Record Tod Diya ⚡",
-            "hook": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush…",
-            "dialogue": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT! ⚡"
-        },
-        {
-            "offset": 0.58, "dur": 40.0, "rank": 3, "score": 92, "tag": "Climax Moment",
-            "title": f"Chat Dekho Yeh Kya Ho Gaya 🔥",
-            "hook": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat?…",
-            "dialogue": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko pehle spectate karte hain... bhai are you serious?! 🤯"
-        },
-        {
-            "offset": 0.80, "dur": 32.0, "rank": 4, "score": 89, "tag": "Highlight Finale",
-            "title": f"Yaar Tu Believe Nahi Karega 😱",
-            "hook": "Zone shrink ho raha hai aur pura squad rush kar raha hai!…",
-            "dialogue": "Zone shrink ho raha hai aur pura squad rush kar raha hai! Smoke daal smoke daal! Medkit laga raha hu... chalo chalo push karo abhi sab khatam! 💣"
-        }
+        {"offset": 0.12, "dur": 38.0, "rank": 1, "score": 98, "badge": "🔥 Viral Hit",
+         "title": f"The Core Truth About {topic} 🧠",
+         "hook": f"The biggest realization from {topic}…"},
+        {"offset": 0.35, "dur": 40.0, "rank": 2, "score": 95, "badge": "💡 Core Insight",
+         "title": f"Why {topic} Changes Everything 💡",
+         "hook": f"Why most people get {topic} completely wrong…"},
+        {"offset": 0.60, "dur": 42.0, "rank": 3, "score": 92, "badge": "⚡ Turning Point",
+         "title": f"The Exact Moment Everything Clicked ⚡",
+         "hook": f"The major turning point in {topic}…"},
+        {"offset": 0.82, "dur": 35.0, "rank": 4, "score": 89, "badge": "🎯 Critical Takeaway",
+         "title": f"What Nobody Realizes About {topic} 🎯",
+         "hook": f"The final crucial lesson from {topic}…"}
     ]
-    
+
     formatted = []
     for item in intervals:
         start_time = round(video_dur * item["offset"], 1)
         end_time = round(min(video_dur - 1, start_time + item["dur"]), 1)
         actual_dur = round(end_time - start_time, 1)
-        
-        clip_title = item["title"]
-        hook_text = item["hook"]
-        subtitle_text = item["dialogue"]
-        
-        subtitles = generate_word_subtitles(start_time, end_time, subtitle_text)
-        
+
         formatted.append({
             "id": f"clip_{item['rank']}",
             "rank": item["rank"],
-            "title": clip_title,
-            "hook": hook_text,
+            "title": item["title"],
+            "hook": item["hook"],
             "start": start_time,
             "end": end_time,
             "duration": format_duration(actual_dur),
             "duration_sec": actual_dur,
             "virality_score": item["score"],
-            "virality_badge": "🔥 Viral Hit" if item["score"] >= 92 else "⚡ High Potential",
-            "viral_reasons": ["High engagement window", f"Paced {actual_dur}s short duration"],
-            "tags": [item["tag"], "Short"],
-            "full_text": subtitle_text,
-            "subtitles": subtitles,
+            "virality_badge": item["badge"],
+            "viral_reasons": ["High engagement window", f"Topic: {topic[:30]}"],
+            "tags": ["Key Insight", "Must Watch", "Algorithm Pick"],
+            "full_text": item["hook"],
+            "subtitles": [],
             "has_real_captions": False
         })
-        
     return formatted

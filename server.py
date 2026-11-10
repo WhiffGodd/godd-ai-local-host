@@ -301,7 +301,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             clips = analyze_virality_and_cut_clips(
                 transcript=transcript,
                 video_duration=meta.get("duration", 600),
-                title=meta.get("title", "")
+                title=meta.get("title", ""),
+                chapters=meta.get("chapters", [])
             )
 
             # Response returned immediately — fast & reliable (2s response time)
