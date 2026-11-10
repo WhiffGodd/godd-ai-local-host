@@ -288,6 +288,7 @@ def download_and_clip_video(
     if not math.isfinite(start_time) or not math.isfinite(duration) or start_time < 0 or duration <= 0:
         raise ValueError("Clip start must be non-negative and duration must be positive")
 
+    owns_output = output_path is None
     if not output_path:
         tmp_dir = os.path.join(tempfile.gettempdir(), "godd_ai_clips")
         os.makedirs(tmp_dir, exist_ok=True)
@@ -434,8 +435,14 @@ def download_and_clip_video(
         return output_path
 
     except Exception as e:
+        if owns_output:
+            for suffix in ("", ".captions.json", ".srt"):
+                try:
+                    os.remove(output_path + suffix)
+                except OSError:
+                    pass
         print(f"[VideoEngine] Error rendering video: {e}")
-        raise e
+        raise
 
     finally:
         if srt_temp_file and os.path.exists(srt_temp_file):
