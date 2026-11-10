@@ -228,11 +228,13 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             start_time = float(query.get("start", [0])[0])
             duration = float(query.get("duration", [30])[0])
             layout = query.get("layout", ["split"])[0]
+            title = query.get("title", [""])[0]
             payload = {
                 "url": url,
                 "start": start_time,
                 "duration": duration,
                 "layout": layout,
+                "title": title,
                 "stream": True,
                 "subtitles": []
             }
@@ -312,6 +314,12 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 chapters=meta.get("chapters", [])
             )
 
+            # Check whether video is gaming/streamer with facecam or general content/tutorial
+            title_lower = (meta.get("title") or "").lower()
+            author_lower = (meta.get("author") or "").lower()
+            gaming_indicators = ["stream", "live", "gaming", "valorant", "gta", "minecraft", "bgmi", "clutch", "facecam", "webcam", "reaction", "playthrough"]
+            has_facecam = any(ind in title_lower or ind in author_lower for ind in gaming_indicators)
+
             # Response returned immediately — fast & reliable (2s response time)
             response_data = {
                 "success": True,
@@ -323,7 +331,9 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "thumbnail": meta.get("thumbnail", f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"),
                     "duration": meta.get("duration", 600),
                     "duration_formatted": f"{int(meta.get('duration', 600) // 60)}:{int(meta.get('duration', 600) % 60):02d}",
-                    "view_count": meta.get("view_count", 250000)
+                    "view_count": meta.get("view_count", 250000),
+                    "has_facecam": has_facecam,
+                    "recommended_layout": "split" if has_facecam else "blur"
                 },
                 "clips": clips
             }
@@ -368,12 +378,22 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 subtitles=subtitles
             )
 
-            # Stream the rendered MP4 file directly to the client
+            # Stream the rendered MP4 file directly to the client with clean title filename
             if payload.get("stream", True):
                 file_size = os.path.getsize(rendered_path)
+                raw_title = payload.get("title", "").strip()
+                if raw_title:
+                    clean = re.sub(r'[^\w\s-]', '', raw_title).strip()
+                    clean_name = re.sub(r'[-\s]+', '_', clean).strip('_')[:55]
+                else:
+                    clean_name = ""
+                if not clean_name:
+                    clean_name = f"clip_{int(start_time)}s"
+                download_filename = f"{clean_name}.mp4"
+
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp4")
-                self.send_header("Content-Disposition", f'attachment; filename="godd_ai_clip_{int(start_time)}.mp4"')
+                self.send_header("Content-Disposition", f'attachment; filename="{download_filename}"')
                 self.send_header("Content-Length", str(file_size))
                 self.end_headers()
                 with open(rendered_path, "rb") as f:

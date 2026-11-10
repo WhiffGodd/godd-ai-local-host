@@ -237,13 +237,68 @@ def format_srt_timestamp(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
     return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
+FACE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet.onnx")
+
+def detect_facecam_in_stream(stream_url: str, timestamp: float = 10.0) -> dict:
+    """
+    Sample 1 frame from the video stream using FFmpeg image2pipe and detect if a streamer
+    facecam exists using OpenCV's fast YuNet face detector.
+    Returns: {"has_face": True/False, "x": int, "y": int, "w": int, "h": int, "orig_w": int, "orig_h": int}
+    """
+    if not stream_url or not os.path.exists(FACE_MODEL_PATH):
+        return {"has_face": False}
+    try:
+        import cv2
+        import numpy as np
+
+        ffmpeg_bin = FFMPEG_PATH or "ffmpeg"
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-ss", str(max(0.0, timestamp)),
+            "-i", stream_url,
+            "-vframes", "1",
+            "-f", "image2pipe",
+            "-vcodec", "png",
+            "-"
+        ]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        out, _ = p.communicate(timeout=6)
+        if not out or len(out) < 1000:
+            return {"has_face": False}
+
+        arr = np.frombuffer(out, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"has_face": False}
+
+        h, w = img.shape[:2]
+        detector = cv2.FaceDetectorYN.create(FACE_MODEL_PATH, "", (w, h), score_threshold=0.55)
+        _, faces = detector.detect(img)
+        if faces is not None and len(faces) > 0:
+            best = max(faces, key=lambda f: float(f[-1]))
+            fx, fy, fw, fh = [int(v) for v in best[:4]]
+            score = float(best[-1])
+            print(f"[FaceCam] Streamer face detected at x={fx}, y={fy}, w={fw}, h={fh} (confidence: {score:.2f})")
+            return {
+                "has_face": True,
+                "x": fx, "y": fy, "w": fw, "h": fh,
+                "orig_w": w, "orig_h": h,
+                "score": score
+            }
+        print("[FaceCam] No streamer facecam detected in video frame.")
+        return {"has_face": False, "orig_w": w, "orig_h": h}
+    except Exception as e:
+        print(f"[FaceCam] Detection notice: {e}")
+        return {"has_face": False}
+
 def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "split", subtitles: list = None, output_path: str = None) -> str:
     """
     Download and render a 9:16 short using FFmpeg.
     Layouts:
-    - 'split': Streamer facecam on top (720x520) + Full 16:9 gameplay below (720x405, 100% visible)
+    - 'split': If streamer facecam is detected -> upper facecam zoomed & centered (720x520) + full 16:9 gameplay below.
+               If NO facecam is detected -> automatically uses unified single-section 9:16 (no duplicate 2 sections).
     - 'crop': Smart center crop to 9:16 (720x1280)
-    - 'blur': Blurred 9:16 background with centered video
+    - 'blur': Blurred 9:16 ambient background with centered 16:9 video
     - 'fit': Fitted 16:9 on 9:16 canvas with clean black bars
     """
     if not output_path:
@@ -263,34 +318,10 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             with open(srt_temp_file, "w", encoding="utf-8") as f:
                 f.write(generate_srt(subtitles, clip_start=start_time))
             esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-            # Position in dedicated subtitle bar below game screen with bold yellow text and black border
             srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=720,PlayResY=1280,FontName=Arial,FontSize=32,Bold=1,PrimaryColour=&H0024BFFB,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=110'"
         except Exception as se:
             print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
             srt_filter = ""
-
-    # Filter graph based on layout (720x1280 vertical resolution for speed & HD quality)
-    if layout == "split":
-        # Streamer Facecam Top (720x520) + Full 16:9 Game Screen in Middle (720x405, 100% visible) + Subtitles below
-        filter_complex = (
-            "[0:v]split=2[cam_src][game_src];"
-            "[cam_src]crop=iw*0.48:ih*0.5:0:0,scale=720:520:force_original_aspect_ratio=increase,crop=720:520[cam];"
-            "[game_src]scale=720:405[game];"
-            f"color=c=#0B0C10:s=720x1280:d={duration}[bg];"
-            "[bg][cam]overlay=0:0:shortest=1[bg_cam];"
-            f"[bg_cam][game]overlay=0:525:shortest=1{srt_filter}[outv]"
-        )
-    elif layout == "blur":
-        filter_complex = (
-            "[0:v]split=2[bg][fg];"
-            "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg_blurred];"
-            "[fg]scale=720:-1[fg_scaled];"
-            f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2{srt_filter}[outv]"
-        )
-    elif layout == "fit":
-        filter_complex = f"scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black{srt_filter}[outv]"
-    else: # Default: 'crop'
-        filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280{srt_filter}[outv]"
 
     # Use yt-dlp to obtain stream URL directly without needing to download gigabytes of long video
     try:
@@ -334,6 +365,66 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
 
         if not stream_url and not video_stream_url:
             raise RuntimeError("Could not find playable video stream URL")
+
+        target_stream = stream_url or video_stream_url
+
+        # Check whether streamer facecam exists in this video
+        face_info = {"has_face": False}
+        if layout == "split":
+            face_info = detect_facecam_in_stream(target_stream, start_time + 1.5)
+
+        # Filter graph based on layout & facecam detection
+        if layout == "split":
+            if face_info.get("has_face"):
+                # Streamer Facecam IS present: tightly frame and zoom into the streamer's face!
+                fx = face_info["x"]
+                fy = face_info["y"]
+                fw = face_info["w"]
+                fh = face_info["h"]
+                orig_w = face_info.get("orig_w", 1920)
+                orig_h = face_info.get("orig_h", 1080)
+
+                # Head and shoulders framing: facecam fills the 720x520 upper section prominently
+                cam_crop_h = int(fh * 2.6)
+                cam_crop_w = int(cam_crop_h * (720.0 / 520.0))
+                cam_crop_w = max(cam_crop_w, int(orig_w * 0.20))
+                cam_crop_w = min(cam_crop_w, int(orig_w * 0.40))
+                cam_crop_h = int(cam_crop_w * (520.0 / 720.0))
+
+                crop_x = max(0, min(orig_w - cam_crop_w, int(fx + fw/2 - cam_crop_w/2)))
+                crop_y = max(0, min(orig_h - cam_crop_h, int(fy + fh/2 - cam_crop_h/2)))
+
+                cam_filter = f"crop={cam_crop_w}:{cam_crop_h}:{crop_x}:{crop_y},scale=720:520"
+                print(f"[VideoEngine] Framing streamer facecam: {cam_filter}")
+
+                filter_complex = (
+                    "[0:v]split=2[cam_src][game_src];"
+                    f"[cam_src]{cam_filter}[cam];"
+                    "[game_src]scale=720:405[game];"
+                    f"color=c=#0B0C10:s=720x1280:d={duration}[bg];"
+                    "[bg][cam]overlay=0:0:shortest=1[bg_cam];"
+                    f"[bg_cam][game]overlay=0:525:shortest=1{srt_filter}[outv]"
+                )
+            else:
+                # User requirement: "if there is no streamer face cam in the clip then no need of 2 sections in the clip"
+                print("[VideoEngine] No streamer facecam found — rendering unified single-section 9:16 short.")
+                filter_complex = (
+                    "[0:v]split=2[bg][fg];"
+                    "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=25:5[bg_blurred];"
+                    "[fg]scale=720:405[fg_scaled];"
+                    f"[bg_blurred][fg_scaled]overlay=0:(1280-405)/2{srt_filter}[outv]"
+                )
+        elif layout == "blur":
+            filter_complex = (
+                "[0:v]split=2[bg][fg];"
+                "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg_blurred];"
+                "[fg]scale=720:405[fg_scaled];"
+                f"[bg_blurred][fg_scaled]overlay=0:(1280-405)/2{srt_filter}[outv]"
+            )
+        elif layout == "fit":
+            filter_complex = f"scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black{srt_filter}[outv]"
+        else: # Default: 'crop'
+            filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280{srt_filter}[outv]"
 
         encoder_flags = get_video_encoder_flags()
 

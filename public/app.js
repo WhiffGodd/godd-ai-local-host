@@ -316,6 +316,13 @@ function displayStudio(video, clips) {
   document.getElementById('processingSection').style.display = 'none';
   document.getElementById('studioSection').style.display = 'block';
 
+  // Layout selection: If no facecam is present, automatically use single-section (no 2 sections)
+  if (video.has_facecam === false) {
+    setLayout('blur');
+  } else {
+    setLayout('split');
+  }
+
   // Select first clip
   if (clips.length > 0) {
     selectClip(clips[0].id);
@@ -632,16 +639,18 @@ async function downloadClip() {
   const startSec = activeClip.start;
   const durSec   = activeClip.duration_sec || Math.round(activeClip.end - activeClip.start);
   const backend  = getBackend();
-  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}`;
+  const clipTitle = activeClip.title || `clip_${Math.round(startSec)}s`;
+  const cleanTitle = clipTitle.replace(/[^\w\s-]/g, '').trim().replace(/[-\s]+/g, '_') || `clip_${Math.round(startSec)}s`;
+  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}`;
 
   // 1. Show modal with immediate direct download link ready
-  setDlProgress('🎬 Rendering 9:16 short on cloud backend…', 18, directDlUrl);
+  setDlProgress(`🎬 Rendering "${clipTitle}"…`, 18, directDlUrl);
 
   // 2. Animate progress smoothly
   let pct = 20;
   const ticker = setInterval(() => {
     pct = Math.min(88, pct + 3);
-    setDlProgress('🎬 FFmpeg is encoding your 9:16 clip… please wait', pct, directDlUrl);
+    setDlProgress(`🎬 FFmpeg is encoding "${clipTitle}"… please wait`, pct, directDlUrl);
   }, 1800);
 
   // 3. Request video stream
@@ -657,6 +666,7 @@ async function downloadClip() {
         start: startSec,
         duration: durSec,
         layout: currentLayout || 'split',
+        title: clipTitle,
         subtitles: [], // SUBTITLES TURNED OFF AS REQUESTED
         stream: true
       }),
@@ -673,15 +683,13 @@ async function downloadClip() {
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        const name = (activeClip.title || activeClip.id || 'clip')
-          .replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        a.download = `godd_ai_${name}.mp4`;
+        a.download = `${cleanTitle}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
         hideDlProgress();
-        showToast('✅ Downloaded your 9:16 short!');
+        showToast(`✅ Downloaded "${cleanTitle}.mp4"!`);
         return;
       }
     }

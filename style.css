@@ -339,11 +339,12 @@ input  { font-family: inherit; outline: none; }
 }
 .cam-preview-feed {
   position: absolute;
-  inset: -15%;
+  inset: -10%;
   background-size: cover;
   background-position: top left;
-  transform: scale(1.6);
-  filter: contrast(1.1) brightness(1.05);
+  transform: scale(2.2);
+  transform-origin: 15% 15%;
+  filter: contrast(1.12) brightness(1.04);
 }
 .streamer-live-tag {
   position: absolute;
