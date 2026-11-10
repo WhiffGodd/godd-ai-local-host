@@ -50,8 +50,8 @@ def download_error_response(error):
     if any(term in text for term in ('confirm you', 'not a bot', 'sign in', '429', 'too many requests')):
         return 429, 'YOUTUBE_ACCESS_BLOCKED', (
             'YouTube blocked access to this video before rendering could start. '
-            'Playback verification was attempted, but YouTube may still restrict this server or video. '
-            'Please try again later. Some videos require authenticated access that this public service does not have.')
+            'Choose Upload original video and retry to render the same clip from a video you provide. '
+            'This avoids the blocked YouTube fetch and still generates subtitles on the server.')
     return 500, 'CLIP_RENDER_FAILED', str(error)
 
 

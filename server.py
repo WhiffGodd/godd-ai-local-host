@@ -13,6 +13,7 @@ import re
 import math
 import queue
 from render_jobs import RenderJobs
+from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
 from analyzer import (
     extract_youtube_id,
@@ -33,6 +34,7 @@ if sys.platform == "win32":
 PORT = int(os.environ.get("PORT", 8080))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CAPTION_RESULTS = OrderedDict()
+SOURCE_UPLOADS = SourceUploads()
 
 def validate_render_payload(payload):
     host = urllib.parse.urlparse(payload.get("url", "")).hostname
@@ -48,11 +50,12 @@ def validate_render_payload(payload):
 
 
 def run_export(payload):
+    source_path = validate_uploaded_video(SOURCE_UPLOADS.completed_path(payload['upload_id'])) if payload.get('upload_id') else None
     return download_and_clip_video(
         video_url=payload["url"], start_time=payload["start"], duration=payload["duration"],
         layout=payload.get("layout", "blur"), subtitle_style=payload.get("subtitle_style", "beast"),
         subtitles=payload.get("subtitles", []), video_subtitles=payload.get("video_subtitles", []),
-        caption_source=payload.get("caption_source", "auto"))
+        caption_source=payload.get("caption_source", "auto"), local_source_path=source_path)
 
 
 EXPORT_JOBS = RenderJobs(run_export)
@@ -219,7 +222,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         # Enable CORS and disable aggressive caching for local testing
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Range, Authorization, X-Requested-With, Accept")
         self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type, X-Captions-URL")
         super().end_headers()
@@ -236,7 +239,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai backend", "version": "1.4.0", "caption_renderer": "styled-ass"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai backend", "version": "1.5.0", "caption_renderer": "styled-ass"}).encode("utf-8"))
             return
 
         if path == "/api/samples":
@@ -342,6 +345,27 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         with open(file_path, "rb") as f:
             self.wfile.write(f.read())
 
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) != 3 or parts[:2] != ["api", "source-uploads"]:
+            self.send_error(404)
+            return
+        try:
+            self.connection.settimeout(90)
+            offset = int(urllib.parse.parse_qs(parsed.query).get("offset", ["0"])[0])
+            length = int(self.headers.get("Content-Length", "0"))
+            received = SOURCE_UPLOADS.append(parts[2], offset, self.rfile, length)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"received": received}).encode())
+        except (ValueError, OSError) as error:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(error)}).encode())
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -359,9 +383,26 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             payload = {}
 
+        if path == "/api/source-uploads":
+            try:
+                token = SOURCE_UPLOADS.create(payload.get("size"))
+                self.send_response(201)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"id": token, "chunk_size": MAX_CHUNK_BYTES}).encode())
+            except ValueError as error:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(error)}).encode())
+            return
+
         if path == "/api/exports":
             try:
-                job = EXPORT_JOBS.submit(validate_render_payload(payload))
+                validated = validate_render_payload(payload)
+                if payload.get("upload_id"):
+                    SOURCE_UPLOADS.completed_path(payload["upload_id"])
+                job = EXPORT_JOBS.submit(validated)
                 self.send_response(202)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()

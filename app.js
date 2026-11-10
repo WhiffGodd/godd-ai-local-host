@@ -834,6 +834,7 @@ async function downloadClip() {
         subtitles: (activeClip.has_real_captions || activeClip.subtitles_edited) ? (activeClip.subtitles || []) : [],
         video_subtitles: activeClip.video_subtitles || [],
         caption_source: activeClip.subtitles_edited ? 'provided' : 'auto',
+        upload_id: currentVideoData.upload_id || undefined,
         stream: true
       }),
       signal: ctrl.signal
@@ -848,6 +849,7 @@ async function downloadClip() {
         if (status.state === 'failed') {
           hideDlProgress();
           showErrModal(status.error || 'The export failed. Please try again.');
+          if (status.code === 'YOUTUBE_ACCESS_BLOCKED') offerSourceUpload();
           return;
         }
         if (status.state === 'complete') {
@@ -913,6 +915,69 @@ async function downloadClip() {
   }
 }
 
+function offerSourceUpload() {
+  let button = document.getElementById('sourceUploadButton');
+  if (!button) {
+    button = document.createElement('button');
+    button.id = 'sourceUploadButton';
+    button.className = 'btn-modal-primary';
+    button.textContent = 'Upload original video and retry';
+    button.style.marginTop = '12px';
+    button.onclick = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'video/mp4,video/webm,video/quicktime,video/x-matroska,.mkv';
+      input.onchange = () => { if (input.files[0]) uploadOriginalVideo(input.files[0]); };
+      input.click();
+    };
+    document.getElementById('errDetail').after(button);
+  }
+  button.hidden = false;
+}
+
+async function uploadOriginalVideo(file) {
+  if (!currentVideoData || !activeClip) return;
+  const video = currentVideoData;
+  const selectedClip = activeClip;
+  const backend = getBackend();
+  if (file.size > 1024 * 1024 * 1024) {
+    showErrModal('Choose the same original video in MP4, MOV, WebM or MKV format, smaller than 1 GB.');
+    return;
+  }
+  closeErrModal();
+  setDlProgress('Uploading your original video…', 0);
+  try {
+    const created = await fetch(`${backend}/api/source-uploads`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({size:file.size})
+    });
+    const upload = await created.json();
+    if (!created.ok) throw new Error(upload.error || 'Could not start upload.');
+    for (let offset=0; offset<file.size; offset+=upload.chunk_size) {
+      const end = Math.min(file.size,offset+upload.chunk_size);
+      const chunk = file.slice(offset,end);
+      let sent = false;
+      for (let attempt=0; attempt<2 && !sent; attempt++) {
+        try {
+          const response = await fetch(`${backend}/api/source-uploads/${upload.id}?offset=${offset}`, {
+            method:'PUT', headers:{'Content-Type':'application/octet-stream'}, body:chunk
+          });
+          if (!response.ok) throw new Error((await response.json()).error || 'Upload interrupted.');
+          sent = true;
+        } catch(error) { if (attempt===1) throw error; }
+      }
+      setDlProgress(`Uploading original video… ${Math.round(end/file.size*100)}%`,end/file.size*100);
+    }
+    video.upload_id = upload.id;
+    hideDlProgress();
+    if (currentVideoData===video && activeClip===selectedClip) await downloadClip();
+    else showToast('Source uploaded. Select your clip and download when ready.');
+  } catch(error) {
+    hideDlProgress();
+    showErrModal(error.message || 'Could not upload the source video. Please retry.');
+    offerSourceUpload();
+  }
+}
+
 function setDlProgress(label, pct, directUrl) {
   const overlay = document.getElementById('dlProgressOverlay');
   if (overlay) {
@@ -922,6 +987,7 @@ function setDlProgress(label, pct, directUrl) {
     const f = document.getElementById('dlFill');
     if (f) f.style.width = `${Math.min(99, pct)}%`;
     const directBtn = document.getElementById('dlDirectLink');
+    if (directBtn) directBtn.hidden = !directUrl;
     if (directBtn && directUrl) {
       directBtn.href = '#';
       directBtn.textContent = 'Retry download';
@@ -944,6 +1010,8 @@ function hideDlProgress() {
 }
 
 function showErrModal(msg) {
+  const sourceButton = document.getElementById('sourceUploadButton');
+  if (sourceButton) sourceButton.hidden = true;
   const d = document.getElementById('errDetail');
   if (d) d.textContent = msg;
   const m = document.getElementById('errModal');

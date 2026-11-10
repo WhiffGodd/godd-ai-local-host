@@ -285,7 +285,8 @@ def download_and_clip_video(
     output_path: str = None,
     subtitle_style: str = "source",
     video_subtitles: list = None,
-    caption_source: str = "auto"
+    caption_source: str = "auto",
+    local_source_path: str = None
 ) -> str:
     """
     Download and render a Full HD 1080p (1080x1920) 9:16 short using FFmpeg.
@@ -311,10 +312,16 @@ def download_and_clip_video(
 
     srt_temp_file = None
     try:
-        info = extract_youtube_info(video_url, {
-            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-            'quiet': True, 'no_warnings': True,
-        })
+        if local_source_path:
+            # This path is resolved from an upload token by the server, never
+            # accepted as a filesystem path in a visitor's request.
+            info = {"formats": [{"url": local_source_path, "vcodec": "local",
+                                 "acodec": "local", "height": 1080}]}
+        else:
+            info = extract_youtube_info(video_url, {
+                'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+                'quiet': True, 'no_warnings': True,
+            })
         target_stream, selected_audio, separate_audio = select_export_streams(info)
         srt_filter = ""
         is_none_style = str(subtitle_style).lower() in ("none", "off", "disable", "disabled", "false")
@@ -396,7 +403,8 @@ def download_and_clip_video(
         encoder_flags = get_video_encoder_flags()
         # Accurate seeks on both inputs share the same clip origin. Resample against
         # timestamps to correct drift and pad a late-starting audio stream.
-        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), *stream_http_input_args(info, target_stream), "-i", target_stream]
+        source_protocols = ["-protocol_whitelist", "file,pipe"] if local_source_path else []
+        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), *source_protocols, *stream_http_input_args(info, target_stream), "-i", target_stream]
         if separate_audio:
             cmd += ["-ss", str(start_time), *stream_http_input_args(info, selected_audio), "-i", selected_audio]
         cmd += ["-t", str(duration), "-filter_complex", filter_complex,

@@ -123,6 +123,16 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(sidecar['words'][0]['start'], .5)
         self.assertEqual(sidecar['words'][0]['end'], 1.0)
 
+    def test_uploaded_source_never_calls_youtube(self):
+        from source_uploads import validate_uploaded_video
+        self.assertEqual(validate_uploaded_video(self.source), self.source)
+        out = str(Path(self.tmp.name) / 'uploaded.mp4')
+        with patch.object(v, 'extract_youtube_info') as extract, patch.object(v, 'get_video_encoder_flags', return_value=['-c:v','libx264','-preset','ultrafast']):
+            v.download_and_clip_video('https://youtu.be/blocked',1,2,layout='fit',subtitle_style='off',
+                                      output_path=out,local_source_path=self.source)
+        extract.assert_not_called()
+        self.assertGreater(os.path.getsize(out),1000)
+
     def test_off_skips_recognition(self):
         with patch.object(v, 'transcribe_audio_with_whisper') as transcribe:
             self.render(subtitle_style='off')

@@ -162,3 +162,15 @@ stream's HTTP playback headers. No personal account cookies are bundled.
 Playback verification can improve access but cannot guarantee access from a
 blocked datacenter IP or to a video requiring sign-in. Treat a download as
 verified only after the affected video's export succeeds on the deployed host.
+
+
+### Blocked-video upload alternative
+
+When YouTube blocks an export, the error dialog offers **Upload original video
+and retry**. Choose the same original video (up to 1 GB). Uploads use 4 MB chunks
+and stream to temporary storage; the visitor does not need a local backend.
+The selected start/end, layout and subtitle style stay the same. Rendering reads
+that uploaded source directly and recognizes its clip audio without contacting
+YouTube. Uploads are identified by random tokens, expire after one hour, and
+are lost if the free service restarts. Only use videos you are allowed to upload.
+This is an alternative source path, not a claim that YouTube's IP block is removed.
