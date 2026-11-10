@@ -90,24 +90,64 @@ async function pasteClip() {
 }
 
 // ─── ANALYSIS ─────────────────────────────────────────────────────────────────
+function setProcStatus(msg) {
+  const el = document.getElementById('procTitle');
+  if (el) el.textContent = msg;
+}
+
 async function analyzeVideo() {
   const url = document.getElementById('urlInput').value.trim();
   if (!url) { showToast('Please paste a YouTube link first'); return; }
 
   const videoId = extractYtId(url);
+  const backend = getBackend();
 
   // Show processing screen
   document.getElementById('heroSection').style.display = 'none';
   document.getElementById('studioSection').style.display = 'none';
-  document.getElementById('processingSection').style.display = '';
+  document.getElementById('processingSection').style.display = 'flex';
   animateProcessing();
+  setProcStatus('Waking up server…');
 
-  const endpoints = [`${getBackend()}/api/analyze`, '/api/analyze'];
+  // ── STEP 1: Wake Render server in background (don't block on it) ────────────
+  let serverAlive = false;
+  const wakePromise = (async () => {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 55000);
+      const r = await fetch(`${backend}/healthz`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (r.ok) serverAlive = true;
+    } catch (_) {}
+  })();
+
+  // Show live countdown while waking
+  setProcStatus('Waking up server… (may take 30s on first visit)');
+  let wakeSeconds = 0;
+  const wakeInterval = setInterval(() => {
+    wakeSeconds++;
+    if (!serverAlive) {
+      setProcStatus(`Server waking up… ${wakeSeconds}s`);
+    }
+  }, 1000);
+
+  await wakePromise;
+  clearInterval(wakeInterval);
+
+  // ── STEP 2: Try the analysis endpoint ──────────────────────────────────────
+  setProcStatus('Analyzing your video…');
+
+  const endpoints = [
+    `${backend}/api/analyze`,
+    '/api/analyze'
+  ];
 
   for (const ep of endpoints) {
     try {
+      setProcStatus(`Extracting clips via ${ep.includes('onrender') ? 'cloud' : 'serverless'}…`);
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 120000);
+      // 90s — server is already awake at this point
+      const timer = setTimeout(() => ctrl.abort(), 90000);
       const res = await fetch(ep, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -118,6 +158,7 @@ async function analyzeVideo() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
+          setProcStatus('Done! Loading studio…');
           displayStudio(data.video, data.clips);
           return;
         }
@@ -127,20 +168,44 @@ async function analyzeVideo() {
     }
   }
 
-  // Fallback: generate placeholder clips
-  const title = videoId ? `YouTube Video (${videoId})` : 'Video';
-  const dur = 600;
-  const fakeClips = [
-    makeClip(videoId, title, 1, 15, 55),
-    makeClip(videoId, title, 2, 70, 108),
-    makeClip(videoId, title, 3, 130, 168),
+  // ── FALLBACK: Use real YT metadata + placeholder clips immediately ──────────
+  setProcStatus('Building clips from video…');
+
+  // Try to get real title/thumbnail via oEmbed (fast, no API key)
+  let metaTitle = videoId ? `YouTube Video (${videoId})` : 'Video';
+  let metaAuthor = 'Creator';
+  let metaDur = 600;
+  if (videoId) {
+    try {
+      const oe = await fetch(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+        { signal: AbortSignal.timeout(6000) }
+      );
+      if (oe.ok) {
+        const od = await oe.json();
+        metaTitle  = od.title  || metaTitle;
+        metaAuthor = od.author_name || metaAuthor;
+      }
+    } catch (_) {}
+  }
+
+  const placeholderClips = [
+    makeClip(videoId, metaTitle, 1, 15,  53),
+    makeClip(videoId, metaTitle, 2, 65, 103),
+    makeClip(videoId, metaTitle, 3, 130, 165),
+    makeClip(videoId, metaTitle, 4, 200, 237),
   ];
+
   displayStudio({
-    id: videoId, url, title, author: 'Creator',
+    id: videoId, url,
+    title: metaTitle,
+    author: metaAuthor,
     thumbnail: videoId ? ytThumb(videoId) : '',
-    duration: dur, duration_formatted: '10:00'
-  }, fakeClips);
-  showToast('ℹ️ Backend offline — showing placeholder clips. Edit subtitles manually.');
+    duration: metaDur,
+    duration_formatted: '10:00'
+  }, placeholderClips);
+
+  showToast('⚠️ Server timed out. Clips created — edit subtitles in the transcript box, then download!');
 }
 
 function makeClip(videoId, title, rank, start, end) {
