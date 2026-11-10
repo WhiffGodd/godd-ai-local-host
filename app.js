@@ -652,13 +652,27 @@ async function analyzeVideo() {
     animateProcessingSteps();
 
     try {
-        const response = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: url, api_key: storedApiKey })
-        });
+        let response = null;
+        try {
+            response = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url, api_key: storedApiKey })
+            });
+        } catch(e) {}
 
-        if (response.ok) {
+        if (!response || !response.ok) {
+            // Fallback to live Render backend
+            try {
+                response = await fetch('https://godd-ai.onrender.com/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url, api_key: storedApiKey })
+                });
+            } catch(e2) {}
+        }
+
+        if (response && response.ok) {
             const data = await response.json();
             if (data.success && data.clips && data.clips.length > 0) {
                 setTimeout(() => {
@@ -1302,11 +1316,14 @@ async function renderClipViaBackendOrScreen() {
 
     // Try backend endpoints in order:
     // 1. Stored custom backend URL (if user configured one)
-    // 2. Relative endpoint /api/render-clip (if running on local server or custom backend)
-    // 3. http://localhost:8080/api/render-clip (standard local backend)
+    // 2. Default live Render Cloud Backend (https://godd-ai.onrender.com)
+    // 3. Relative endpoint /api/render-clip (if running on local server)
+    // 4. http://localhost:8080/api/render-clip (standard local backend)
+    const DEFAULT_CLOUD_BACKEND = 'https://godd-ai.onrender.com';
     const customBackend = (localStorage.getItem('backend_api_url') || '').trim();
     const candidateEndpoints = [];
     if (customBackend) candidateEndpoints.push(`${customBackend.replace(/\/$/, '')}/api/render-clip`);
+    candidateEndpoints.push(`${DEFAULT_CLOUD_BACKEND}/api/render-clip`);
     candidateEndpoints.push('/api/render-clip');
     if (!window.location.origin.includes(':8080')) {
         candidateEndpoints.push('http://localhost:8080/api/render-clip');

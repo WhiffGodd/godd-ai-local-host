@@ -71,36 +71,36 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     if not yt_dlp:
         raise RuntimeError("yt-dlp is not installed")
 
-    # Filter graph based on layout
+    # Filter graph based on layout (720x1280 vertical resolution for speed & HD quality)
     if layout == "blur":
-        # Split filter: background scaled & blurred to 1080x1920, foreground scaled to fit width 1080
         filter_complex = (
             "[0:v]split=2[bg][fg];"
-            "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg_blurred];"
-            "[fg]scale=1080:-1[fg_scaled];"
+            "[bg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,boxblur=20:5[bg_blurred];"
+            "[fg]scale=720:-1[fg_scaled];"
             "[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2[outv]"
         )
     elif layout == "fit":
-        filter_complex = "scale=1080:-1,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black[outv]"
+        filter_complex = "scale=720:-1,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black[outv]"
     else: # Default: 'crop'
-        filter_complex = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920[outv]"
+        filter_complex = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=720:1280[outv]"
 
     # Use yt-dlp to obtain stream URL directly without needing to download gigabytes of long video
     try:
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'best[ext=mp4]/best',
+            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
             'quiet': True,
             'no_warnings': True,
         }
+        stream_url = None
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             stream_url = info.get("url")
-            
-            # If separated audio/video
+
+            # If separated audio/video formats
             if not stream_url and "formats" in info:
-                # Pick best mp4 format
                 for f in reversed(info["formats"]):
-                    if f.get("vcodec") != "none" and f.get("acodec") != "none":
+                    if f.get("url") and f.get("protocol", "").startswith("http"):
                         stream_url = f.get("url")
                         break
                         
@@ -118,8 +118,8 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             "-map", "[outv]",
             "-map", "0:a?",
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "22",
+            "-preset", "ultrafast",
+            "-crf", "23",
             "-c:a", "aac",
             "-b:a", "128k",
             "-movflags", "+faststart",
