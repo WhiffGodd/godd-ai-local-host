@@ -186,9 +186,12 @@
 
       <!-- Subtitle Style Variations (Klap Style) -->
       <div class="ctrl-box">
-        <div class="ctrl-box-title">🎨 Subtitle Style Preset</div>
+        <div class="ctrl-box-title">🎨 Subtitle Mode & Preset</div>
         <div class="style-grid">
-          <button class="style-btn active" data-s="beast" onclick="setStyle('beast')">
+          <button class="style-btn active" data-s="source" onclick="setStyle('source')" title="Use video's original closed captions">
+            <span class="style-dot dot-source"></span> 📺 Video Subtitles (Original)
+          </button>
+          <button class="style-btn" data-s="beast" onclick="setStyle('beast')">
             <span class="style-dot dot-beast"></span> Beast Gold
           </button>
           <button class="style-btn" data-s="hormozi" onclick="setStyle('hormozi')">
@@ -200,11 +203,11 @@
           <button class="style-btn" data-s="fire" onclick="setStyle('fire')">
             <span class="style-dot dot-fire"></span> Viral Flame
           </button>
-          <button class="style-btn" data-s="box" onclick="setStyle('box')">
-            <span class="style-dot dot-box"></span> Box Pop
-          </button>
           <button class="style-btn" data-s="clean" onclick="setStyle('clean')">
             <span class="style-dot dot-clean"></span> Minimal White
+          </button>
+          <button class="style-btn" data-s="none" onclick="setStyle('none')" title="Suppress subtitle burning for videos with burned-in captions">
+            <span class="style-dot dot-none"></span> 🚫 Off (Already in Video)
           </button>
         </div>
       </div>

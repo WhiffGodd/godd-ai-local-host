@@ -19,7 +19,7 @@ let clipDur     = 30;
 let animId      = null;
 let lastTs      = 0;
 
-let currentStyle  = 'bold';
+let currentStyle  = 'source';
 let currentLayout = 'split';
 
 // ─── YouTube IFrame API callback ──────────────────────────────────────────────
@@ -321,6 +321,14 @@ function displayStudio(video, clips) {
     setLayout('blur');
   } else {
     setLayout('split');
+  }
+
+  // Subtitle selection: If video contains real subtitles, use them by default!
+  const hasSourceSubs = clips.some(c => c.has_source_subtitles || (c.video_subtitles && c.video_subtitles.length > 0));
+  if (hasSourceSubs) {
+    setStyle('source');
+  } else {
+    setStyle('beast');
   }
 
   // Select first clip
@@ -682,9 +690,38 @@ function genWordSubs(startSec, endSec, text) {
 function renderSubtitles(curOffset) {
   const box = document.getElementById('subsBox');
   if (!box || !activeClip) return;
+
+  // 1. If subtitles are disabled (e.g., video has burned-in captions)
+  if (currentStyle === 'none') {
+    if (box.innerHTML !== '') {
+      box.innerHTML = '';
+      box.dataset.lastHtml = '';
+    }
+    return;
+  }
+
+  // 2. If "Source Video Subtitles" selected and video contains real subtitles, USE THEM DIRECTLY!
+  if (currentStyle === 'source' && activeClip.video_subtitles && activeClip.video_subtitles.length > 0) {
+    const vSubs = activeClip.video_subtitles;
+    const curAbs = activeClip.start + curOffset;
+    let activeLine = vSubs.find(s => curAbs >= s.start && curAbs <= (s.end + 0.35));
+    if (!activeLine) {
+      activeLine = vSubs.slice().reverse().find(s => curAbs >= s.start && (curAbs - s.end) < 0.65);
+    }
+    const html = activeLine ? `<div class="sub-source-card">${escHtml(activeLine.text)}</div>` : '';
+    if (box.dataset.lastHtml !== html) {
+      box.innerHTML = html;
+      box.dataset.lastHtml = html;
+    }
+    return;
+  }
+
   const subs = activeClip.subtitles;
   if (!subs || !subs.length) {
-    if (box.innerHTML !== '') box.innerHTML = '';
+    if (box.innerHTML !== '') {
+      box.innerHTML = '';
+      box.dataset.lastHtml = '';
+    }
     return;
   }
 
@@ -847,7 +884,7 @@ async function downloadClip() {
   const backend  = getBackend();
   const clipTitle = activeClip.title || `clip_${Math.round(startSec)}s`;
   const cleanTitle = clipTitle.replace(/[^\w\s-]/g, '').trim().replace(/[-\s]+/g, '_') || `clip_${Math.round(startSec)}s`;
-  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'beast')}`;
+  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'source')}`;
 
   // 1. Show modal with immediate direct download link ready
   setDlProgress(`🎬 Rendering "${clipTitle}" in 1080p…`, 18, directDlUrl);
@@ -873,8 +910,9 @@ async function downloadClip() {
         duration: durSec,
         layout: currentLayout || 'split',
         title: clipTitle,
-        subtitle_style: currentStyle || 'beast',
+        subtitle_style: currentStyle || 'source',
         subtitles: activeClip.subtitles || [],
+        video_subtitles: activeClip.video_subtitles || [],
         stream: true
       }),
       signal: ctrl.signal

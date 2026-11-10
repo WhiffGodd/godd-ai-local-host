@@ -481,15 +481,28 @@ def estimate_word_weight(word: str) -> float:
         weight += 0.40  # Clause breathing pause
     return max(0.5, weight)
 
+INCOMPLETE_TAIL_WORDS = {
+    "and", "but", "so", "or", "because", "if", "while", "though", "although", "whereas",
+    "as", "since", "plus", "yet", "that", "which", "who", "whom", "whose", "where", "when",
+    "what", "whatever", "how", "why", "the", "a", "an", "this", "these", "those",
+    "my", "your", "his", "her", "its", "our", "their", "of", "to", "in", "for", "on",
+    "with", "at", "by", "from", "up", "about", "into", "through", "over", "after",
+    "under", "between", "against", "during", "without", "before", "towards", "upon",
+    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do",
+    "does", "did", "can", "could", "will", "would", "shall", "should", "may", "might",
+    "must", "like", "representing", "distinct", "including", "than", "well", "just"
+}
+
 def snap_to_clean_sentence_boundaries(
     transcript: list,
     target_start: float,
-    min_duration: float = 28.0,
-    ideal_duration: float = 42.0,
-    max_duration: float = 65.0
+    min_duration: float = 35.0,
+    ideal_duration: float = 58.0,
+    max_duration: float = 85.0
 ) -> tuple:
     """
     Find complete, smooth thought boundaries so the speaker NEVER gets cut off or hanged mid-sentence.
+    Allows the speaker to finish what they are saying completely before clipping.
     Returns (clean_start, clean_end, list_of_segments).
     """
     if not transcript:
@@ -504,14 +517,14 @@ def snap_to_clean_sentence_boundaries(
             min_dist = dist
             start_idx = idx
 
-    # If the chosen segment is mid-sentence, walk backwards up to 3 segments to start at the true beginning of the sentence
+    # If the chosen segment is mid-sentence, walk backwards up to 8 seconds to start at the true sentence beginning
     while start_idx > 0:
         prev_seg = transcript[start_idx - 1]
         prev_txt = str(prev_seg.get("text", "")).strip()
         gap = transcript[start_idx].get("start", 0) - prev_seg.get("end", 0)
         if gap >= 0.45 or prev_txt.endswith((".", "!", "?")):
             break
-        if target_start - prev_seg.get("start", 0) > 6.0:
+        if target_start - prev_seg.get("start", 0) > 8.0:
             break
         start_idx -= 1
 
@@ -519,7 +532,7 @@ def snap_to_clean_sentence_boundaries(
 
     # 2. Accumulate segments and search for complete sentence closure between min_duration and max_duration
     best_end_idx = None
-    best_score = -1
+    best_score = -1000
     best_end_time = clean_start + ideal_duration
 
     for idx in range(start_idx, len(transcript)):
@@ -533,35 +546,66 @@ def snap_to_clean_sentence_boundaries(
             break
 
         seg_txt = str(seg.get("text", "")).strip()
+        words = seg_txt.split()
+        last_word = words[-1].lower().strip(".,!?:;\"'()[]") if words else ""
+        
+        # Check if segment ends on incomplete tail or open clause
+        is_incomplete = (
+            last_word in INCOMPLETE_TAIL_WORDS or
+            seg_txt.endswith((",", ";", ":", "-", "..."))
+        )
+
         has_terminal = seg_txt.endswith((".", "!", "?"))
         next_gap = 0.0
+        next_starts_trans = False
+        next_is_lower = False
+
         if idx + 1 < len(transcript):
-            next_gap = float(transcript[idx + 1].get("start", cur_end)) - cur_end
+            next_seg = transcript[idx + 1]
+            next_gap = float(next_seg.get("start", cur_end)) - cur_end
+            next_txt = str(next_seg.get("text", "")).strip()
+            if next_txt and next_txt[0].islower():
+                next_is_lower = True
+            next_lower = next_txt.lower()
+            if any(next_lower.startswith(t) for t in ["now ", "so ", "next ", "but ", "however ", "in fact ", "then ", "anyway ", "moving on "]):
+                next_starts_trans = True
 
-        # Scoring candidate end point: strong preference for complete sentence (. ! ?) and natural breath pause
         score = 0
-        if has_terminal:
-            score += 55
-        if next_gap >= 0.45:
-            score += 30
-        elif next_gap >= 0.25:
-            score += 15
+        if is_incomplete or next_is_lower:
+            score -= 200  # Disqualify incomplete clauses from cutting off speaker
+        else:
+            if has_terminal:
+                score += 70
+            if next_gap >= 0.5:
+                score += 40
+            elif next_gap >= 0.25:
+                score += 20
+            if next_starts_trans:
+                score += 30
 
-        dur_diff = abs(cur_dur - ideal_duration)
-        score += max(0, 25 - int(dur_diff))
+            # Conclusive phrasing bonus
+            lower_txt = seg_txt.lower()
+            if any(c in lower_txt for c in ["that's it", "that's how", "that's why", "in the end", "at the end of the day", "it's that simple", "doesn't it", "makes sense", "all there is to it", "simple as that"]):
+                score += 35
+
+            # Comfortable Short/Reel narrative duration (45s - 75s sweet spot)
+            if 45.0 <= cur_dur <= 75.0:
+                score += 25
+            else:
+                score += max(0, 15 - int(abs(cur_dur - ideal_duration) * 0.5))
 
         if score > best_score:
             best_score = score
             best_end_idx = idx
-            # Add a 0.5s tail margin after final word so speaker's natural breath isn't chopped
-            best_end_time = round(cur_end + min(0.65, max(0.25, next_gap * 0.5)), 2)
+            # Add generous 0.85s tail margin so speaker's breath and vocal decay are never clipped
+            best_end_time = round(cur_end + min(0.85, max(0.4, next_gap * 0.6)), 2)
 
     if best_end_idx is None:
         for idx in range(start_idx, len(transcript)):
             cur_end = float(transcript[idx].get("end", 0))
             if cur_end - clean_start >= min_duration:
                 best_end_idx = idx
-                best_end_time = round(cur_end + 0.35, 2)
+                best_end_time = round(cur_end + 0.5, 2)
                 break
 
     if best_end_idx is None:
@@ -694,15 +738,25 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             c_start, c_end, c_segs = snap_to_clean_sentence_boundaries(
                 transcript,
                 start_time,
-                min_duration=28.0,
-                ideal_duration=42.0,
-                max_duration=65.0
+                min_duration=35.0,
+                ideal_duration=58.0,
+                max_duration=85.0
             )
             actual_dur = round(c_end - c_start, 1)
             full_text = " ".join(s.get("text", "") for s in c_segs) if c_segs else ch_title
             
             clip_title = generate_meaningful_content_title(clip_text=full_text, video_title=title, chapter_title=ch_title, rank=idx+1)
             
+            c_vsubs = [
+                {
+                    "start": round(float(s.get("start", 0)), 2),
+                    "end": round(float(s.get("end", 0)), 2),
+                    "text": clean_streamer_text(s.get("text", ""))
+                }
+                for s in c_segs
+                if clean_streamer_text(s.get("text", ""))
+            ]
+
             meaningful_clips.append({
                 "id": f"clip_{idx+1}",
                 "rank": idx + 1,
@@ -717,6 +771,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 "viral_reasons": ["Creator Chapter Topic", f"Content: {ch_title[:32]}"],
                 "tags": ["Key Chapter", "Deep Dive", "Must Watch"],
                 "full_text": full_text,
+                "video_subtitles": c_vsubs,
+                "has_source_subtitles": bool(c_vsubs),
                 "subtitles": generate_word_subtitles_from_segments(transcript, c_start, c_end) or generate_word_subtitles(c_start, c_end, full_text),
                 "has_real_captions": bool(c_segs)
             })
@@ -728,9 +784,9 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
         # If no transcript was fetched (e.g., auto-captions off), synthesize content-focused segments based on video title
         return synthesize_viral_clips(video_duration, title, chapters=chapters)
         
-    target_clip_length = 42.0 # ~42 seconds per short
-    min_clip_length = 28.0
-    max_clip_length = 65.0
+    target_clip_length = 58.0 # ~58-65 seconds per short to let speaker finish completely
+    min_clip_length = 35.0
+    max_clip_length = 85.0
     
     candidate_windows = []
     total_segments = len(transcript)
@@ -774,6 +830,16 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             first_phrase=" ".join(words[:min(5, len(words))])
         )
         
+        c_vsubs = [
+            {
+                "start": round(float(s.get("start", 0)), 2),
+                "end": round(float(s.get("end", 0)), 2),
+                "text": clean_streamer_text(s.get("text", ""))
+            }
+            for s in c_segs
+            if clean_streamer_text(s.get("text", ""))
+        ]
+        
         candidate_windows.append({
             "start": round(c_start, 2),
             "end": round(c_end, 2),
@@ -782,7 +848,9 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "score": score,
             "reasons": reasons,
             "tags": tags,
-            "hook": hook_text
+            "hook": hook_text,
+            "segs": c_segs,
+            "video_subtitles": c_vsubs
         })
                     
     # Sort candidates by virality score descending
@@ -827,6 +895,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "viral_reasons": clip["reasons"],
             "tags": clip["tags"],
             "full_text": clip["text"],
+            "video_subtitles": clip.get("video_subtitles", []),
+            "has_source_subtitles": bool(clip.get("video_subtitles")),
             "subtitles": generate_word_subtitles_from_segments(transcript, clip["start"], clip["end"]) or generate_word_subtitles(clip["start"], clip["end"], clip["text"]),
             "has_real_captions": True
         })

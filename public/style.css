@@ -626,12 +626,32 @@ input  { font-family: inherit; outline: none; }
   display: inline-block;
   flex-shrink: 0;
 }
+.dot-source  { background: #38BDF8; box-shadow: 0 0 6px #38BDF8; }
 .dot-beast   { background: #FFE600; box-shadow: 0 0 6px #FFE600; }
 .dot-hormozi { background: #22C55E; box-shadow: 0 0 6px #22C55E; }
 .dot-cyber   { background: #00F0FF; box-shadow: 0 0 6px #00F0FF; }
 .dot-fire    { background: #FF3B30; box-shadow: 0 0 6px #FF3B30; }
 .dot-box     { background: #FBBF24; box-shadow: 0 0 6px #FBBF24; }
 .dot-clean   { background: #FFFFFF; box-shadow: 0 0 6px #FFFFFF; }
+.dot-none    { background: #64748B; box-shadow: 0 0 4px #64748B; }
+
+.sub-source-card {
+  font-size: 16px;
+  line-height: 1.35;
+  color: #FFFFFF;
+  font-weight: 700;
+  text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 2px 8px rgba(0,0,0,0.9);
+  padding: 4px 10px;
+  text-align: center;
+  max-width: 92%;
+  margin: 0 auto;
+}
+.subs-box.s-source {
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 8px 14px;
+}
 
 .sync-badge {
   background: rgba(59, 130, 246, 0.2);

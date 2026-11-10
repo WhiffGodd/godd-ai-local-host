@@ -199,8 +199,42 @@ def get_video_encoder_flags():
     _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", "fast", "-crf", "18", "-b:v", "10M"]
     return _DETECTED_ENCODER
 
-def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
-    """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
+def clean_streamer_text(text: str) -> str:
+    """Strip HTML entities, speaker tags (<<, >>), and bracketed sounds."""
+    if not text:
+        return ""
+    cleaned = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', str(text))
+    cleaned = re.sub(r'[«»<>]+', ' ', cleaned)
+    cleaned = re.sub(r'\[.*?\]|\(.*?\)|♪+', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+def generate_srt(subtitles: list, clip_start: float = 0.0, video_subtitles: list = None) -> str:
+    """
+    Generate SubRip (.srt) caption file content with timestamps relative to clip start.
+    If the video contains real subtitles (video_subtitles), USE THEM directly instead of generating new subtitles!
+    """
+    # 1. If video contains real source subtitles, use them faithfully!
+    if video_subtitles and len(video_subtitles) > 0:
+        lines = []
+        lead_offset = 0.12
+        for idx, sub in enumerate(video_subtitles):
+            raw_start = float(sub.get("start", 0))
+            raw_end = float(sub.get("end", raw_start + 1.5))
+            txt = clean_streamer_text(str(sub.get("text", "")))
+            if not txt:
+                continue
+
+            start_sec = max(0.0, raw_start - clip_start - lead_offset)
+            end_sec = max(start_sec + 0.6, raw_end - clip_start - (lead_offset * 0.5))
+
+            lines.append(f"{idx + 1}")
+            lines.append(f"{format_srt_timestamp(start_sec)} --> {format_srt_timestamp(end_sec)}")
+            lines.append(txt)
+            lines.append("")
+        if lines:
+            return "\n".join(lines)
+
     if not subtitles:
         return ""
 
@@ -349,7 +383,16 @@ def detect_facecam_in_stream(stream_url: str, timestamp: float = 10.0) -> dict:
         print(f"[FaceCam] Detection notice: {e}")
         return {"has_face": False}
 
-def download_and_clip_video(video_url: str, start_time: float, duration: float, layout: str = "split", subtitles: list = None, output_path: str = None, subtitle_style: str = "beast") -> str:
+def download_and_clip_video(
+    video_url: str,
+    start_time: float,
+    duration: float,
+    layout: str = "split",
+    subtitles: list = None,
+    output_path: str = None,
+    subtitle_style: str = "source",
+    video_subtitles: list = None
+) -> str:
     """
     Download and render a Full HD 1080p (1080x1920) 9:16 short using FFmpeg.
     Layouts:
@@ -369,6 +412,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
 
     # Map subtitle styles to ASS / SRT color palettes
     style_colors = {
+        "source": "&H001ED2FF",    # Original source subtitles (Clean bright yellow-gold)
         "beast": "&H001ED2FF",     # High-intensity Neon Gold (#FFD21E)
         "hormozi": "&H002EC55E",   # Electric Lime Green (#5EC52E)
         "cyber": "&H00FFF000",     # Electric Cyan (#00F0FF)
@@ -378,16 +422,27 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     }
     primary_color = style_colors.get(subtitle_style, "&H001ED2FF")
 
-    # Generate SRT file if subtitles are provided (scaled for 1080p canvas)
+    # Generate SRT file: If video has real source subtitles, use them directly!
+    # If subtitle_style is "none" or "off", suppress overlay completely (for videos with burned-in captions)
     srt_filter = ""
     srt_temp_file = None
-    if subtitles and len(subtitles) > 0:
+    is_none_style = str(subtitle_style).lower() in ("none", "off", "disable", "disabled", "false")
+
+    if not is_none_style and (video_subtitles or (subtitles and len(subtitles) > 0)):
         try:
-            srt_temp_file = os.path.join(tempfile.gettempdir(), f"subs_{int(start_time)}_{int(duration)}.srt")
-            with open(srt_temp_file, "w", encoding="utf-8") as f:
-                f.write(generate_srt(subtitles, clip_start=start_time))
-            esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=1080,PlayResY=1920,FontName=Arial,FontSize=52,Bold=1,PrimaryColour={primary_color},OutlineColour=&H00000000,BorderStyle=1,Outline=4.5,Shadow=2,Alignment=2,MarginV=180'"
+            srt_content = ""
+            if video_subtitles and (subtitle_style == "source" or not subtitles):
+                # Use video's actual source subtitles directly!
+                srt_content = generate_srt(subtitles=[], clip_start=start_time, video_subtitles=video_subtitles)
+            elif subtitles and len(subtitles) > 0:
+                srt_content = generate_srt(subtitles=subtitles, clip_start=start_time, video_subtitles=video_subtitles)
+
+            if srt_content.strip():
+                srt_temp_file = os.path.join(tempfile.gettempdir(), f"subs_{int(start_time)}_{int(duration)}.srt")
+                with open(srt_temp_file, "w", encoding="utf-8") as f:
+                    f.write(srt_content)
+                esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
+                srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=1080,PlayResY=1920,FontName=Arial,FontSize=52,Bold=1,PrimaryColour={primary_color},OutlineColour=&H00000000,BorderStyle=1,Outline=4.5,Shadow=2,Alignment=2,MarginV=180'"
         except Exception as se:
             print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
             srt_filter = ""

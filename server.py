@@ -353,8 +353,9 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_srt(self, payload: dict):
         subtitles = payload.get("subtitles", [])
+        video_subtitles = payload.get("video_subtitles", [])
         clip_start = float(payload.get("start", 0))
-        srt_content = generate_srt(subtitles, clip_start=clip_start)
+        srt_content = generate_srt(subtitles, clip_start=clip_start, video_subtitles=video_subtitles)
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Disposition", 'attachment; filename="godd_ai_captions.srt"')
@@ -367,9 +368,10 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         duration = float(payload.get("duration", 30))
         layout = payload.get("layout", "split")
         subtitles = payload.get("subtitles", [])
-        subtitle_style = payload.get("subtitle_style", "beast")
+        subtitle_style = payload.get("subtitle_style", "source")
+        video_subtitles = payload.get("video_subtitles", [])
 
-        print(f"[VideoEngine] Rendering 1080p clip: URL={url}, Start={start_time}s, Dur={duration}s, Layout={layout}, Style={subtitle_style}, Subtitles={len(subtitles)} words")
+        print(f"[VideoEngine] Rendering 1080p clip: URL={url}, Start={start_time}s, Dur={duration}s, Layout={layout}, Style={subtitle_style}, VideoSubtitles={len(video_subtitles)} lines, Subtitles={len(subtitles)} words")
 
         try:
             rendered_path = download_and_clip_video(
@@ -378,7 +380,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 duration=duration,
                 layout=layout,
                 subtitles=subtitles,
-                subtitle_style=subtitle_style
+                subtitle_style=subtitle_style,
+                video_subtitles=video_subtitles
             )
 
             # Stream the rendered MP4 file directly to the client with clean title filename
