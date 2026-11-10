@@ -464,8 +464,9 @@ input  { font-family: inherit; outline: none; }
   padding-left: 4px;
 }
 
-/* Subtitle overlay */
+/* Subtitle overlay (Turned OFF) */
 .subs-overlay {
+  display: none !important;
   position: absolute; left: 12px; right: 12px; bottom: 62px; z-index: 15;
   pointer-events: none; text-align: center; padding: 0 4px;
 }

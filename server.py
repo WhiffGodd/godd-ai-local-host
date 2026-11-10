@@ -188,7 +188,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         # Enable CORS and disable aggressive caching for local testing
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Range, Authorization, X-Requested-With, Accept")
+        self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type")
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -211,6 +212,24 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(SAMPLE_VIDEOS).encode("utf-8"))
+            return
+
+        # Direct browser download endpoint via GET
+        if path == "/api/render-clip":
+            query = urllib.parse.parse_qs(parsed.query)
+            url = query.get("url", [""])[0]
+            start_time = float(query.get("start", [0])[0])
+            duration = float(query.get("duration", [30])[0])
+            layout = query.get("layout", ["split"])[0]
+            payload = {
+                "url": url,
+                "start": start_time,
+                "duration": duration,
+                "layout": layout,
+                "stream": True,
+                "subtitles": []
+            }
+            self.handle_render_clip(payload)
             return
 
         # Serve static files from BASE_DIR

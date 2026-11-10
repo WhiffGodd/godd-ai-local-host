@@ -538,53 +538,15 @@ function scrubSeek(e) {
   renderSubtitles(currentTime);
 }
 
-// ─── SUBTITLES ────────────────────────────────────────────────────────────────
+// ─── SUBTITLES (TURNED OFF) ─────────────────────────────────────────────────
 function genWordSubs(startSec, endSec, text) {
-  const words = (text || '').split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  const dur = Math.max(1, endSec - startSec);
-  const tpw = dur / words.length;
-  const highEnergyWords = ['clutch', 'bhai', 'chat', 'headshot', 'rush', 'op', 'record', 'let\'s go', 'insane', 'boom'];
-
-  return words.map((w, i) => ({
-    word: w,
-    start: startSec + i * tpw,
-    end:   startSec + (i + 1) * tpw,
-    highlight: highEnergyWords.some(k => w.toLowerCase().includes(k)) || (i % 4 === 2)
-  }));
+  return [];
 }
 
 function renderSubtitles(curOffset) {
   const box = document.getElementById('subsBox');
-  if (!box || !activeClip) return;
-  const subs = activeClip.subtitles;
-  if (!subs || !subs.length) {
-    box.innerHTML = '';
-    return;
-  }
-
-  // curOffset is time elapsed in the clip (0 to clipDur)
-  // Check if subs have absolute timestamps (e.g. 620+) or relative (0 to 35)
-  const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
-  const targetTime = isAbsolute ? (activeClip.start + curOffset) : curOffset;
-
-  let ai = subs.findIndex(s => targetTime >= s.start && targetTime < s.end);
-  if (ai < 0) {
-    for (let i = subs.length - 1; i >= 0; i--) {
-      if (targetTime >= subs[i].start) { ai = i; break; }
-    }
-  }
-  if (ai < 0) ai = 0;
-
-  const lo = Math.max(0, ai - 2);
-  const hi = Math.min(subs.length, lo + 6);
-  const visible = subs.slice(lo, hi);
-
-  box.innerHTML = visible.map((s, idx) => {
-    const isActive = (lo + idx) === ai;
-    const isHl     = s.highlight && !isActive;
-    return `<span class="sw${isActive ? ' active' : ''}${isHl ? ' hl' : ''}">${escHtml(s.word)}</span>`;
-  }).join(' ');
+  if (box) box.innerHTML = '';
+  return;
 }
 
 function escHtml(s) {
@@ -658,16 +620,19 @@ async function downloadClip() {
   const startSec = activeClip.start;
   const durSec   = activeClip.duration_sec || Math.round(activeClip.end - activeClip.start);
   const backend  = getBackend();
+  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}`;
 
-  setDlProgress('🎬 Starting FFmpeg render on cloud backend…', 20);
+  // 1. Show modal with immediate direct download link ready
+  setDlProgress('🎬 Rendering 9:16 short on cloud backend…', 18, directDlUrl);
 
-  // Animate progress smoothly
-  let pct = 22;
+  // 2. Animate progress smoothly
+  let pct = 20;
   const ticker = setInterval(() => {
-    pct = Math.min(88, pct + 2);
-    setDlProgress('🎬 FFmpeg is encoding your 9:16 clip… please wait', pct);
-  }, 2500);
+    pct = Math.min(88, pct + 3);
+    setDlProgress('🎬 FFmpeg is encoding your 9:16 clip… please wait', pct, directDlUrl);
+  }, 1800);
 
+  // 3. Request video stream
   try {
     const ctrl = new AbortController();
     const renderTimer = setTimeout(() => ctrl.abort(), 180000); // 3 min timeout
@@ -680,7 +645,7 @@ async function downloadClip() {
         start: startSec,
         duration: durSec,
         layout: currentLayout || 'split',
-        subtitles: activeClip.subtitles || [],
+        subtitles: [], // SUBTITLES TURNED OFF AS REQUESTED
         stream: true
       }),
       signal: ctrl.signal
@@ -690,48 +655,41 @@ async function downloadClip() {
     clearInterval(ticker);
 
     if (res.ok) {
-      const ctype = res.headers.get('content-type') || '';
-      if (ctype.includes('video') || ctype.includes('octet-stream')) {
-        setDlProgress('💾 Saving your 9:16 MP4…', 96);
-        const blob = await res.blob();
-        if (blob.size > 5000) {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          const name = (activeClip.title || activeClip.id || 'clip')
-            .replace(/[^a-z0-9]/gi, '_').toLowerCase();
-          a.download = `godd_ai_${name}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-          hideDlProgress();
-          showToast('✅ Downloaded your 9:16 short!');
-          return;
-        }
+      setDlProgress('💾 Saving your 9:16 MP4…', 95, directDlUrl);
+      const blob = await res.blob();
+      if (blob.size > 2000) {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        const name = (activeClip.title || activeClip.id || 'clip')
+          .replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `godd_ai_${name}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+        hideDlProgress();
+        showToast('✅ Downloaded your 9:16 short!');
+        return;
       }
-      // Non-video response
-      let errMsg = `Server returned HTTP ${res.status}`;
-      try { const j = await res.json(); errMsg = j.error || errMsg; } catch(_) {}
-      hideDlProgress();
-      showErrModal(errMsg);
-      return;
     }
 
-    hideDlProgress();
-    showErrModal(`Server returned HTTP ${res.status}. If Render is cold, retry in 20 seconds.`);
+    // Direct browser navigation fallback
+    setDlProgress('⬇️ Starting native browser download…', 92, directDlUrl);
+    window.location.href = directDlUrl;
+    setTimeout(() => hideDlProgress(), 4500);
 
   } catch (err) {
     clearInterval(ticker);
-    hideDlProgress();
-    if (err.name === 'AbortError') {
-      showErrModal('Render timed out. Try a shorter clip (e.g. 30s) or click Retry.');
-    } else {
-      showErrModal(`Download error: ${err.message}`);
-    }
+    console.warn('[Download] Fetch failed, triggering native browser download:', err);
+    setDlProgress('⬇️ Starting native browser download…', 92, directDlUrl);
+    // Automatic fallback: trigger direct browser GET download
+    window.location.href = directDlUrl;
+    setTimeout(() => hideDlProgress(), 5000);
   }
 }
 
-function setDlProgress(label, pct) {
+function setDlProgress(label, pct, directUrl) {
   const overlay = document.getElementById('dlProgressOverlay');
   if (overlay) {
     overlay.style.display = 'flex';
@@ -739,6 +697,11 @@ function setDlProgress(label, pct) {
     if (l) l.textContent = label;
     const f = document.getElementById('dlFill');
     if (f) f.style.width = `${Math.min(99, pct)}%`;
+    const directBtn = document.getElementById('dlDirectLink');
+    if (directBtn && directUrl) {
+      directBtn.href = directUrl;
+      directBtn.download = `godd_ai_${(activeClip?.title||'clip').replace(/[^a-z0-9]/gi,'_').toLowerCase()}.mp4`;
+    }
   }
 }
 

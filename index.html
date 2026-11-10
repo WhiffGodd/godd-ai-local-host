@@ -137,8 +137,8 @@
           </div>
         </div>
 
-        <!-- Subtitle overlay -->
-        <div class="subs-overlay" id="subsOverlay">
+        <!-- Subtitle overlay (Turned OFF) -->
+        <div class="subs-overlay" id="subsOverlay" style="display:none;">
           <div class="subs-box s-bold" id="subsBox"></div>
         </div>
 
@@ -164,25 +164,6 @@
     <!-- RIGHT: Controls -->
     <div class="col-controls">
 
-      <!-- Subtitle Style -->
-      <div class="ctrl-box">
-        <div class="ctrl-box-title">🎨 Subtitle Style</div>
-        <div class="style-grid">
-          <button class="style-btn active" data-s="bold" onclick="setStyle('bold')">
-            <span class="style-prev prev-bold">BOLD</span>Yellow
-          </button>
-          <button class="style-btn" data-s="beast" onclick="setStyle('beast')">
-            <span class="style-prev prev-beast">CYAN</span>Beast
-          </button>
-          <button class="style-btn" data-s="fire" onclick="setStyle('fire')">
-            <span class="style-prev prev-fire">FIRE</span>Neon
-          </button>
-          <button class="style-btn" data-s="clean" onclick="setStyle('clean')">
-            <span class="style-prev prev-clean">clean</span>Minimal
-          </button>
-        </div>
-      </div>
-
       <!-- Layout -->
       <div class="ctrl-box">
         <div class="ctrl-box-title">📐 Video Layout</div>
@@ -203,28 +184,13 @@
         </div>
       </div>
 
-      <!-- Transcript -->
-      <div class="ctrl-box">
-        <div class="ctrl-box-title" style="display:flex;justify-content:space-between;align-items:center;">
-          🎙️ Streamer Subtitles
-          <span class="real-badge">Real Voice</span>
-        </div>
-        <div class="transcript-box" id="transcriptBox" contenteditable="true" spellcheck="false" oninput="onTranscriptEdit(event)">
-          Select a clip to see subtitles here…
-        </div>
-        <button class="btn-refresh-subs" onclick="refreshSubsFromEditor()">↻ Refresh subtitles from text</button>
-      </div>
-
-      <!-- Download -->
+      <!-- Direct Download Box -->
       <div class="ctrl-box download-box">
-        <button class="btn-download" onclick="downloadClip()">
-          ⬇️ Download 9:16 MP4
+        <div class="ctrl-box-title">💾 Export Video</div>
+        <button class="btn-download" id="mainDlBtn" onclick="downloadClip()">
+          ⬇️ Download 9:16 Short (MP4)
         </button>
-        <div class="dl-note">Free · No watermark · Server-side FFmpeg</div>
-        <div class="sec-actions">
-          <button class="btn-sec" onclick="downloadSRT()">📄 SRT Captions</button>
-          <button class="btn-sec" onclick="copyScript()">📋 Copy Script</button>
-        </div>
+        <div class="dl-note">Zero Watermarks · High Quality · Instant Download</div>
       </div>
 
     </div>
@@ -250,9 +216,13 @@
 <div class="modal-bg" id="dlProgressOverlay" style="display:none">
   <div class="modal-card" style="text-align:center;min-width:340px">
     <div style="font-size:36px;margin-bottom:12px">⚡</div>
-    <div class="dl-label" id="dlLabel">Preparing…</div>
+    <div class="dl-label" id="dlLabel">Rendering your 9:16 clip…</div>
     <div class="dl-track"><div class="dl-fill" id="dlFill"></div></div>
-    <div class="dl-hint">Please do not close this tab</div>
+    <div class="dl-hint" id="dlHint">Encoding on cloud server… please wait 20s</div>
+    <div id="dlDirectWrap" style="margin-top:14px;">
+      <a id="dlDirectLink" href="#" target="_blank" class="btn-download" style="display:inline-block;padding:9px 18px;font-size:13px;text-decoration:none;">⬇️ Click If Download Hasn't Started</a>
+    </div>
+    <button class="btn-modal-sec" style="margin-top:12px;" onclick="hideDlProgress()">Close</button>
   </div>
 </div>
 
