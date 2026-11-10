@@ -639,6 +639,14 @@ function renderSubtitles(curOffset) {
     return;
   }
 
+  // Suggestions made without a transcript are not spoken words. Never show
+  // invented hook text as if it were a caption from the video.
+  if (activeClip.has_real_captions === false && !activeClip.subtitles_edited) {
+    box.innerHTML = '';
+    box.dataset.lastHtml = '';
+    return;
+  }
+
   // 2. If "Source Video Subtitles" selected and video contains real subtitles, USE THEM DIRECTLY!
   if (currentStyle === 'source' && activeClip.video_subtitles && activeClip.video_subtitles.length > 0) {
     const vSubs = activeClip.video_subtitles;
