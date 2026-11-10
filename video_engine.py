@@ -239,8 +239,8 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             with open(srt_temp_file, "w", encoding="utf-8") as f:
                 f.write(generate_srt(subtitles, clip_start=start_time))
             esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-            # Position at bottom of screen with bold yellow text and black border
-            srt_filter = f",subtitles='{esc_srt}':force_style='FontName=Arial,FontSize=22,Bold=1,PrimaryColour=&H0024BFFB,OutlineColour=&H00000000,BorderStyle=1,Outline=2.5,Shadow=1,Alignment=2,MarginV=55'"
+            # Position in dedicated subtitle bar below game screen with bold yellow text and black border
+            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=720,PlayResY=1280,FontName=Arial,FontSize=32,Bold=1,PrimaryColour=&H0024BFFB,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=110'"
         except Exception as se:
             print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
             srt_filter = ""
