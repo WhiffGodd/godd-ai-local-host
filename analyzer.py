@@ -38,6 +38,44 @@ HIGH_ENERGY_WORDS = [
     "viral", "legendary", "super", "epic", "impossible", "holy", "broke"
 ]
 
+# Streamer microphone commentary & clutch gaming voice markers
+STREAMER_KEYWORDS = [
+    # Addressing Chat / Viewers
+    "chat", "guys", "bhai", "bhai log", "dosto", "doston", "viewers", "stream", "live", "bro", "dude",
+    # Gaming Reactions & Clutch Moments
+    "no way", "oh my god", "omg", "what the", "what just happened", "are you kidding", "clutch", "headshot",
+    "kill", "rush", "revive", "heal", "loot", "zone", "let's go", "lets go", "watch this", "look at",
+    "look at my", "one tap", "hacker", "pro", "insane", "literally", "shaking", "clutch god",
+    # Hindi / Hinglish Streamer Reactions
+    "arre yaar", "bhai bhai", "dekh", "dekho", "dekha", "suno", "ruko", "chalo", "kya mara", "kya clutch",
+    "bach gaya", "mar gaya", "kya kar raha hai", "bhot hard", "maza aa gaya", "gadbad", "jaldi", "cover de",
+    "revive kar", "rush karo", "op", "bawaal", "khatam", "bacha le", "maro", "ye kya tha", "kya baat hai",
+    "record tod diya", "literally kaanp"
+]
+
+# In-game scripted narrative / sound tags to suppress so streamer voice is chosen
+IN_GAME_GAMEPLAY_BLACKLIST = [
+    "mission", "objective", "checkpoint", "level completed", "press e to", "press f to",
+    "press space", "loading screen", "system online", "system reboot", "armor depleted",
+    "civilian", "sector clear", "commander", "protocol", "tactical reload", "hostile neutralized",
+    "game over", "soundtrack", "subtitles by", "press any key", "saving progress"
+]
+
+def clean_streamer_text(text: str) -> str:
+    """
+    Remove in-game sound tags like [Music], [Applause], [Gunfire], (chuckles), ♪, 
+    and NPC/radio dialogue prefixes to isolate the streamer's spoken voice.
+    """
+    if not text:
+        return ""
+    # Remove bracketed sound effects: [Music], [Sound], [Laughter], (music), (cheering), etc.
+    cleaned = re.sub(r'\[.*?\]|\(.*?\)|♪+', ' ', text)
+    # Remove in-game character/radio labels: e.g. "Narrator:", "Cop 1:", "Radio:", "NPC:"
+    cleaned = re.sub(r'^[A-Za-z0-9_\s]{1,15}:', '', cleaned)
+    # Normalize extra whitespaces
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 def extract_youtube_id(url: str) -> str:
     """Extract YouTube video ID from various URL formats including livestreams and shorts."""
     if not url:
@@ -202,23 +240,83 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
     return meta
 
 def fetch_transcript_segments(video_id: str) -> list:
-    """Fetch transcripts with timing information."""
+    """
+    Fetch transcripts with priority on streamer mic speech:
+    1. Manually created captions (creator's own subtitles)
+    2. Hindi / Hinglish captions (streamer's native language)
+    3. Auto-generated captions
+    Automatically cleans in-game sound tags ([Music], [Applause], etc.)
+    """
+    transcript_data = None
     try:
         api = YouTubeTranscriptApi()
-        # Fetch transcript in English or available languages
-        transcript_data = api.fetch(video_id)
-        # Format into list of dicts with text, start, duration
+        
+        # Check transcript list for preferred creator/streamer languages
+        try:
+            t_list = api.list(video_id)
+            # Try manual creator captions first (Hindi, Hinglish, English)
+            try:
+                t = t_list.find_manually_created_transcript(['hi', 'hi-Latn', 'en-IN', 'en', 'en-US'])
+                transcript_data = t.fetch()
+            except Exception:
+                pass
+                
+            # If not found, try auto-generated Hindi / Hinglish (streamer speech)
+            if not transcript_data:
+                try:
+                    t = t_list.find_generated_transcript(['hi', 'hi-Latn', 'en-IN'])
+                    transcript_data = t.fetch()
+                except Exception:
+                    pass
+                    
+            # Fallback: English generated
+            if not transcript_data:
+                try:
+                    t = t_list.find_generated_transcript(['en', 'en-US'])
+                    transcript_data = t.fetch()
+                except Exception:
+                    pass
+                    
+            # Last fallback: any available transcript
+            if not transcript_data:
+                for t in t_list:
+                    try:
+                        transcript_data = t.fetch()
+                        break
+                    except Exception:
+                        continue
+        except Exception as e_list:
+            print(f"[TranscriptList] list() notice: {e_list}, trying direct fetch")
+            try:
+                transcript_data = api.fetch(video_id, languages=['hi', 'hi-Latn', 'en-IN', 'en'])
+            except Exception:
+                try:
+                    transcript_data = api.fetch(video_id)
+                except Exception:
+                    transcript_data = None
+
+        if not transcript_data:
+            return []
+
+        # Format and clean out in-game sound tags ([Music], [Gunfire], etc.)
         results = []
         for item in transcript_data:
+            raw_text = item.text.replace("\n", " ").strip()
+            cleaned_text = clean_streamer_text(raw_text)
+            
+            # Skip if segment was pure in-game noise like [Music] or empty
+            if not cleaned_text or len(cleaned_text) < 2:
+                continue
+
             results.append({
-                "text": item.text.replace("\n", " ").strip(),
+                "text": cleaned_text,
                 "start": float(item.start),
                 "duration": float(item.duration),
                 "end": float(item.start) + float(item.duration)
             })
         return results
     except Exception as e:
-        print(f"[Transcript] Notice: {e}. Generating simulated transcript based on audio structure.")
+        print(f"[Transcript] Notice: {e}. Generating simulated streamer transcript.")
         return []
 
 def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list:
@@ -380,7 +478,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     return formatted
 
 def score_segment(start_time: float, duration: float, text: str, first_phrase: str) -> tuple:
-    """Calculate 0-100 Virality Score with human-readable rationale."""
+    """Calculate 0-100 Virality Score prioritizing streamer microphone commentary over in-game narrative."""
     lower_text = text.lower()
     lower_hook = first_phrase.lower()
     
@@ -388,52 +486,66 @@ def score_segment(start_time: float, duration: float, text: str, first_phrase: s
     reasons = []
     tags = []
     
-    # 1. Hook Strength in first 3-5 seconds
+    # 1. STREAMER MIC VOICE PRIORITY (Massive Boost for Streamer Commentary)
+    streamer_matches = [w for w in STREAMER_KEYWORDS if w in lower_text or w in lower_hook]
+    if streamer_matches:
+        score += 25.0
+        reasons.append(f"Streamer mic commentary & live reaction ('{streamer_matches[0]}')")
+        tags.append("Streamer Voice")
+        tags.append("Live Clutch")
+    
+    # 2. IN-GAME SCRIPTED NARRATIVE SUPPRESSION
+    in_game_matches = [w for w in IN_GAME_GAMEPLAY_BLACKLIST if w in lower_text]
+    if in_game_matches and not streamer_matches:
+        score -= 28.0 # Heavily deprioritize in-game NPC/cutscene dialogue
+    
+    # 3. Hook Strength in first 3-5 seconds
     hook_matches = [w for w in HOOK_KEYWORDS if w in lower_hook]
     if hook_matches:
-        score += 14.0
+        score += 12.0
         reasons.append(f"Instant curiosity hook: '{hook_matches[0]}'")
-        tags.append("Strong Hook")
+        if "Strong Hook" not in tags:
+            tags.append("Strong Hook")
     elif any(char in lower_hook for char in ["?", "!"]):
-        score += 8.0
-        reasons.append("Opening question creates an open curiosity loop")
-        tags.append("Curiosity Loop")
+        score += 7.0
+        reasons.append("Opening reaction creates curiosity")
+        if "Curiosity Loop" not in tags:
+            tags.append("Curiosity Loop")
     else:
-        score += 4.0
+        score += 3.0
         
-    # 2. Emotional and High Energy keywords
+    # 4. Emotional and High Energy keywords
     energy_matches = [w for w in HIGH_ENERGY_WORDS if w in lower_text]
     if energy_matches:
         score += 8.0
-        reasons.append(f"High emotional arousal vocabulary ('{energy_matches[0]}')")
+        reasons.append(f"High energy reaction ('{energy_matches[0]}')")
         tags.append("High Energy")
         
-    # 3. Humor / Entertainment triggers
+    # 5. Humor / Entertainment triggers
     humor_matches = [w for w in HUMOR_KEYWORDS if w in lower_text]
     if humor_matches:
-        score += 7.0
-        reasons.append("Engaging humor and conversational spontaneity")
+        score += 6.0
+        reasons.append("Spontaneous humor & banter")
         tags.append("Entertaining")
         
-    # 4. Pacing & Speech Density (Words Per Minute)
+    # 6. Pacing & Speech Density (Words Per Minute)
     word_count = len(text.split())
     wpm = (word_count / max(1.0, duration)) * 60
     if 130 <= wpm <= 190:
-        score += 6.0
-        reasons.append(f"Ideal short-form retention pacing ({int(wpm)} WPM)")
-    elif wpm > 190:
-        score += 4.0
-        reasons.append("Fast-paced punchy delivery")
-    else:
-        score += 2.0
-        
-    # 5. Length sweet-spot for Shorts/Reels (30s - 45s performs highest on TikTok/Reels)
-    if 30 <= duration <= 50:
         score += 5.0
-        reasons.append("Optimal algorithmic duration (30-50s) for 100%+ completion rate")
+        reasons.append(f"Punchy streamer pacing ({int(wpm)} WPM)")
+    elif wpm > 190:
+        score += 3.0
+        reasons.append("Fast-paced live callouts")
+    else:
+        score += 1.0
+        
+    # 7. Optimal Shorts/Reels duration (30s - 45s)
+    if 30 <= duration <= 50:
+        score += 4.0
         tags.append("Algorithm Pick")
         
-    final_score = min(99, int(round(score)))
+    final_score = max(50, min(99, int(round(score))))
     
     # Extract concise hook
     clean_hook = first_phrase.strip().capitalize()
@@ -441,13 +553,13 @@ def score_segment(start_time: float, duration: float, text: str, first_phrase: s
         clean_hook = clean_hook[:57] + "..."
         
     if not tags:
-        tags = ["Trending", "Highlight"]
+        tags = ["Streamer Voice", "Highlight"]
         
     return final_score, reasons[:3], tags[:3], clean_hook
 
 def generate_viral_title(hook: str, tags: list, rank: int) -> str:
-    """Generate high-CTR TikTok/Reels headline."""
-    emojis = ["🤯", "🔥", "🚀", "🤫", "⚠️", "💡"]
+    """Generate high-CTR TikTok/Reels headline in Hinglish focusing on streamer commentary."""
+    emojis = ["🤯", "🔥", "🚀", "😱", "⚠️", "⚡"]
     emoji = emojis[(rank - 1) % len(emojis)]
     
     clean_hook = hook.replace('"', '').replace("'", '').strip()
@@ -456,11 +568,11 @@ def generate_viral_title(hook: str, tags: list, rank: int) -> str:
         clean_hook = " ".join(words)
         
     templates = [
-        f"The Truth About {clean_hook} {emoji}",
-        f"Why Nobody Talks About This {emoji}",
-        f"{clean_hook}... Watch Until The End {emoji}",
-        f"This Changed Everything {emoji}",
-        f"You Won't Believe What Happened {emoji}"
+        f"Bhai Yeh Kya Clutch Tha {emoji}",
+        f"Chat Dekho Yeh Kya Ho Gaya {emoji}",
+        f"{clean_hook}... End Tak Ruk Jaa {emoji}",
+        f"Streamer Reaction: Record Tod Diya {emoji}",
+        f"Yaar Tu Believe Nahi Karega {emoji}"
     ]
     return templates[(rank - 1) % len(templates)]
 
@@ -470,49 +582,49 @@ def format_duration(seconds: float) -> str:
     return f"{mins}:{secs:02d}"
 
 def synthesize_viral_clips(video_duration: float, title: str) -> list:
-    """Intelligent fallback for videos where captions aren't available."""
+    """Intelligent fallback prioritizing streamer voice and live gaming reactions."""
     video_dur = max(60.0, float(video_duration))
     
     presets = [
         {
-            "offset_ratio": 0.08,
-            "duration": 42.0,
-            "score": 98,
-            "title": f"The #1 Secret They Don't Want You To Know 🤯",
-            "hook": "Wait until you see how this actually works...",
-            "reasons": ["Peak opening hook in first 2 seconds", "98% predicted viewer retention", "Punchy takeaway climax"],
-            "tags": ["Mindset", "Viral Hook", "Top Pick"],
-            "text": "Most people completely misunderstand this concept from day one. When you look at the top one percent, they aren't working twenty hours a day. They figured out one simple leverage point that changes every single result. If you apply this exact mindset right now, your trajectory changes forever."
+            "offset_ratio": 0.12,
+            "duration": 35.0,
+            "score": 99,
+            "title": "BHAI YEH KYA CLUTCH THA?! 🤯🔥",
+            "hook": "Chat, dekho mere haath literally kaanp rahe hain abhi...",
+            "reasons": ["Peak streamer mic reaction", "High tension clutch moment", "99% audience retention"],
+            "tags": ["Streamer Voice", "Clutch", "Top Pick"],
+            "text": "Chat, dekho mere haath, literally kaanp rahe hain abhi. Agar yeh jump miss ho gaya, pura speedrun khatam. Teen, do, ek... BHAI KAR DIYA! RECORD TOD DIYA! LET'S GOOO!"
         },
         {
-            "offset_ratio": 0.28,
+            "offset_ratio": 0.38,
             "duration": 36.0,
-            "score": 95,
-            "title": f"The Biggest Mistake Everyone Is Making ⚠️",
-            "hook": "Stop doing this before it ruins everything!",
-            "reasons": ["High urgency warning hook", "Strong emotional trigger", "Contrarian viewpoint"],
-            "tags": ["Controversial", "Mistakes", "High Engagement"],
-            "text": "Stop doing this immediately. Everyone tells you to keep repeating the same outdated strategy, but the data proves the exact opposite. If you look closely at what happened here, it completely destroyed the outcome. Do this instead."
+            "score": 96,
+            "title": "Bhai Yeh Hacker Hai Ya Pro Player?! 🚨👀",
+            "hook": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai?!",
+            "reasons": ["High curiosity streamer callout", "Spontaneous live spectator reaction", "Punchy 36s pacing"],
+            "tags": ["Streamer Voice", "Hacker?", "Live Reaction"],
+            "text": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko, isko report mat karna pehle spectate karte hain... bhai kya aim lock hai are you serious?!"
         },
         {
-            "offset_ratio": 0.52,
-            "duration": 48.0,
-            "score": 93,
-            "title": f"The Moment That Broke The Internet 🔥",
-            "hook": "Nobody expected this to actually happen on live stream...",
-            "reasons": ["Spontaneous unexpected climax", "High curiosity gap", "Storytelling arc"],
-            "tags": ["Crazy Moment", "Live Stream", "Storytime"],
-            "text": "Nobody expected what happened next. We were right in the middle of the discussion when suddenly everything turned upside down. Look at the reaction right here. That was the exact turning point that made this entire episode legendary."
+            "offset_ratio": 0.62,
+            "duration": 38.0,
+            "score": 94,
+            "title": "1v4 Situation Mein Squad Wipe Out! 😱⚡",
+            "hook": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain...",
+            "reasons": ["Intense live callout pacing", "Climax squad wipeout", "High shareability"],
+            "tags": ["Streamer Voice", "Squad Wipe", "OP Clutch"],
+            "text": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... reload karne ka time nahi hai! BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT!"
         },
         {
-            "offset_ratio": 0.74,
-            "duration": 34.0,
-            "score": 89,
-            "title": f"The 10-Second Rule That Solves Everything 💡",
-            "hook": "Here is the simple rule that changed my life forever.",
-            "reasons": ["Fast actionable advice", "High save/share potential", "Concise 34s format"],
-            "tags": ["Life Hack", "Productivity", "Shorts"],
-            "text": "Whenever you feel stuck, remember the ten second rule. You don't need motivation, you just need momentum. Count down from three, take the immediate action, and observe how quickly your hesitation disappears."
+            "offset_ratio": 0.82,
+            "duration": 32.0,
+            "score": 91,
+            "title": "Bhai Jaldi Revive Kar Zone Aa Gaya ⚠️💣",
+            "hook": "Jaldi cover mein aa warna sab khatam ho jaayega!",
+            "reasons": ["Urgent survival gameplay trigger", "Fast-paced Hindi callout", "Optimal short duration"],
+            "tags": ["Streamer Voice", "Survival", "Funny Reaction"],
+            "text": "Bhai jaldi cover mein aa, zone bhi shrink ho raha hai aur pura squad push kar raha hai. Smoke daal smoke daal! Medkit laga raha hu... chalo chalo rush karo abhi unka health low hai!"
         }
     ]
     

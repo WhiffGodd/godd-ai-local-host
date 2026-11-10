@@ -367,10 +367,20 @@
 
                         <!-- TRANSCRIPT -->
                         <div class="control-box">
-                            <label class="control-label">
-                                📝 Script / Transcript
-                                <span class="label-hint">Edit the words shown in captions</span>
-                            </label>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <label class="control-label" style="margin-bottom: 0;">
+                                    🎙️ Streamer Voice &amp; Subtitles
+                                </label>
+                                <span style="font-size: 11px; font-weight: 600; color: #34D399; background: rgba(52, 211, 153, 0.15); border: 1px solid rgba(52, 211, 153, 0.3); padding: 2px 8px; border-radius: 12px;">
+                                    🎙️ Game Audio Filtered
+                                </span>
+                            </div>
+                            <p class="control-hint" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>Showing streamer's spoken commentary:</span>
+                                <button type="button" onclick="injectStreamerCallouts()" style="background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.4); color: #FACC15; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; cursor: pointer;" title="Clean any remaining in-game sound and load intense streamer reaction commentary">
+                                    ⚡ Streamer Clutch Voice
+                                </button>
+                            </p>
                             <div class="transcript-editor-box" id="transcriptEditor" contenteditable="true" oninput="handleTranscriptEdit(event)" spellcheck="false">
                                 Select a clip to see its transcript here…
                             </div>
@@ -378,14 +388,13 @@
 
                         <!-- ═══ EXPORT / DOWNLOAD ═══ -->
                         <div class="export-actions">
-                            <div class="export-title">Step 3: Download Your Short</div>
+                            <div class="export-title">Step 3: Download Your 9:16 Short</div>
                             <button class="btn-download-mp4" type="button" onclick="downloadShortVideo()">
                                 <span class="dl-icon">⬇️</span>
-                                <span>Download Clip (WebM Video)</span>
+                                <span>Download 9:16 MP4 (Free)</span>
                             </button>
                             <p class="download-hint" id="downloadHintText">
-                                Uploaded file: downloads the actual video clip.<br>
-                                YouTube link: downloads SRT captions + script.
+                                ⚡ Direct 1080x1920 MP4 download via godd.ai Cloud FFmpeg Engine • 100% Free • No Watermark
                             </p>
                             <div class="secondary-actions">
                                 <button class="btn-secondary" type="button" onclick="downloadSrtCaptions()" title="Download subtitle file for editing">

@@ -107,7 +107,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
         if not stream_url:
             raise RuntimeError("Could not find direct playable stream URL")
 
-        # Run ffmpeg with fast seek (-ss before -i)
+        # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement
         cmd = [
             FFMPEG_PATH,
             "-y",
@@ -117,6 +117,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             "-filter_complex", filter_complex,
             "-map", "[outv]",
             "-map", "0:a?",
+            "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "23",

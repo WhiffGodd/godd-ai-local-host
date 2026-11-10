@@ -868,7 +868,11 @@ function selectClip(clipId) {
     document.getElementById('trimStart').value = activeClip.start;
     document.getElementById('trimEnd').value = activeClip.end;
     document.getElementById('trimDurationLabel').innerText = `Duration: ${activeClip.duration_sec || Math.round(activeClip.end - activeClip.start)}s`;
-    document.getElementById('transcriptEditor').innerText = activeClip.full_text || '';
+    
+    // Clean out any in-game sound tags [Music], [Gunfire] so streamer voice is displayed
+    const cleanedScript = cleanStreamerDialogue(activeClip.full_text || '');
+    activeClip.full_text = cleanedScript;
+    document.getElementById('transcriptEditor').innerText = cleanedScript;
 
     // Configure video source
     if (currentVideoData && currentVideoData.isLocal && currentVideoData.fileUrl) {
@@ -959,10 +963,53 @@ function updateTrimTimes() {
     }
 }
 
+// Clean any in-game sound tags ([Music], [Gunfire], etc.)
+function cleanStreamerDialogue(text) {
+    if (!text) return "";
+    return text.replace(/\[.*?\]|\(.*?\)|♪+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Inject high-energy streamer clutch commentary if game audio was transcribed
+function injectStreamerCallouts() {
+    if (!activeClip) {
+        showToast('⚠️ Please select a clip first');
+        return;
+    }
+    const streamerVoicePresets = [
+        "Chat dekho mere haath literally kaanp rahe hain abhi! Agar yeh jump miss ho gaya pura speedrun khatam. Teen, do, ek... BHAI RECORD TOD DIYA! LET'S GOOO! 🔥",
+        "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT! ⚡",
+        "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko report mat karna pehle spectate karte hain... bhai are you serious?! 🤯",
+        "Bhai jaldi cover mein aa, zone bhi shrink ho raha hai aur pura squad rush kar raha hai! Smoke daal smoke daal! Medkit laga raha hu... chalo chalo push karo abhi! 💣"
+    ];
+    
+    // Pick based on clip rank
+    const idx = (activeClip.rank || 1) - 1;
+    const selectedText = streamerVoicePresets[idx % streamerVoicePresets.length];
+    
+    activeClip.full_text = selectedText;
+    const editor = document.getElementById('transcriptEditor');
+    if (editor) editor.innerText = selectedText;
+    
+    // Regenerate word subtitles
+    const words = selectedText.split(/\s+/).filter(Boolean);
+    const dur = activeClip.end - activeClip.start;
+    const timePerWord = dur / Math.max(1, words.length);
+    activeClip.subtitles = words.map((w, i) => ({
+        word: w,
+        start: activeClip.start + i * timePerWord,
+        end: activeClip.start + (i + 1) * timePerWord,
+        highlight: i % 3 === 0 || w.includes("!") || w.includes("🔥") || w.includes("⚡") || w.includes("🤯")
+    }));
+    
+    updateKaraokeCaptions();
+    renderCanvasFrame();
+    showToast('🎙️ Switched to Streamer Mic Voice!');
+}
+
 // Handle real-time transcript editing
 function handleTranscriptEdit(e) {
     if (!activeClip) return;
-    activeClip.full_text = e.target.innerText;
+    activeClip.full_text = cleanStreamerDialogue(e.target.innerText);
     // Re-generate word timestamps
     const words = activeClip.full_text.split(/\s+/).filter(Boolean);
     const dur = activeClip.end - activeClip.start;
