@@ -2,14 +2,27 @@ import os
 import subprocess
 import tempfile
 import json
-import imageio_ffmpeg
+import shutil
+
+try:
+    import imageio_ffmpeg
+except ImportError:
+    imageio_ffmpeg = None
 
 try:
     import yt_dlp
 except ImportError:
     yt_dlp = None
 
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+# Locate FFmpeg binary (System PATH -> imageio_ffmpeg -> fallback)
+FFMPEG_PATH = shutil.which("ffmpeg")
+if not FFMPEG_PATH and imageio_ffmpeg:
+    try:
+        FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        FFMPEG_PATH = "ffmpeg"
+if not FFMPEG_PATH:
+    FFMPEG_PATH = "ffmpeg"
 
 def generate_srt(subtitles: list) -> str:
     """Generate SubRip (.srt) caption file content."""

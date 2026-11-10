@@ -508,6 +508,98 @@ function loadSampleVideo(sampleId) {
     simulateAnalysis(sample);
 }
 
+// Cloud Backend (Render.com) Management
+function openBackendModal() {
+    const modal = document.getElementById('backendModal');
+    const input = document.getElementById('backendUrlInput');
+    const msg = document.getElementById('backendStatusMsg');
+    if (modal) modal.style.display = 'flex';
+    if (input) input.value = localStorage.getItem('backend_api_url') || '';
+    if (msg) msg.innerText = '';
+}
+
+function closeBackendModal() {
+    const modal = document.getElementById('backendModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function testAndSaveBackend() {
+    const input = document.getElementById('backendUrlInput');
+    const msg = document.getElementById('backendStatusMsg');
+    let url = (input?.value || '').trim();
+
+    if (!url) {
+        localStorage.removeItem('backend_api_url');
+        if (msg) {
+            msg.style.color = '#94A3B8';
+            msg.innerText = 'Reset to default backend';
+        }
+        showToast('Backend reset to default');
+        setTimeout(closeBackendModal, 1000);
+        return;
+    }
+
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+    }
+    url = url.replace(/\/$/, '');
+
+    if (msg) {
+        msg.style.color = '#FACC15';
+        msg.innerText = 'Testing connection to Render backend…';
+    }
+
+    try {
+        const res = await fetch(`${url}/healthz`, { method: 'GET' });
+        if (res.ok) {
+            localStorage.setItem('backend_api_url', url);
+            if (msg) {
+                msg.style.color = '#34D399';
+                msg.innerText = '✅ Connection successful! Cloud FFmpeg engine active.';
+            }
+            showToast('✅ Render Cloud Backend connected!');
+            setTimeout(closeBackendModal, 1200);
+            return;
+        }
+    } catch(e) {
+        try {
+            const res2 = await fetch(`${url}/api/status`, { method: 'GET' });
+            if (res2.ok) {
+                localStorage.setItem('backend_api_url', url);
+                if (msg) {
+                    msg.style.color = '#34D399';
+                    msg.innerText = '✅ Connection successful! Backend active.';
+                }
+                showToast('✅ Render Cloud Backend connected!');
+                setTimeout(closeBackendModal, 1200);
+                return;
+            }
+        } catch(e2) {}
+    }
+
+    // Still allow saving in case Render is spinning up (free tier spins down after idle)
+    localStorage.setItem('backend_api_url', url);
+    if (msg) {
+        msg.style.color = '#FACC15';
+        msg.innerText = '⚠️ Saved! (Note: Render free services take ~50s to wake up if cold)';
+    }
+    showToast('⚠️ Backend URL saved');
+    setTimeout(closeBackendModal, 1800);
+}
+
+function clearBackendUrl() {
+    localStorage.removeItem('backend_api_url');
+    const input = document.getElementById('backendUrlInput');
+    const msg = document.getElementById('backendStatusMsg');
+    if (input) input.value = '';
+    if (msg) {
+        msg.style.color = '#94A3B8';
+        msg.innerText = 'Cleared. Defaulting to local/built-in.';
+    }
+    showToast('Backend URL cleared');
+    setTimeout(closeBackendModal, 1000);
+}
+
 // Official YouTube API Key Management
 function openApiKeyModal() {
     const modal = document.getElementById('apiKeyModal');

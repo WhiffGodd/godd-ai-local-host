@@ -28,6 +28,7 @@
             </div>
             <nav class="nav-links">
                 <a href="#how-it-works">How It Works</a>
+                <button class="btn-api-key-nav" type="button" onclick="openBackendModal()" title="Connect Render.com Cloud Backend for FFmpeg clipping">☁️ Cloud Backend</button>
                 <button class="btn-api-key-nav" type="button" onclick="openApiKeyModal()" title="Configure Official YouTube Data API Key">🔑 YouTube API</button>
                 <button class="btn-sample-nav" type="button" onclick="loadSampleVideo('sample_huberman')">▶ Try Demo</button>
             </nav>
@@ -467,6 +468,35 @@
             <div class="footer-badge">Free Open Creator Engine</div>
         </div>
     </footer>
+
+    <!-- Render.com Cloud Backend Modal -->
+    <div class="modal-overlay" id="backendModal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-icon">☁️</div>
+            <h3 class="modal-title">Cloud Video Processing Backend</h3>
+            <p class="modal-body">
+                Connect your free Render.com backend worker to clip videos with server-side FFmpeg (just like Klap and Opus Clip).
+            </p>
+            <div class="api-key-input-group">
+                <label for="backendUrlInput" style="font-size: 13px; font-weight: 700; color: var(--text-secondary);">Your Render Backend URL:</label>
+                <input type="text" id="backendUrlInput" placeholder="https://godd-ai-backend.onrender.com" style="width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: #fff; font-size: 13px; margin-top: 6px;">
+                <div id="backendStatusMsg" style="font-size: 12px; margin-top: 6px; font-weight: 600;"></div>
+            </div>
+            <div class="api-key-help-box" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                <strong>Deploy to Render in 2 minutes:</strong><br>
+                1. Go to <a href="https://dashboard.render.com/select-repo?type=web" target="_blank" rel="noopener" style="color: var(--accent-cyan);">dashboard.render.com</a><br>
+                2. Connect repository: <strong>WhiffGodd/godd-ai</strong><br>
+                3. Render automatically detects the <code>Dockerfile</code> &amp; <code>render.yaml</code><br>
+                4. Click <strong>Create Web Service</strong> (Free plan)<br>
+                5. Paste your Render service URL above and click Save
+            </div>
+            <div class="modal-actions" style="margin-top: 10px;">
+                <button class="btn-modal-primary" type="button" onclick="testAndSaveBackend()">Test &amp; Save Backend</button>
+                <button class="btn-modal-secondary" type="button" onclick="clearBackendUrl()">Use Default / Localhost</button>
+                <button class="btn-modal-close" type="button" onclick="closeBackendModal()">✕ Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Official YouTube API Key Modal -->
     <div class="modal-overlay" id="apiKeyModal" style="display: none;">

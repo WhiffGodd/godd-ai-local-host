@@ -199,11 +199,11 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        if path == "/api/status":
+        if path in ("/api/status", "/healthz"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai", "version": "1.0.0"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai backend", "version": "1.0.0"}).encode("utf-8"))
             return
 
         if path == "/api/samples":

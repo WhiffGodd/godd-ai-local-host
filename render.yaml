@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: godd-ai-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: YOUTUBE_API_KEY
+        sync: false
