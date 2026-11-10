@@ -214,6 +214,13 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(SAMPLE_VIDEOS).encode("utf-8"))
             return
 
+        if path == "/api/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "service": "godd-ai", "mode": "gpu_accelerated"}).encode("utf-8"))
+            return
+
         # Direct browser download endpoint via GET
         if path == "/api/render-clip":
             query = urllib.parse.parse_qs(parsed.query)
