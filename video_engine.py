@@ -59,7 +59,6 @@ def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: flo
         # 1. Get audio-only stream URL via yt-dlp (no video download)
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
             'quiet': True,
             'no_warnings': True,
         }
@@ -368,8 +367,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
     # Use yt-dlp to obtain stream URL: prioritize 1080p adaptive streams for crystal-clear quality
     try:
         ydl_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}},
+            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
             'quiet': True,
             'no_warnings': True,
         }
