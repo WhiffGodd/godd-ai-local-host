@@ -1219,115 +1219,34 @@ function renderCanvasFrame() {
     }
 }
 
-// Download Short Video — records actual video content (not canvas animations)
+// Download Short Video — always uses backend FFmpeg (no screen recording ever)
 function downloadShortVideo() {
     if (!activeClip) {
         showToast('⚠️ Please select a clip first');
         return;
     }
-
-    // ── LOCAL UPLOADED VIDEO ──────────────────────────────────────────────────
-    if (currentVideoData && currentVideoData.isLocal && uploadedFileUrl) {
-        showDownloadProgress('Preparing your clip…', 0);
-
-        // Create a hidden video element to play the exact clip segment
-        const clipVideo = document.createElement('video');
-        clipVideo.src = uploadedFileUrl;
-        clipVideo.muted = false;
-        clipVideo.crossOrigin = 'anonymous';
-        clipVideo.preload = 'auto';
-
-        clipVideo.onloadedmetadata = () => {
-            clipVideo.currentTime = activeClip.start;
-        };
-
-        clipVideo.onseeked = () => {
-            // Now capture directly from the video element (actual frames!)
-            let stream;
-            try {
-                stream = clipVideo.captureStream(30);
-            } catch(e) {
-                // Fallback: canvas capture of the preview video
-                _downloadFromCanvas();
-                return;
-            }
-
-            const chunks = [];
-            let recorder;
-            try {
-                recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
-            } catch(e) {
-                try {
-                    recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-                } catch(e2) {
-                    _downloadFromCanvas();
-                    return;
-                }
-            }
-
-            const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
-            let progress = 0;
-            const progressInterval = setInterval(() => {
-                progress = Math.min(90, progress + (100 / (clipDurationMs / 300)));
-                showDownloadProgress(`Recording clip… ${Math.round(progress)}%`, progress);
-            }, 300);
-
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunks.push(e.data);
-            };
-
-            recorder.onstop = () => {
-                clearInterval(progressInterval);
-                showDownloadProgress('Saving file…', 100);
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                a.download = `godd_ai_${safeName}.webm`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(url), 5000);
-                hideDownloadProgress();
-                showToast('✅ Clip downloaded! Check your Downloads folder.');
-            };
-
-            clipVideo.play().catch(() => {});
-            recorder.start(100); // collect data every 100ms
-
-            setTimeout(() => {
-                if (recorder.state === 'recording') recorder.stop();
-                clipVideo.pause();
-            }, clipDurationMs + 200);
-        };
-
-        clipVideo.onerror = () => {
-            hideDownloadProgress();
-            showToast('❌ Could not read video file. Please try re-uploading.');
-        };
-
-        return;
-    }
-
-    // ── YOUTUBE / ONLINE VIDEO: BACKEND FFmpeg RENDER (Klap / Opus Clip style) ──
-    renderClipViaBackendOrScreen();
+    // Both local uploads AND YouTube clips go through the backend FFmpeg render
+    renderClipViaBackend();
 }
 
-// Backend FFmpeg Video Render (Klap/Opus Clip Architecture) with In-Browser Tab Capture Fallback
-async function renderClipViaBackendOrScreen() {
-    const videoUrl = currentVideoData?.url || (currentVideoData?.id ? `https://www.youtube.com/watch?v=${currentVideoData.id}` : '');
+// Backend FFmpeg Video Render — Pure download, no screen recording fallback
+async function renderClipViaBackend() {
+    const videoUrl = currentVideoData?.url
+        || (currentVideoData?.id && !currentVideoData.isLocal
+            ? `https://www.youtube.com/watch?v=${currentVideoData.id}`
+            : currentVideoData?.fileUrl || '');
+
     const startSec = activeClip.start;
     const durSec = activeClip.duration_sec || Math.max(15, Math.round(activeClip.end - activeClip.start));
     const layout = currentLayout || 'crop';
 
-    showDownloadProgress('⚡ Connecting to godd ai FFmpeg backend… (may take ~30s on first use)', 10);
+    if (!videoUrl) {
+        showToast('❌ No video URL found. Please paste a YouTube link or re-upload.');
+        return;
+    }
 
-    // Try backend endpoints in order:
-    // 1. Stored custom backend URL (if user configured one)
-    // 2. Default live Render Cloud Backend (https://godd-ai.onrender.com)
-    // 3. Relative endpoint /api/render-clip (if running on local server)
-    // 4. http://localhost:8080/api/render-clip (standard local backend)
+    showDownloadProgress('⚡ Connecting to godd.ai FFmpeg server… (first request may take ~30s)', 10);
+
     const DEFAULT_CLOUD_BACKEND = 'https://godd-ai.onrender.com';
     const customBackend = (localStorage.getItem('backend_api_url') || '').trim();
     const candidateEndpoints = [];
@@ -1338,15 +1257,15 @@ async function renderClipViaBackendOrScreen() {
         candidateEndpoints.push('http://localhost:8080/api/render-clip');
     }
 
-    let backendSuccess = false;
+    let lastError = '';
 
     for (const endpoint of candidateEndpoints) {
         try {
-            showDownloadProgress('⚡ Rendering 9:16 short with FFmpeg backend… please wait up to 2 min', 30);
+            showDownloadProgress('🎬 FFmpeg rendering your 9:16 clip… please wait (up to 2 min)', 35);
 
             const controller = new AbortController();
-            // 120s timeout — Render free tier cold start (~50s) + render time
-            const timeoutId = setTimeout(() => controller.abort(), 120000);
+            // 150s — Render cold start (~50s) + yt-dlp download + FFmpeg encode
+            const timeoutId = setTimeout(() => controller.abort(), 150000);
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -1365,208 +1284,88 @@ async function renderClipViaBackendOrScreen() {
             if (res.ok) {
                 const ctype = res.headers.get('content-type') || '';
                 if (ctype.includes('video/') || ctype.includes('octet-stream')) {
-                    showDownloadProgress('💾 Saving MP4 video file…', 95);
+                    showDownloadProgress('💾 Saving your MP4…', 90);
                     const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
+                    if (blob.size < 1000) {
+                        lastError = 'Backend returned an empty file';
+                        continue;
+                    }
+                    const blobUrl = URL.createObjectURL(blob);
                     const a = document.createElement('a');
-                    a.href = url;
+                    a.href = blobUrl;
                     const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
                     a.download = `godd_ai_${safeName}.mp4`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
-                    setTimeout(() => URL.revokeObjectURL(url), 6000);
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
                     hideDownloadProgress();
-                    showToast('✅ Viral 9:16 MP4 downloaded via backend!');
-                    backendSuccess = true;
-                    return;
+                    showToast('✅ 9:16 MP4 downloaded!');
+                    return; // success — done
                 } else {
-                    // Got a non-video response — likely a JSON error from backend
-                    console.log(`Backend at ${endpoint} returned non-video content-type: ${ctype}`);
+                    // Backend returned JSON error
+                    try {
+                        const errJson = await res.json();
+                        lastError = errJson.error || 'Backend error';
+                    } catch(_) {
+                        lastError = `Non-video response from ${endpoint}`;
+                    }
+                    console.warn('Backend non-video response:', lastError);
                     continue;
                 }
             } else {
-                console.log(`Backend at ${endpoint} returned HTTP ${res.status}`);
+                lastError = `HTTP ${res.status} from ${endpoint}`;
+                console.warn(lastError);
             }
         } catch (err) {
-            console.log(`Backend attempt failed at ${endpoint}:`, err.message);
+            lastError = err.name === 'AbortError'
+                ? 'Request timed out (backend took too long — try again, it should be warmed up now)'
+                : err.message;
+            console.warn(`Backend failed at ${endpoint}:`, lastError);
         }
     }
 
-    if (!backendSuccess) {
-        hideDownloadProgress();
-        // If backend is not running, prompt user to capture tab or run local server
-        promptDownloadOptions();
-    }
+    // All endpoints failed — show a clean error, NO screen recording
+    hideDownloadProgress();
+    showBackendErrorModal(lastError);
 }
 
-// Prompt download options when cloud backend is unavailable
-function promptDownloadOptions() {
-    let modal = document.getElementById('dlOptionsModal');
+// Clean error modal — no recording, just helpful info
+function showBackendErrorModal(errorDetail) {
+    let modal = document.getElementById('dlErrorModal');
     if (!modal) {
         modal = document.createElement('div');
-        modal.id = 'dlOptionsModal';
+        modal.id = 'dlErrorModal';
         modal.className = 'modal-overlay';
         document.body.appendChild(modal);
     }
 
     modal.innerHTML = `
         <div class="modal-card">
-            <div class="modal-icon">⚡</div>
-            <h3 class="modal-title">Download Your 9:16 Clip</h3>
-            <p class="modal-body">Choose how you'd like to get your actual video file:</p>
-            <div class="modal-actions" style="display: flex; flex-direction: column; gap: 10px;">
-                <button class="btn-modal-primary" type="button" onclick="startOneClickTabRecorder()" style="padding: 14px; font-size: 14px; background: linear-gradient(135deg, #10B981, #059669);">
-                    🎥 1-Click Screen/Tab Record (Instant • No Server Needed)
+            <div class="modal-icon">❌</div>
+            <h3 class="modal-title">Download Failed</h3>
+            <p class="modal-body" style="font-size:13px; color:#F87171; margin-bottom:8px;">${errorDetail || 'Could not connect to the render backend.'}</p>
+            <p class="modal-body" style="font-size:13px;">
+                The godd.ai backend on Render may be spinning up (free tier sleeps after 15 min idle).
+                <strong>Wait 30 seconds and try downloading again</strong> — it usually works on the second attempt.
+            </p>
+            <div class="modal-actions" style="display:flex; flex-direction:column; gap:10px; margin-top:14px;">
+                <button class="btn-modal-primary" type="button"
+                    onclick="document.getElementById('dlErrorModal').style.display='none'; renderClipViaBackend();"
+                    style="background: linear-gradient(135deg, #6366F1, #8B5CF6);">
+                    🔄 Retry Download
                 </button>
-                <button class="btn-modal-secondary" type="button" onclick="showLocalBackendInstructions()" style="padding: 12px; font-size: 13px;">
-                    🖥️ Use Local Python/FFmpeg Backend (Klap Style)
+                <button class="btn-modal-secondary" type="button" onclick="downloadSrtCaptions()">
+                    📄 Download SRT Captions Instead
                 </button>
-                <button class="btn-modal-close" type="button" onclick="document.getElementById('dlOptionsModal').style.display='none'">✕ Cancel</button>
+                <button class="btn-modal-close" type="button"
+                    onclick="document.getElementById('dlErrorModal').style.display='none'">
+                    ✕ Close
+                </button>
             </div>
         </div>
     `;
     modal.style.display = 'flex';
-}
-
-// Instant 1-Click Screen/Tab Clip Recorder (Works immediately without any backend!)
-async function startOneClickTabRecorder() {
-    const modal = document.getElementById('dlOptionsModal');
-    if (modal) modal.style.display = 'none';
-
-    showToast('🎬 Select this tab in the browser prompt to record!');
-
-    try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-            video: { displaySurface: 'browser' },
-            audio: true,
-            preferCurrentTab: true
-        });
-
-        showDownloadProgress('🔴 Recording 9:16 clip in real-time…', 10);
-        const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
-
-        const chunks = [];
-        let recorder;
-        try {
-            recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
-        } catch(e) {
-            recorder = new MediaRecorder(stream);
-        }
-
-        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = () => {
-            stream.getTracks().forEach(t => t.stop());
-            showDownloadProgress('Saving recorded clip…', 100);
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
-            a.download = `godd_ai_${safeName}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 6000);
-            hideDownloadProgress();
-            showToast('✅ Clip recorded and downloaded!');
-        };
-
-        // Seek and play clip
-        if (isYouTubeMode && ytPlayer && ytPlayerReady) {
-            ytPlayer.seekTo(activeClip.start, true);
-            ytPlayer.playVideo();
-        }
-
-        recorder.start(100);
-
-        let progress = 10;
-        const pInterval = setInterval(() => {
-            progress = Math.min(95, progress + (100 / (clipDurationMs / 500)));
-            showDownloadProgress(`🔴 Recording clip… ${Math.round(progress)}%`, progress);
-        }, 500);
-
-        setTimeout(() => {
-            clearInterval(pInterval);
-            if (recorder.state === 'recording') recorder.stop();
-            if (isYouTubeMode && ytPlayer && ytPlayerReady) ytPlayer.pauseVideo();
-        }, clipDurationMs + 300);
-
-    } catch (err) {
-        hideDownloadProgress();
-        showToast('Recording cancelled');
-        showYouTubeDownloadModal();
-    }
-}
-
-// Show Local Backend Instructions
-function showLocalBackendInstructions() {
-    const modal = document.getElementById('dlOptionsModal');
-    if (!modal) return;
-    modal.innerHTML = `
-        <div class="modal-card">
-            <div class="modal-icon">🖥️</div>
-            <h3 class="modal-title">Run Local godd.ai FFmpeg Backend</h3>
-            <p class="modal-body" style="font-size: 13px; text-align: left; line-height: 1.6;">
-                For unlimited 1080x1920 MP4 exports just like Klap &amp; Opus Clip, run the local backend engine included in your project folder:
-            </p>
-            <div style="background: rgba(0,0,0,0.5); padding: 12px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; color: #34D399; margin: 10px 0;">
-                1. Double click <strong>start.bat</strong> in your project folder<br>
-                2. Or run: <strong>python server.py</strong><br>
-                3. Open <strong>http://localhost:8080</strong>
-            </div>
-            <p style="font-size: 12px; color: var(--text-muted); text-align: left;">
-                The backend uses your computer's FFmpeg and yt-dlp to crop, reframe, and save 1080p MP4 files in seconds.
-            </p>
-            <div class="modal-actions" style="margin-top: 14px;">
-                <button class="btn-modal-primary" type="button" onclick="startOneClickTabRecorder()">🎥 Use 1-Click Screen Record Instead</button>
-                <button class="btn-modal-close" type="button" onclick="document.getElementById('dlOptionsModal').style.display='none'">✕ Close</button>
-            </div>
-        </div>
-    `;
-}
-
-// Fallback: Canvas capture (includes subtitles overlay — lower quality but works)
-function _downloadFromCanvas() {
-    showToast('⚡ Rendering with subtitle overlay…');
-    pausePlayer();
-    currentTime = 0;
-    if (previewVideo && currentVideoData?.isLocal) {
-        previewVideo.currentTime = activeClip.start;
-    }
-    startPlayer();
-
-    try {
-        const stream = canvas.captureStream(30);
-        const chunks = [];
-        let recorder;
-        try {
-            recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-        } catch(e) {
-            recorder = new MediaRecorder(stream);
-        }
-
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-        recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            const safeName = (activeClip.title || activeClip.id).replace(/[^a-z0-9]/gi, '_').toLowerCase();
-            a.download = `godd_ai_${safeName}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            hideDownloadProgress();
-            showToast('✅ Clip downloaded!');
-        };
-
-        const clipDurationMs = (activeClip.end - activeClip.start) * 1000;
-        recorder.start();
-        setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, clipDurationMs + 300);
-    } catch(err) {
-        hideDownloadProgress();
-        showToast('❌ Download failed. Try the SRT export instead.');
-    }
 }
 
 // Progress bar helpers
