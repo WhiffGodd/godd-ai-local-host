@@ -14,8 +14,8 @@ const DEFAULT_SAMPLES = [
             {
                 id: "clip_1",
                 rank: 1,
-                title: "The Brutal Secret To Creative Genius 🧠",
-                hook: "Everyone thinks ideas come from motivation, but they're completely wrong...",
+                title: "Yaar, Creative Genius Ka Asli Raaz 🧠",
+                hook: "Bhai log sochte hain ideas motivation se aate hain, but yeh bilkul galat hai...",
                 start: 142.0,
                 end: 182.0,
                 duration: "0:40",
@@ -24,36 +24,35 @@ const DEFAULT_SAMPLES = [
                 virality_badge: "🔥 Viral Hit",
                 viral_reasons: ["High curiosity gap in hook", "98% predicted viewer retention", "Punchy takeaway climax"],
                 tags: ["Mindset", "Genius", "Top Pick"],
-                full_text: "Everyone thinks ideas come from motivation, but they're completely wrong. Motivation is an emotional wave that dies in ten minutes. The top creators don't wait for inspiration. They set up non-negotiable friction boundaries so the subconscious brain is forced to solve the dilemma.",
+                full_text: "Bhai log sochte hain ideas motivation se aate hain, but yeh bilkul galat hai. Motivation ek emotional wave hai jo das minute mein khatam ho jaati hai. Top creators inspiration ka wait nahi karte. Woh aise boundaries set karte hain jisse dimag khud hi solution nikaalte hain.",
                 subtitles: [
-                    { word: "Everyone", start: 142.0, end: 142.5, highlight: false },
-                    { word: "thinks", start: 142.5, end: 142.9, highlight: false },
-                    { word: "ideas", start: 142.9, end: 143.4, highlight: false },
-                    { word: "come", start: 143.4, end: 143.8, highlight: false },
-                    { word: "from", start: 143.8, end: 144.1, highlight: false },
-                    { word: "motivation,", start: 144.1, end: 144.8, highlight: true },
+                    { word: "Bhai", start: 142.0, end: 142.5, highlight: false },
+                    { word: "log", start: 142.5, end: 142.9, highlight: false },
+                    { word: "sochte", start: 142.9, end: 143.4, highlight: false },
+                    { word: "hain", start: 143.4, end: 143.8, highlight: false },
+                    { word: "ideas", start: 143.8, end: 144.1, highlight: false },
+                    { word: "motivation se!", start: 144.1, end: 144.8, highlight: true },
                     { word: "but", start: 145.0, end: 145.3, highlight: false },
-                    { word: "they're", start: 145.3, end: 145.7, highlight: false },
-                    { word: "completely", start: 145.7, end: 146.2, highlight: true },
-                    { word: "wrong.", start: 146.2, end: 147.0, highlight: true },
+                    { word: "yeh", start: 145.3, end: 145.7, highlight: false },
+                    { word: "bilkul", start: 145.7, end: 146.2, highlight: true },
+                    { word: "galat hai! 🤯", start: 146.2, end: 147.0, highlight: true },
                     { word: "Motivation", start: 147.3, end: 147.7, highlight: false },
-                    { word: "dies", start: 147.7, end: 148.1, highlight: false },
-                    { word: "in", start: 148.1, end: 148.4, highlight: false },
-                    { word: "ten", start: 148.4, end: 148.8, highlight: false },
-                    { word: "minutes! ⏳", start: 148.8, end: 149.5, highlight: true },
+                    { word: "khatam", start: 147.7, end: 148.1, highlight: true },
+                    { word: "ho", start: 148.1, end: 148.4, highlight: false },
+                    { word: "jaati", start: 148.4, end: 148.8, highlight: false },
+                    { word: "hai! ⏳", start: 148.8, end: 149.5, highlight: true },
                     { word: "Top", start: 149.8, end: 150.2, highlight: true },
                     { word: "creators", start: 150.2, end: 150.8, highlight: true },
-                    { word: "don't", start: 150.8, end: 151.2, highlight: false },
-                    { word: "wait", start: 151.2, end: 151.6, highlight: false },
-                    { word: "for", start: 151.6, end: 151.9, highlight: false },
-                    { word: "inspiration. 💡", start: 151.9, end: 152.8, highlight: true }
+                    { word: "wait", start: 150.8, end: 151.2, highlight: false },
+                    { word: "nahi", start: 151.2, end: 151.6, highlight: false },
+                    { word: "karte. 💡", start: 151.6, end: 152.5, highlight: true }
                 ]
             },
             {
                 id: "clip_2",
                 rank: 2,
-                title: "Why 99% Of People Burn Out Early ⚠️",
-                hook: "Stop waking up and checking your screen first thing in the morning!",
+                title: "99% Log Itni Jaldi Thak Kyun Jaate Hain ⚠️",
+                hook: "Subah uthke phone mat dekho — yeh tere poore din ko barbaad kar deta hai!",
                 start: 410.0,
                 end: 445.0,
                 duration: "0:35",
@@ -62,19 +61,19 @@ const DEFAULT_SAMPLES = [
                 virality_badge: "🔥 Viral Hit",
                 viral_reasons: ["Urgent alert trigger", "High emotional relatability", "Punchy 35-sec runtime"],
                 tags: ["Dopamine", "Health", "Trending"],
-                full_text: "Stop waking up and checking your phone first thing. When you flood your dopamine receptors at 7:00 AM with infinite scroll, you've exhausted your executive focus for the next eight hours. Sunlight in your eyes before screen time changes your entire biochemical state.",
+                full_text: "Subah uthke sabse pehle phone mat dekho. Jab tu 7 baje infinite scroll karta hai, tu apne dopamine receptors ko barbaad kar leta hai. Agle 8 ghante teri focus ki capacity zero ho jaati hai. Pehle aankhon mein sunlight le — sab kuch change ho jaayega.",
                 subtitles: [
-                    { word: "Stop", start: 410.0, end: 410.4, highlight: true },
-                    { word: "waking", start: 410.4, end: 410.8, highlight: false },
-                    { word: "up", start: 410.8, end: 411.1, highlight: false },
-                    { word: "and", start: 411.1, end: 411.3, highlight: false },
-                    { word: "checking", start: 411.3, end: 411.8, highlight: false },
-                    { word: "your", start: 411.8, end: 412.1, highlight: false },
-                    { word: "phone! 📱", start: 412.1, end: 412.9, highlight: true },
-                    { word: "You're", start: 413.2, end: 413.6, highlight: false },
-                    { word: "destroying", start: 413.6, end: 414.2, highlight: true },
-                    { word: "your", start: 414.2, end: 414.5, highlight: false },
-                    { word: "dopamine! 🤯", start: 414.5, end: 415.5, highlight: true }
+                    { word: "Subah", start: 410.0, end: 410.4, highlight: true },
+                    { word: "uthke", start: 410.4, end: 410.8, highlight: false },
+                    { word: "phone", start: 410.8, end: 411.1, highlight: false },
+                    { word: "mat", start: 411.1, end: 411.3, highlight: false },
+                    { word: "dekho! 📱", start: 411.3, end: 412.0, highlight: true },
+                    { word: "Tu", start: 412.3, end: 412.6, highlight: false },
+                    { word: "apna", start: 412.6, end: 413.0, highlight: false },
+                    { word: "dopamine", start: 413.0, end: 413.6, highlight: true },
+                    { word: "barbaad", start: 413.6, end: 414.2, highlight: true },
+                    { word: "kar", start: 414.2, end: 414.5, highlight: false },
+                    { word: "leta hai! 🤯", start: 414.5, end: 415.5, highlight: true }
                 ]
             }
         ]
@@ -90,8 +89,8 @@ const DEFAULT_SAMPLES = [
             {
                 id: "clip_stream_1",
                 rank: 1,
-                title: "HE ACTUALLY PULLED IT OFF?! 🤯🔥",
-                hook: "Chat, look at my hands, they are literally shaking right now...",
+                title: "BHAI USNE KAR DIYA?! 🤯🔥",
+                hook: "Chat, dekho mere haath, literally kaanp rahe hain abhi...",
                 start: 620.0,
                 end: 655.0,
                 duration: "0:35",
@@ -100,18 +99,17 @@ const DEFAULT_SAMPLES = [
                 virality_badge: "🔥 Viral Hit",
                 viral_reasons: ["Extreme live suspense", "High viewer tension", "Peak spontaneous reaction"],
                 tags: ["Gaming", "Clutch", "World Record"],
-                full_text: "Chat, look at my hands, they are literally shaking right now. If we miss this one jump, the entire speedrun is over. Three, two, one... LET'S GOOO! WE BROKE THE RECORD!",
+                full_text: "Chat, dekho mere haath, literally kaanp rahe hain abhi. Agar yeh jump miss ho gaya, pura 10 ghante ka speedrun khatam. Teen, do, ek... BHAI KAR DIYA! RECORD TOD DIYA!",
                 subtitles: [
                     { word: "Chat,", start: 620.0, end: 620.5, highlight: true },
-                    { word: "look", start: 620.5, end: 620.8, highlight: false },
-                    { word: "at", start: 620.8, end: 621.1, highlight: false },
-                    { word: "my", start: 621.1, end: 621.3, highlight: false },
-                    { word: "hands! 😱", start: 621.3, end: 622.0, highlight: true },
-                    { word: "Three,", start: 622.5, end: 623.0, highlight: false },
-                    { word: "two,", start: 623.0, end: 623.5, highlight: false },
-                    { word: "one...", start: 623.5, end: 624.2, highlight: false },
-                    { word: "LET'S", start: 624.5, end: 625.0, highlight: true },
-                    { word: "GOOO! 🔥", start: 625.0, end: 626.0, highlight: true }
+                    { word: "dekho", start: 620.5, end: 620.8, highlight: false },
+                    { word: "mere", start: 620.8, end: 621.1, highlight: false },
+                    { word: "haath! 😱", start: 621.1, end: 622.0, highlight: true },
+                    { word: "Teen,", start: 622.5, end: 623.0, highlight: false },
+                    { word: "do,", start: 623.0, end: 623.5, highlight: false },
+                    { word: "ek...", start: 623.5, end: 624.2, highlight: false },
+                    { word: "KAR", start: 624.5, end: 625.0, highlight: true },
+                    { word: "DIYA! 🔥", start: 625.0, end: 626.0, highlight: true }
                 ]
             }
         ]
@@ -159,7 +157,7 @@ function initOrUpdateYouTubePlayer(videoId, start, end) {
                 playerVars: {
                     start: Math.floor(start),
                     end: Math.floor(end),
-                    autoplay: 1,
+                    autoplay: 0,
                     controls: 0,
                     modestbranding: 1,
                     rel: 0,
@@ -171,7 +169,9 @@ function initOrUpdateYouTubePlayer(videoId, start, end) {
                     onReady: (e) => {
                         ytPlayerReady = true;
                         e.target.seekTo(start, true);
-                        e.target.playVideo();
+                        // Do NOT auto-play — let user press Play
+                        isPlaying = false;
+                        updatePlayIcon(false);
                     },
                     onStateChange: (e) => {
                         if (e.data === YT.PlayerState.PLAYING) {
@@ -196,7 +196,12 @@ function initOrUpdateYouTubePlayer(videoId, start, end) {
                     startSeconds: Math.floor(start),
                     endSeconds: Math.floor(end)
                 });
-                ytPlayer.playVideo();
+                // Pause after loading new clip — user presses play
+                setTimeout(() => {
+                    try { ytPlayer.pauseVideo(); } catch(ex) {}
+                    isPlaying = false;
+                    updatePlayIcon(false);
+                }, 300);
             } catch(e) {
                 // Fallback to iframe src if player error
                 if (ytIframe) {
@@ -403,8 +408,8 @@ function generateClipsForFile(fileName, duration) {
         {
             id: "clip_up_1",
             rank: 1,
-            title: `The Craziest Part of ${cleanName} 🤯`,
-            hook: "You will not believe what happens right at this moment...",
+            title: `${cleanName} Ka Sabse Crazy Part 🤯`,
+            hook: "Yaar, tu believe nahi karega yeh dekh ke...",
             start: Math.round(dur * 0.1),
             end: Math.round(Math.min(dur, dur * 0.1 + 38)),
             duration: "0:38",
@@ -413,25 +418,23 @@ function generateClipsForFile(fileName, duration) {
             virality_badge: "🔥 Viral Hit",
             viral_reasons: ["Curiosity gap in first 3s", "High speech retention pace", "Climax payoff"],
             tags: ["Viral Hook", "Climax", "Top Pick"],
-            full_text: "You won't believe what happens next. When we first started recording this, nobody expected the outcome to shift this dramatically. Look closely at this exact sequence right here.",
+            full_text: "Yaar, tu believe nahi karega yeh dekh ke. Jab humne pehli baar record kiya, kisi ko nahi pata tha outcome itna dramatic hoga. Dhyan se dekh is exact sequence ko.",
             subtitles: [
-                { word: "You", start: dur * 0.1, end: dur * 0.1 + 0.4, highlight: false },
-                { word: "won't", start: dur * 0.1 + 0.4, end: dur * 0.1 + 0.8, highlight: false },
+                { word: "Yaar,", start: dur * 0.1, end: dur * 0.1 + 0.4, highlight: false },
+                { word: "tu", start: dur * 0.1 + 0.4, end: dur * 0.1 + 0.8, highlight: false },
                 { word: "believe", start: dur * 0.1 + 0.8, end: dur * 0.1 + 1.3, highlight: true },
-                { word: "what", start: dur * 0.1 + 1.3, end: dur * 0.1 + 1.6, highlight: false },
-                { word: "happens", start: dur * 0.1 + 1.6, end: dur * 0.1 + 2.1, highlight: false },
-                { word: "next! 🤯", start: dur * 0.1 + 2.1, end: dur * 0.1 + 3.0, highlight: true },
-                { word: "Look", start: dur * 0.1 + 3.2, end: dur * 0.1 + 3.6, highlight: false },
-                { word: "closely", start: dur * 0.1 + 3.6, end: dur * 0.1 + 4.2, highlight: true },
-                { word: "at", start: dur * 0.1 + 4.2, end: dur * 0.1 + 4.5, highlight: false },
-                { word: "this! 🔥", start: dur * 0.1 + 4.5, end: dur * 0.1 + 5.5, highlight: true }
+                { word: "nahi", start: dur * 0.1 + 1.3, end: dur * 0.1 + 1.6, highlight: false },
+                { word: "karega! 🤯", start: dur * 0.1 + 1.6, end: dur * 0.1 + 2.5, highlight: true },
+                { word: "Dhyan", start: dur * 0.1 + 2.8, end: dur * 0.1 + 3.2, highlight: false },
+                { word: "se", start: dur * 0.1 + 3.2, end: dur * 0.1 + 3.5, highlight: false },
+                { word: "dekh! 🔥", start: dur * 0.1 + 3.5, end: dur * 0.1 + 4.5, highlight: true }
             ]
         },
         {
             id: "clip_up_2",
             rank: 2,
-            title: `The #1 Mistake Nobody Notices ⚠️`,
-            hook: "Pay attention to what happened right before the turn!",
+            title: `Yeh Galti Koi Notice Nahi Karta ⚠️`,
+            hook: "Dhyan de — yeh turn se pehle kya hua tha!",
             start: Math.round(dur * 0.45),
             end: Math.round(Math.min(dur, dur * 0.45 + 32)),
             duration: "0:32",
@@ -440,22 +443,23 @@ function generateClipsForFile(fileName, duration) {
             virality_badge: "🔥 Viral Hit",
             viral_reasons: ["Warning alert trigger", "High curiosity hook", "Optimal 32s length"],
             tags: ["Mistakes", "Trending", "Storytime"],
-            full_text: "Pay attention to this detail right here. Most people completely overlook this, but it changes everything that followed.",
+            full_text: "Is detail pe dhyan de. Zyaadatar log ise completely ignore karte hain, but isi ne baad mein sab kuch badal diya.",
             subtitles: [
-                { word: "Pay", start: dur * 0.45, end: dur * 0.45 + 0.4, highlight: false },
-                { word: "attention", start: dur * 0.45 + 0.4, end: dur * 0.45 + 1.0, highlight: true },
-                { word: "to", start: dur * 0.45 + 1.0, end: dur * 0.45 + 1.3, highlight: false },
-                { word: "this! ⚠️", start: dur * 0.45 + 1.3, end: dur * 0.45 + 2.2, highlight: true },
-                { word: "It", start: dur * 0.45 + 2.4, end: dur * 0.45 + 2.7, highlight: false },
-                { word: "changes", start: dur * 0.45 + 2.7, end: dur * 0.45 + 3.3, highlight: true },
-                { word: "everything! 💡", start: dur * 0.45 + 3.3, end: dur * 0.45 + 4.5, highlight: true }
+                { word: "Is", start: dur * 0.45, end: dur * 0.45 + 0.4, highlight: false },
+                { word: "detail", start: dur * 0.45 + 0.4, end: dur * 0.45 + 1.0, highlight: true },
+                { word: "pe", start: dur * 0.45 + 1.0, end: dur * 0.45 + 1.3, highlight: false },
+                { word: "dhyan! ⚠️", start: dur * 0.45 + 1.3, end: dur * 0.45 + 2.2, highlight: true },
+                { word: "Yeh", start: dur * 0.45 + 2.4, end: dur * 0.45 + 2.7, highlight: false },
+                { word: "sab", start: dur * 0.45 + 2.7, end: dur * 0.45 + 3.1, highlight: false },
+                { word: "badal", start: dur * 0.45 + 3.1, end: dur * 0.45 + 3.6, highlight: true },
+                { word: "deta hai! 💡", start: dur * 0.45 + 3.6, end: dur * 0.45 + 4.5, highlight: true }
             ]
         },
         {
             id: "clip_up_3",
             rank: 3,
-            title: `Wait Until The Very End... 🚀`,
-            hook: "This was the single best moment of the entire recording.",
+            title: `Bilkul End Tak Ruk Jaa... 🚀`,
+            hook: "Yeh puri recording ka sabse best moment tha.",
             start: Math.round(dur * 0.72),
             end: Math.round(Math.min(dur, dur * 0.72 + 35)),
             duration: "0:35",
@@ -464,13 +468,13 @@ function generateClipsForFile(fileName, duration) {
             virality_badge: "⚡ High Potential",
             viral_reasons: ["Strong ending payoff", "Emotional reaction spike", "Shareable content"],
             tags: ["Reaction", "Highlight"],
-            full_text: "This was the single best moment of the entire video. If you made it this far, you know exactly why this went crazy.",
+            full_text: "Yeh puri recording ka sabse best moment tha. Agar tu itna door aaya hai, tu jaanta hai kyun yeh clip viral gayi.",
             subtitles: [
-                { word: "This", start: dur * 0.72, end: dur * 0.72 + 0.4, highlight: false },
-                { word: "was", start: dur * 0.72 + 0.4, end: dur * 0.72 + 0.7, highlight: false },
-                { word: "the", start: dur * 0.72 + 0.7, end: dur * 0.72 + 1.0, highlight: false },
-                { word: "best", start: dur * 0.72 + 1.0, end: dur * 0.72 + 1.5, highlight: true },
-                { word: "moment! 🚀", start: dur * 0.72 + 1.5, end: dur * 0.72 + 2.6, highlight: true }
+                { word: "Yeh", start: dur * 0.72, end: dur * 0.72 + 0.4, highlight: false },
+                { word: "puri", start: dur * 0.72 + 0.4, end: dur * 0.72 + 0.7, highlight: false },
+                { word: "recording", start: dur * 0.72 + 0.7, end: dur * 0.72 + 1.2, highlight: false },
+                { word: "ka", start: dur * 0.72 + 1.2, end: dur * 0.72 + 1.4, highlight: false },
+                { word: "best moment! 🚀", start: dur * 0.72 + 1.4, end: dur * 0.72 + 2.5, highlight: true }
             ]
         }
     ];
@@ -689,8 +693,8 @@ async function analyzeVideo() {
                 {
                     id: "clip_yt_1",
                     rank: 1,
-                    title: "The Truth Nobody Tells You 🤯",
-                    hook: "Wait until you see how this actually works...",
+                    title: "Yeh Sach Koi Nahi Batata 🤯",
+                    hook: "Ruk, dekh yeh kaise actually kaam karta hai...",
                     start: 35.0,
                     end: 75.0,
                     duration: "0:40",
@@ -699,24 +703,24 @@ async function analyzeVideo() {
                     virality_badge: "🔥 Viral Hit",
                     viral_reasons: ["Peak curiosity gap in first 2s", "98% predicted viewer retention", "Punchy takeaway climax"],
                     tags: ["Mindset", "Viral Hook", "Top Pick"],
-                    full_text: "Most people completely misunderstand this concept. When you look at the top one percent, they aren't working twenty hours a day. They figured out one simple leverage point that changes every single result.",
+                    full_text: "Zyaadatar log is concept ko bilkul galat samajhte hain. Jab tu top 1% ko dekhega, woh 20 ghante kaam nahi karte. Unhone ek simple leverage point dhundha joh har result badal deta hai.",
                     subtitles: [
-                        { word: "Most", start: 35.0, end: 35.4, highlight: false },
-                        { word: "people", start: 35.4, end: 35.8, highlight: false },
-                        { word: "completely", start: 35.8, end: 36.3, highlight: true },
-                        { word: "misunderstand", start: 36.3, end: 37.1, highlight: true },
-                        { word: "this! 🤯", start: 37.1, end: 38.0, highlight: true },
+                        { word: "Zyaadatar", start: 35.0, end: 35.5, highlight: false },
+                        { word: "log", start: 35.5, end: 35.8, highlight: false },
+                        { word: "bilkul", start: 35.8, end: 36.3, highlight: true },
+                        { word: "galat", start: 36.3, end: 36.8, highlight: true },
+                        { word: "samajhte hain! 🤯", start: 36.8, end: 38.0, highlight: true },
                         { word: "Top", start: 38.3, end: 38.7, highlight: true },
                         { word: "creators", start: 38.7, end: 39.3, highlight: true },
-                        { word: "use", start: 39.3, end: 39.6, highlight: false },
-                        { word: "leverage! 🚀", start: 39.6, end: 40.5, highlight: true }
+                        { word: "leverage", start: 39.3, end: 39.9, highlight: false },
+                        { word: "use karte hain! 🚀", start: 39.9, end: 41.0, highlight: true }
                     ]
                 },
                 {
                     id: "clip_yt_2",
                     rank: 2,
-                    title: "The Moment Everything Changed 🔥",
-                    hook: "Look at what happens right at this exact second!",
+                    title: "Jis Pal Sab Kuch Badal Gaya 🔥",
+                    hook: "Dekh kya hota hai bilkul is second mein!",
                     start: 120.0,
                     end: 155.0,
                     duration: "0:35",
@@ -725,13 +729,16 @@ async function analyzeVideo() {
                     virality_badge: "🔥 Viral Hit",
                     viral_reasons: ["Spontaneous reaction", "High retention curve", "Emotional spike"],
                     tags: ["Storytime", "Highlights"],
-                    full_text: "Look at what happens right here. Nobody in the room expected this to unfold like this.",
+                    full_text: "Dekh kya hota hai yahan. Room mein kisi ko nahi pata tha yeh aise unfold hoga.",
                     subtitles: [
-                        { word: "Look", start: 120.0, end: 120.4, highlight: false },
-                        { word: "at", start: 120.4, end: 120.7, highlight: false },
-                        { word: "what", start: 120.7, end: 121.0, highlight: false },
-                        { word: "happens", start: 121.0, end: 121.5, highlight: true },
-                        { word: "here! 🔥", start: 121.5, end: 122.5, highlight: true }
+                        { word: "Dekh", start: 120.0, end: 120.4, highlight: false },
+                        { word: "kya", start: 120.4, end: 120.7, highlight: false },
+                        { word: "hota", start: 120.7, end: 121.0, highlight: false },
+                        { word: "hai! 🔥", start: 121.0, end: 122.0, highlight: true },
+                        { word: "Kisi", start: 122.3, end: 122.6, highlight: false },
+                        { word: "ko", start: 122.6, end: 122.8, highlight: false },
+                        { word: "pata", start: 122.8, end: 123.1, highlight: false },
+                        { word: "nahi tha! 😱", start: 123.1, end: 124.0, highlight: true }
                     ]
                 }
             ];
@@ -852,6 +859,8 @@ function selectClip(clipId) {
     });
 
     pausePlayer();
+    isPlaying = false;
+    updatePlayIcon(false);
     currentTime = 0;
 
     // Update controls
@@ -1312,7 +1321,7 @@ async function renderClipViaBackendOrScreen() {
     const durSec = activeClip.duration_sec || Math.max(15, Math.round(activeClip.end - activeClip.start));
     const layout = currentLayout || 'crop';
 
-    showDownloadProgress('⚡ Connecting to godd ai FFmpeg backend worker…', 20);
+    showDownloadProgress('⚡ Connecting to godd ai FFmpeg backend… (may take ~30s on first use)', 10);
 
     // Try backend endpoints in order:
     // 1. Stored custom backend URL (if user configured one)
@@ -1333,10 +1342,11 @@ async function renderClipViaBackendOrScreen() {
 
     for (const endpoint of candidateEndpoints) {
         try {
-            showDownloadProgress('⚡ Rendering 9:16 short with FFmpeg backend…', 45);
+            showDownloadProgress('⚡ Rendering 9:16 short with FFmpeg backend… please wait up to 2 min', 30);
 
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for video render
+            // 120s timeout — Render free tier cold start (~50s) + render time
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -1355,7 +1365,7 @@ async function renderClipViaBackendOrScreen() {
             if (res.ok) {
                 const ctype = res.headers.get('content-type') || '';
                 if (ctype.includes('video/') || ctype.includes('octet-stream')) {
-                    showDownloadProgress('Saving MP4 video file…', 95);
+                    showDownloadProgress('💾 Saving MP4 video file…', 95);
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -1370,7 +1380,13 @@ async function renderClipViaBackendOrScreen() {
                     showToast('✅ Viral 9:16 MP4 downloaded via backend!');
                     backendSuccess = true;
                     return;
+                } else {
+                    // Got a non-video response — likely a JSON error from backend
+                    console.log(`Backend at ${endpoint} returned non-video content-type: ${ctype}`);
+                    continue;
                 }
+            } else {
+                console.log(`Backend at ${endpoint} returned HTTP ${res.status}`);
             }
         } catch (err) {
             console.log(`Backend attempt failed at ${endpoint}:`, err.message);
