@@ -1,3 +1,12 @@
+try:
+    from .youtube_access import youtube_options, extract_youtube_info
+except ImportError:
+    from youtube_access import youtube_options, extract_youtube_info
+try:
+    from .clip_boundaries import snap_to_clean_sentence_boundaries
+except ImportError:
+    from clip_boundaries import snap_to_clean_sentence_boundaries
+
 import re
 import math
 import json
@@ -222,16 +231,15 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
                 'skip_download': True,
                 'extract_flat': True
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return {
-                    "title": info.get("title", f"Video {video_id}"),
-                    "author": info.get("uploader", info.get("channel", "Creator")),
-                    "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
-                    "duration": info.get("duration", 600),
-                    "description": (info.get("description") or "")[:300],
-                    "view_count": info.get("view_count", 150000)
-                }
+            info = extract_youtube_info(url, ydl_opts)
+            return {
+                "title": info.get("title", f"Video {video_id}"),
+                "author": info.get("uploader", info.get("channel", "Creator")),
+                "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                "duration": info.get("duration", 600),
+                "description": (info.get("description") or "")[:300],
+                "view_count": info.get("view_count", 150000)
+            }
         except Exception as e:
             print(f"[Metadata] yt-dlp warning: {e}, falling back to oEmbed")
 
@@ -252,59 +260,57 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}}
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            subs = info.get('subtitles') or {}
-            auto_subs = info.get('automatic_captions') or {}
+        info = extract_youtube_info(url, ydl_opts)
+        subs = info.get('subtitles') or {}
+        auto_subs = info.get('automatic_captions') or {}
 
-            # Prioritize Hindi/Hinglish, then Indian English, then English
-            chosen_sub_formats = None
-            for lang in ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB']:
-                if lang in subs:
-                    chosen_sub_formats = subs[lang]
-                    break
-                if lang in auto_subs:
-                    chosen_sub_formats = auto_subs[lang]
-                    break
+        # Prioritize Hindi/Hinglish, then Indian English, then English
+        chosen_sub_formats = None
+        for lang in ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB']:
+            if lang in subs:
+                chosen_sub_formats = subs[lang]
+                break
+            if lang in auto_subs:
+                chosen_sub_formats = auto_subs[lang]
+                break
 
-            if not chosen_sub_formats:
-                if subs:
-                    chosen_sub_formats = next(iter(subs.values()))
-                elif auto_subs:
-                    chosen_sub_formats = next(iter(auto_subs.values()))
+        if not chosen_sub_formats:
+            if subs:
+                chosen_sub_formats = next(iter(subs.values()))
+            elif auto_subs:
+                chosen_sub_formats = next(iter(auto_subs.values()))
 
-            if not chosen_sub_formats:
-                return []
+        if not chosen_sub_formats:
+            return []
 
-            # Prefer json3 format for millisecond-level word timing
-            json3_url = next((f['url'] for f in chosen_sub_formats if f.get('ext') == 'json3'), None)
-            if not json3_url:
-                json3_url = chosen_sub_formats[0].get('url')
+        # Prefer json3 format for millisecond-level word timing
+        json3_url = next((f['url'] for f in chosen_sub_formats if f.get('ext') == 'json3'), None)
+        if not json3_url:
+            json3_url = chosen_sub_formats[0].get('url')
 
-            if not json3_url:
-                return []
+        if not json3_url:
+            return []
 
-            req = urllib.request.Request(json3_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                events = data.get('events', [])
-                results = []
-                for ev in events:
-                    start_sec = ev.get('tStartMs', 0) / 1000.0
-                    dur_sec = ev.get('dDurationMs', 0) / 1000.0
-                    segs = ev.get('segs', [])
-                    text = "".join(s.get('utf8', '') for s in segs).replace("\n", " ").strip()
-                    cleaned = clean_streamer_text(text)
-                    if cleaned and len(cleaned) > 1:
-                        results.append({
-                            "text": cleaned,
-                            "start": round(start_sec, 2),
-                            "duration": round(dur_sec, 2),
-                            "end": round(start_sec + dur_sec, 2)
-                        })
-                return results
+        req = urllib.request.Request(json3_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            events = data.get('events', [])
+            results = []
+            for ev in events:
+                start_sec = ev.get('tStartMs', 0) / 1000.0
+                dur_sec = ev.get('dDurationMs', 0) / 1000.0
+                segs = ev.get('segs', [])
+                text = "".join(s.get('utf8', '') for s in segs).replace("\n", " ").strip()
+                cleaned = clean_streamer_text(text)
+                if cleaned and len(cleaned) > 1:
+                    results.append({
+                        "text": cleaned,
+                        "start": round(start_sec, 2),
+                        "duration": round(dur_sec, 2),
+                        "end": round(start_sec + dur_sec, 2)
+                    })
+            return results
     except Exception as e:
         print(f"[yt-dlp Captions] Notice: {e}")
         return []
@@ -431,13 +437,13 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     - Speech density (WPM)
     - Pacing and climax conclusion
     """
-    if not transcript or len(transcript) < 5:
+    if not transcript:
         # If no transcript was fetched (e.g., auto-captions off), synthesize high-potential segments based on video length
         return synthesize_viral_clips(video_duration, title)
         
-    target_clip_length = 40.0 # ~40 seconds per short
-    min_clip_length = 25.0
-    max_clip_length = 60.0
+    target_clip_length = 58.0 # Soft duration target; completion may extend to 180 seconds
+    min_clip_length = 35.0
+    max_clip_length = 85.0
     
     candidate_windows = []
     total_segments = len(transcript)
@@ -452,40 +458,19 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
         if start_time + min_clip_length > video_duration:
             break
             
-        current_words = []
-        end_time = start_time
-        
-        for j in range(i, total_segments):
-            seg = transcript[j]
-            current_words.append(seg["text"])
-            end_time = seg["end"]
-            
-            dur = end_time - start_time
-            if dur >= min_clip_length:
-                full_text = " ".join(current_words)
-                
-                # Calculate virality score
-                score, reasons, tags, hook_text = score_segment(
-                    start_time=start_time,
-                    duration=dur,
-                    text=full_text,
-                    first_phrase=" ".join(current_words[:min(4, len(current_words))])
-                )
-                
-                candidate_windows.append({
-                    "start": round(start_time, 2),
-                    "end": round(end_time, 2),
-                    "duration_sec": round(dur, 1),
-                    "text": full_text,
-                    "score": score,
-                    "reasons": reasons,
-                    "tags": tags,
-                    "hook": hook_text
-                })
-                
-                if dur >= max_clip_length:
-                    break
-                    
+        start_time, end_time, segments = snap_to_clean_sentence_boundaries(
+            transcript, start_time, min_duration=min_clip_length,
+            ideal_duration=target_clip_length, max_duration=max_clip_length, boundary_limit=video_duration)
+        if not segments:
+            continue
+        current_words = [seg.get("text", "") for seg in segments]
+        full_text = " ".join(current_words)
+        score, reasons, tags, hook_text = score_segment(
+            start_time, end_time - start_time, full_text, " ".join(current_words[:4]))
+        candidate_windows.append({
+            "start": start_time, "end": end_time, "duration_sec": round(end_time - start_time, 2),
+            "text": full_text, "score": score, "reasons": reasons, "tags": tags, "hook": hook_text})
+
     # Sort candidates by virality score descending
     candidate_windows.sort(key=lambda x: x["score"], reverse=True)
     
@@ -504,7 +489,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 break
                 
     if not selected_clips:
-        return synthesize_viral_clips(video_duration, title)
+        return []
         
     # Format selected clips for Klap-style display
     formatted = []

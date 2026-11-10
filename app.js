@@ -19,7 +19,7 @@ let clipDur     = 30;
 let animId      = null;
 let lastTs      = 0;
 
-let currentStyle  = 'source';
+let currentStyle  = 'beast';
 let currentLayout = 'split';
 
 // ─── YouTube IFrame API callback ──────────────────────────────────────────────
@@ -38,17 +38,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getBackend() {
+  // A deployed site always uses its own backend, including custom domains.
+  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return window.location.origin;
+  }
   const custom = localStorage.getItem('godd_backend');
-  if (custom && custom.trim()) return custom.trim().replace(/\/$/, '');
-  // If running locally, ALWAYS use local backend on RTX GPU!
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return window.location.origin;
-  }
-  // If running on render directly, use same-origin
-  if (window.location.origin.includes('onrender.com')) {
-    return window.location.origin;
-  }
-  return RENDER_BACKEND;
+  return custom && custom.trim() ? custom.trim().replace(/\/$/, '') : window.location.origin;
 }
 
 function extractYtId(url) {
@@ -151,10 +146,18 @@ async function analyzeVideo() {
 
       if (res.ok) {
         const data = await res.json();
+        if (data.success && Array.isArray(data.clips) && data.clips.length === 0) {
+          document.getElementById('processingSection').style.display = 'none';
+          document.getElementById('heroSection').style.display = 'block';
+          showErrModal('No complete speech passage was found within the 3-minute clip limit. Try another video or a source with clearer captions.');
+          return;
+        }
         if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
           setProcStatus('Done! Loading Klap studio…');
           displayStudio(data.video, data.clips);
-          showToast('✅ Meaningful content clips extracted with titles!');
+          showToast(data.clips.some(c => c.has_real_captions === false)
+            ? 'Transcript unavailable: these are suggested time ranges. Review and adjust their endings.'
+            : '✅ Clips selected using speech boundaries. Review the ending before export.');
           return;
         }
       }
@@ -163,46 +166,9 @@ async function analyzeVideo() {
     }
   }
 
-  // ── FAST FALLBACK: Real YT metadata via oEmbed + Content-Focused Clips ─────
-  setProcStatus('Generating content-focused viral clips…');
-
-  let metaTitle = videoId ? `Video (${videoId})` : 'Video Content';
-  let metaAuthor = 'Creator';
-  let metaDur = 600;
-
-  if (videoId) {
-    try {
-      const oe = await fetch(
-        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
-        { signal: AbortSignal.timeout(4000) }
-      );
-      if (oe.ok) {
-        const od = await oe.json();
-        metaTitle  = od.title  || metaTitle;
-        metaAuthor = od.author_name || metaAuthor;
-      }
-    } catch (_) {}
-  }
-
-  const topic = extractContentTopic(metaTitle);
-  const placeholderClips = [
-    makeContentClip(videoId, metaTitle, topic, 1, 15, 52),
-    makeContentClip(videoId, metaTitle, topic, 2, 65, 105),
-    makeContentClip(videoId, metaTitle, topic, 3, 130, 172),
-    makeContentClip(videoId, metaTitle, topic, 4, 210, 248)
-  ];
-
-  displayStudio({
-    id: videoId,
-    url,
-    title: metaTitle,
-    author: metaAuthor,
-    thumbnail: videoId ? ytThumb(videoId) : '',
-    duration: metaDur,
-    duration_formatted: '10:00'
-  }, placeholderClips);
-
-  showToast('⚡ Content clips ready! Click to preview and render on your GPU.');
+  document.getElementById('processingSection').style.display = 'none';
+  document.getElementById('heroSection').style.display = 'block';
+  showErrModal('Could not analyze the video. Check your backend connection and try again.');
 }
 
 function extractContentTopic(title) {
@@ -323,13 +289,8 @@ function displayStudio(video, clips) {
     setLayout('split');
   }
 
-  // Subtitle selection: If video contains real subtitles, use them by default!
-  const hasSourceSubs = clips.some(c => c.has_source_subtitles || (c.video_subtitles && c.video_subtitles.length > 0));
-  if (hasSourceSubs) {
-    setStyle('source');
-  } else {
-    setStyle('beast');
-  }
+  // Start with the styled caption preset; source captions remain selectable.
+  setStyle(currentStyle);
 
   // Select first clip
   if (clips.length > 0) {
@@ -509,28 +470,6 @@ function updatePlayIcon(playing) {
 
 let lastYtReportedTime = -1;
 let lastYtReportedTs   = 0;
-let syncOffset         = 0.35; // Default 350ms lead time: perfectly synchronizes visual highlight with physical vocal attack
-
-function onSyncChange(val) {
-  syncOffset = parseFloat(val) / 1000.0;
-  const badge = document.getElementById('syncBadge');
-  if (badge) badge.textContent = `${val >= 0 ? '+' : ''}${val}ms`;
-  document.querySelectorAll('.sync-chip').forEach(c => c.classList.remove('active'));
-  if (activeClip) renderSubtitles(currentTime);
-}
-
-function setSyncOffset(val) {
-  const slider = document.getElementById('syncSlider');
-  if (slider) slider.value = val;
-  onSyncChange(val);
-  const badge = document.getElementById('syncBadge');
-  if (badge) badge.textContent = `${val >= 0 ? '+' : ''}${val}ms`;
-  document.querySelectorAll('.sync-chip').forEach(c => {
-    c.classList.toggle('active', c.textContent.includes(`${val}ms`));
-  });
-  showToast(`⚡ Subtitle Sync: ${val >= 0 ? '+' : ''}${val}ms`);
-}
-
 function animLoop(ts) {
   if (!isPlaying) { animId = null; return; }
   if (!ts) ts = performance.now();
@@ -636,7 +575,7 @@ function buildPhraseCards(subs) {
     if ((endsSentence && currentChunk.length >= 2) || currentChunk.length >= 4 || endsPause || i === subs.length - 1) {
       const cStart = currentChunk[0].start;
       const cEndRaw = currentChunk[currentChunk.length - 1].end || (cStart + 1.2);
-      const cEndWithHold = Math.max(cStart + 1.3, cEndRaw + 0.45);
+      const cEndWithHold = cEndRaw;
       cards.push({
         start: cStart,
         end: cEndWithHold,
@@ -651,7 +590,7 @@ function buildPhraseCards(subs) {
   for (let i = 0; i < cards.length - 1; i++) {
     const nextStart = cards[i + 1].start;
     if (cards[i].end > nextStart) {
-      cards[i].end = Math.max(cards[i].start + 0.85, nextStart - 0.04);
+      cards[i].end = Math.min(cards[i].end, nextStart);
     }
   }
   return cards;
@@ -704,10 +643,7 @@ function renderSubtitles(curOffset) {
   if (currentStyle === 'source' && activeClip.video_subtitles && activeClip.video_subtitles.length > 0) {
     const vSubs = activeClip.video_subtitles;
     const curAbs = activeClip.start + curOffset;
-    let activeLine = vSubs.find(s => curAbs >= s.start && curAbs <= (s.end + 0.35));
-    if (!activeLine) {
-      activeLine = vSubs.slice().reverse().find(s => curAbs >= s.start && (curAbs - s.end) < 0.65);
-    }
+    const activeLine = vSubs.find(s => curAbs >= s.start && curAbs < s.end);
     const html = activeLine ? `<div class="sub-source-card">${escHtml(activeLine.text)}</div>` : '';
     if (box.dataset.lastHtml !== html) {
       box.innerHTML = html;
@@ -725,9 +661,7 @@ function renderSubtitles(curOffset) {
     return;
   }
 
-  const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
-  // User calibrated syncOffset (+350ms default advance): visual highlight locks with speaker acoustic attack
-  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + syncOffset;
+  const targetTime = activeClip.start + curOffset;
 
   const clipKey = `${activeClip.start}_${activeClip.end}_${subs.length}`;
   if (cachedClipKey !== clipKey) {
@@ -750,24 +684,10 @@ function renderSubtitles(curOffset) {
     }
   }
 
-  // If outside speech segments
   if (!activeCard) {
-    // Before first phrase or past last phrase
-    if (targetTime < cachedPhraseCards[0].start || targetTime > cachedPhraseCards[cachedPhraseCards.length - 1].end) {
-      if (box.innerHTML !== '') box.innerHTML = '';
-      return;
-    }
-    // Hold previous card during micro-pauses (< 0.75s) so captions don't vanish abruptly
-    for (let i = cachedPhraseCards.length - 1; i >= 0; i--) {
-      if (targetTime >= cachedPhraseCards[i].start && (targetTime - cachedPhraseCards[i].end) < 0.75) {
-        activeCard = cachedPhraseCards[i];
-        break;
-      }
-    }
-    if (!activeCard) {
-      if (box.innerHTML !== '') box.innerHTML = '';
-      return;
-    }
+    box.innerHTML = '';
+    box.dataset.lastHtml = '';
+    return;
   }
 
   // Within the active card, identify currently spoken word
@@ -779,16 +699,6 @@ function renderSubtitles(curOffset) {
       break;
     }
   }
-  // During hold time after all words spoken, keep the last word active
-  if (activeWordIdx < 0) {
-    for (let j = activeCard.words.length - 1; j >= 0; j--) {
-      if (targetTime >= activeCard.words[j].start) {
-        activeWordIdx = j;
-        break;
-      }
-    }
-  }
-
   const html = activeCard.words.map((s, idx) => {
     const isActive = (idx === activeWordIdx);
     const isHl     = s.highlight && !isActive;
@@ -813,7 +723,10 @@ function escHtml(s) {
 
 function setStyle(name) {
   currentStyle = name;
-  document.querySelectorAll('.style-btn').forEach(b => b.classList.toggle('active', b.dataset.s === name));
+  document.querySelectorAll('.style-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.s === name);
+    b.setAttribute('aria-pressed', String(b.dataset.s === name));
+  });
   const box = document.getElementById('subsBox');
   if (box) {
     box.className = `subs-box s-${name}`;
@@ -840,6 +753,8 @@ function applyTrim() {
   if (e <= s) return;
   activeClip.start = s;
   activeClip.end   = e;
+  activeClip.duration_sec = e - s;
+  activeClip.duration = fmtSec(e - s);
   clipDur = e - s;
   const lbl = document.getElementById('trimDurLabel');
   if (lbl) lbl.textContent = `${Math.round(clipDur)}s`;
@@ -860,7 +775,10 @@ function refreshSubsFromEditor() {
   if (!activeClip) return;
   const text = document.getElementById('transcriptBox').textContent || '';
   activeClip.full_text = text;
+  activeClip.subtitles_edited = true;
+  activeClip.video_subtitles = [];
   activeClip.subtitles = genWordSubs(activeClip.start, activeClip.end, text);
+  cachedClipKey = null;
   renderSubtitles(currentTime);
   showToast('✓ Subtitles updated from editor!');
 }
@@ -879,8 +797,9 @@ async function downloadClip() {
     return;
   }
 
+  const exportingClip = activeClip;
   const startSec = activeClip.start;
-  const durSec   = activeClip.duration_sec || Math.round(activeClip.end - activeClip.start);
+  const durSec   = activeClip.end - activeClip.start;
   const backend  = getBackend();
   const clipTitle = activeClip.title || `clip_${Math.round(startSec)}s`;
   const cleanTitle = clipTitle.replace(/[^\w\s-]/g, '').trim().replace(/[-\s]+/g, '_') || `clip_${Math.round(startSec)}s`;
@@ -893,15 +812,16 @@ async function downloadClip() {
   let pct = 20;
   const ticker = setInterval(() => {
     pct = Math.min(88, pct + 3);
-    setDlProgress(`🎬 FFmpeg NVENC is encoding 1080p "${clipTitle}"…`, pct, directDlUrl);
+    setDlProgress(`🎬 Preparing captions and encoding 1080p "${clipTitle}"…`, pct, directDlUrl);
   }, 1800);
 
   // 3. Request video stream
+  let renderTimer;
   try {
     const ctrl = new AbortController();
-    const renderTimer = setTimeout(() => ctrl.abort(), 180000); // 3 min timeout
+    renderTimer = setTimeout(() => ctrl.abort(), 1800000); // Background jobs can take longer on free hosting
 
-    const res = await fetch(`${backend}/api/render-clip`, {
+    let res = await fetch(`${backend}/api/exports`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -911,19 +831,53 @@ async function downloadClip() {
         layout: currentLayout || 'split',
         title: clipTitle,
         subtitle_style: currentStyle || 'source',
-        subtitles: activeClip.subtitles || [],
+        subtitles: (activeClip.has_real_captions || activeClip.subtitles_edited) ? (activeClip.subtitles || []) : [],
         video_subtitles: activeClip.video_subtitles || [],
+        caption_source: activeClip.subtitles_edited ? 'provided' : 'auto',
         stream: true
       }),
       signal: ctrl.signal
     });
 
+    if (res.status === 202) {
+      const job = await res.json();
+      const started = Date.now();
+      while (true) {
+        if (Date.now() - started > 1800000) throw new Error('Export timed out');
+        const status = await fetch(`${backend}/api/exports/${job.id}`, {signal: ctrl.signal}).then(r => r.json());
+        if (status.state === 'failed') {
+          hideDlProgress();
+          showErrModal(status.error || 'The export failed. Please try again.');
+          return;
+        }
+        if (status.state === 'complete') {
+          res = await fetch(`${backend}/api/exports/${job.id}/download`, {signal: ctrl.signal});
+          break;
+        }
+        if (status.state === 'queued') setDlProgress('Your clip is queued. It will start shortly…', 20, directDlUrl);
+        await new Promise(resolve => setTimeout(resolve, 2500));
+      }
+    }
     clearTimeout(renderTimer);
     clearInterval(ticker);
 
     if (res.ok) {
       setDlProgress('💾 Saving your 9:16 MP4…', 95, directDlUrl);
       const blob = await res.blob();
+      const captionsUrl = res.headers.get('X-Captions-URL');
+      if (captionsUrl) {
+        try {
+          const captions = await fetch(`${backend}${captionsUrl}`).then(r => r.json());
+          exportingClip.subtitles = captions.words.map(w => ({...w, start: w.start + startSec, end: w.end + startSec}));
+          exportingClip.video_subtitles = [];
+          exportingClip.has_real_captions = true;
+          exportingClip.captions_measured = true;
+          if (activeClip === exportingClip) {
+            cachedClipKey = null;
+            renderSubtitles(currentTime);
+          }
+        } catch (error) { console.warn('Could not load measured caption preview:', error); }
+      }
       if (blob.size > 2000) {
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -939,18 +893,23 @@ async function downloadClip() {
       }
     }
 
-    // Direct browser navigation fallback
-    setDlProgress('⬇️ Starting native browser download…', 92, directDlUrl);
-    window.location.href = directDlUrl;
-    setTimeout(() => hideDlProgress(), 4500);
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      hideDlProgress();
+      showErrModal(error.error || 'Clip rendering failed. Please try again.');
+      return;
+    }
 
+    hideDlProgress();
+    showErrModal('The server returned an empty clip. Please try again.');
   } catch (err) {
+    hideDlProgress();
+    showErrModal(err.name === 'AbortError'
+      ? 'Rendering took too long. Please try a shorter clip.'
+      : 'Could not download the clip. Check the backend connection and try again.');
+  } finally {
+    clearTimeout(renderTimer);
     clearInterval(ticker);
-    console.warn('[Download] Fetch failed, triggering native browser download:', err);
-    setDlProgress('⬇️ Starting native browser download…', 92, directDlUrl);
-    // Automatic fallback: trigger direct browser GET download
-    window.location.href = directDlUrl;
-    setTimeout(() => hideDlProgress(), 5000);
   }
 }
 
@@ -964,7 +923,12 @@ function setDlProgress(label, pct, directUrl) {
     if (f) f.style.width = `${Math.min(99, pct)}%`;
     const directBtn = document.getElementById('dlDirectLink');
     if (directBtn && directUrl) {
-      directBtn.href = directUrl;
+      directBtn.href = '#';
+      directBtn.textContent = 'Retry download';
+      directBtn.onclick = event => {
+        event.preventDefault();
+        if (pct >= 90) downloadClip();
+      };
       directBtn.download = `godd_ai_${(activeClip?.title||'clip').replace(/[^a-z0-9]/gi,'_').toLowerCase()}.mp4`;
     }
   }
@@ -997,17 +961,19 @@ function downloadSRT() {
     showToast('No subtitles to export');
     return;
   }
-  const subs = activeClip.subtitles;
+  const source = activeClip.video_subtitles || [];
+  const subs = source.length ? source : (activeClip.subtitles || []);
   const lines = [];
-  const chunk = 4;
+  const chunk = source.length ? 1 : 4;
+  const duration = activeClip.end - activeClip.start;
   for (let i = 0; i < subs.length; i += chunk) {
     const g = subs.slice(i, i + chunk);
-    lines.push(
-      Math.floor(i/chunk) + 1,
-      `${srtTime(g[0].start)} --> ${srtTime(g[g.length-1].end)}`,
-      g.map(s => s.word).join(' '),
-      ''
-    );
+    const start = Math.max(0, g[0].start - activeClip.start);
+    const end = Math.min(duration, g[g.length - 1].end - activeClip.start);
+    if (end <= start) continue;
+    lines.push(lines.length / 4 + 1,
+      `${srtTime(start)} --> ${srtTime(end)}`,
+      g.map(s => s.text || s.word).join(' '), '');
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');

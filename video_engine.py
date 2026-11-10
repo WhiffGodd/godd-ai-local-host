@@ -2,8 +2,15 @@ import os
 import re
 import subprocess
 import tempfile
-import json
 import shutil
+import math
+import threading
+import json
+import gc
+from caption_styles import generate_ass
+from api.youtube_access import youtube_options, extract_youtube_info
+
+_WHISPER_LOCK = threading.Lock()
 
 try:
     import imageio_ffmpeg
@@ -26,144 +33,92 @@ except ImportError:
 
 
 def _get_whisper_model():
-    """Lazy-load Whisper tiny model (cached globally for reuse across requests)."""
+    """Lazy-load the configured Whisper model (cached globally for reuse across requests)."""
     global _whisper_model
     if _whisper_model is None and WHISPER_AVAILABLE:
-        print("[Whisper] Loading faster-whisper tiny model...")
-        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        print("[Whisper] Loading faster-whisper speech model...")
+        _whisper_model = WhisperModel(os.environ.get("WHISPER_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=int(os.environ.get("WHISPER_CPU_THREADS", "4")))
         print("[Whisper] Model loaded.")
     return _whisper_model
 
 
-def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: float) -> list:
-    """
-    Download only the audio track for the given segment and transcribe it with
-    faster-whisper (tiny model, CPU int8 — fast and low-RAM).
-
-    Returns a list of dicts: [{text, start, duration, end}, ...]
-    relative to 0.0 (not to video absolute time — caller adds offset).
-    """
+def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: float,
+                                  audio_stream_url: str = None) -> list:
+    """Transcribe the selected export audio; return clip-relative speech timings."""
     if not WHISPER_AVAILABLE:
-        print("[Whisper] faster-whisper not available, skipping.")
-        return []
-    if not yt_dlp:
-        print("[Whisper] yt-dlp not available, skipping.")
-        return []
+        raise RuntimeError("Automatic subtitles require faster-whisper. Install requirements.txt or select subtitles Off.")
+    if not audio_stream_url:
+        if not yt_dlp:
+            raise RuntimeError("yt-dlp is not installed")
+        info = extract_youtube_info(video_url, {'quiet': True, 'no_warnings': True})
+        _, audio_stream_url, _ = select_export_streams(info)
+    with tempfile.TemporaryDirectory(prefix="godd_ai_speech_") as tmp_dir:
+        wav_path = os.path.join(tmp_dir, "speech.wav")
+        cmd = [FFMPEG_PATH, "-y", "-ss", str(start_sec), "-i", audio_stream_url,
+               "-t", str(end_sec - start_sec), "-map", "0:a:0", "-vn",
+               "-af", "aresample=async=1:first_pts=0", "-ar", "16000", "-ac", "1", wav_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=max(120, (end_sec - start_sec) * 4))
+        if result.returncode:
+            raise RuntimeError(f"Could not extract speech for subtitles: {result.stderr[-500:]}")
+        # Serialize model use and loading across HTTP request threads.
+        with _WHISPER_LOCK:
+            model = _get_whisper_model()
+            segments, _ = model.transcribe(wav_path, beam_size=5, temperature=0.0,
+                                            task="transcribe", language=os.environ.get("WHISPER_LANGUAGE") or None,
+                                            vad_filter=False, word_timestamps=True,
+                                            hallucination_silence_threshold=2.0,
+                                            condition_on_previous_text=False)
+            recognized = [{"text": seg.text.strip(), "start": float(seg.start),
+                     "end": float(seg.end), "duration": float(seg.end - seg.start),
+                     "words": [{"word": w.word.strip(), "start": float(w.start),
+                                "end": float(w.end)} for w in (seg.words or [])]}
+                    for seg in segments if seg.text.strip()]
+            if os.environ.get("RELEASE_WHISPER_MODEL") == "1":
+                global _whisper_model
+                _whisper_model = None
+                del model
+                gc.collect()
+            return recognized
 
-    duration_sec = max(1.0, end_sec - start_sec)
-    tmp_dir = os.path.join(tempfile.gettempdir(), "godd_ai_audio")
-    os.makedirs(tmp_dir, exist_ok=True)
-    wav_path = os.path.join(tmp_dir, f"seg_{int(start_sec)}_{int(end_sec)}.wav")
 
-    try:
-        # 1. Get audio-only stream URL via yt-dlp (no video download)
-        ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            audio_url = info.get("url")
-            if not audio_url and "formats" in info:
-                # Pick best audio-only format
-                for fmt in reversed(info["formats"]):
-                    if fmt.get("acodec") != "none" and fmt.get("vcodec") in (None, "none", ""):
-                        audio_url = fmt.get("url")
-                        break
-                if not audio_url:
-                    # Fallback: any stream
-                    for fmt in reversed(info["formats"]):
-                        if fmt.get("url"):
-                            audio_url = fmt["url"]
-                            break
+def speech_words_for_clip(speech, duration):
+    """Keep recognized text within clip bounds, using neighboring timing anchors.
 
-        if not audio_url:
-            print("[Whisper] Could not obtain audio stream URL.")
-            return []
+    Whisper can emit zero-length tokens; retain them until the next measured
+    word boundary rather than losing spoken text or inventing a fixed duration.
+    """
+    result = []
+    for segment in speech:
+        words = segment.get("words") or []
+        for index, word in enumerate(words):
+            start = max(0.0, float(word.get("start", 0)))
+            end = min(duration, float(word.get("end", start)))
+            if end <= start:
+                end = min(duration, next((float(other["start"]) for other in words[index + 1:]
+                                           if float(other["start"]) > start), float(segment.get("end", start))))
+            if word.get("word") and start < duration and end > start:
+                result.append({"word": word["word"], "start": start, "end": end})
+    return result
 
-        # 2. Download only the segment's audio as 16kHz mono WAV
-        # Apply aggressive vocal-frequency boost: highpass 100Hz, boost 1800Hz presence
-        # This emphasizes human voice (streamer mic) and cuts low-frequency game rumble
-        cmd = [
-            FFMPEG_PATH, "-y",
-            "-ss", str(start_sec),
-            "-i", audio_url,
-            "-t", str(duration_sec),
-            "-vn",                                        # no video
-            "-af", (
-                "highpass=f=100,"                         # cut bass/rumble below 100Hz
-                "lowpass=f=8000,"                         # cut harsh highs above 8kHz
-                "equalizer=f=1800:width_type=h:width=1200:g=5,"  # boost voice presence
-                "equalizer=f=300:width_type=h:width=200:g=-4,"   # cut muddy low-mids
-                "acompressor=threshold=-20dB:ratio=3:attack=5:release=100,"  # level streamer voice
-                "volume=2.0"                              # extra gain for quiet mics
-            ),
-            "-ar", "16000",   # 16kHz required by Whisper
-            "-ac", "1",       # mono
-            "-f", "wav",
-            wav_path
-        ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
-        if result.returncode != 0:
-            print(f"[Whisper] FFmpeg audio extraction failed: {result.stderr[:300]}")
-            return []
 
-        if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
-            print("[Whisper] WAV file too small or missing, skipping.")
-            return []
+def select_export_streams(info):
+    """Select one video and one audio rendition, preferring original speech."""
+    formats = info.get("formats") or info.get("requested_formats") or [info]
+    videos = [f for f in formats if f.get("url") and f.get("vcodec") not in (None, "none", "")
+              and (f.get("height") or 0) <= 1080]
+    if not videos:
+        raise RuntimeError("Could not find playable video stream URL")
+    video = max(videos, key=lambda f: (f.get("height") or 0, f.get("tbr") or 0))
+    audios = [f for f in formats if f.get("url") and f.get("acodec") not in (None, "none", "")]
+    def audio_rank(f):
+        note = str(f.get("format_note", "")).lower()
+        return ("original" in note, f.get("language_preference") or 0,
+                f.get("vcodec") in (None, "none", ""), f.get("abr") or 0)
+    audio = max(audios, key=audio_rank) if audios else None
+    if audio is None:
+        raise RuntimeError("No audio track found for this video")
+    return video["url"], audio["url"], video["url"] != audio["url"]
 
-        # 3. Transcribe with faster-whisper
-        model = _get_whisper_model()
-        if not model:
-            return []
-
-        # Try Hindi first (streamer Hinglish), fall back to multilingual auto-detect
-        segments_out = []
-        for lang in ["hi", None]:
-            try:
-                kwargs = {"beam_size": 1, "temperature": 0.0, "vad_filter": True}
-                if lang:
-                    kwargs["language"] = lang
-                seg_gen, info_obj = model.transcribe(wav_path, **kwargs)
-                raw_segments = list(seg_gen)
-
-                if not raw_segments:
-                    continue
-
-                for seg in raw_segments:
-                    text = (seg.text or "").strip()
-                    if not text or text in ("[BLANK_AUDIO]", "[SILENCE]", "(Music)", "[Music]"):
-                        continue
-                    # Skip very short noise bursts
-                    if len(text) < 3:
-                        continue
-                    segments_out.append({
-                        "text": text,
-                        "start": round(float(seg.start), 2),
-                        "duration": round(float(seg.end) - float(seg.start), 2),
-                        "end": round(float(seg.end), 2)
-                    })
-
-                if segments_out:
-                    print(f"[Whisper] Transcribed {len(segments_out)} segments (lang={lang or 'auto'}).")
-                    break
-            except Exception as e:
-                print(f"[Whisper] Transcription attempt (lang={lang}) error: {e}")
-                continue
-
-        return segments_out
-
-    except Exception as e:
-        print(f"[Whisper] transcribe_audio_with_whisper error: {e}")
-        return []
-    finally:
-        # Clean up temp wav to save disk space on Render free tier
-        try:
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
-        except Exception:
-            pass
 
 # Locate FFmpeg binary (System PATH -> imageio_ffmpeg -> fallback)
 FFMPEG_PATH = shutil.which("ffmpeg")
@@ -196,7 +151,7 @@ def get_video_encoder_flags():
         pass
         
     print("[VideoEngine] Using CPU libx264 encoder (CRF 18 visually lossless).")
-    _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", "fast", "-crf", "18", "-b:v", "10M"]
+    _DETECTED_ENCODER = ["-c:v", "libx264", "-preset", os.environ.get("ENCODER_PRESET", "fast"), "-crf", "20", "-threads", os.environ.get("FFMPEG_THREADS", "2")]
     return _DETECTED_ENCODER
 
 def clean_streamer_text(text: str) -> str:
@@ -209,124 +164,51 @@ def clean_streamer_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def generate_srt(subtitles: list, clip_start: float = 0.0, video_subtitles: list = None) -> str:
-    """
-    Generate SubRip (.srt) caption file content with timestamps relative to clip start.
-    If the video contains real subtitles (video_subtitles), USE THEM directly instead of generating new subtitles!
-    """
-    # 1. If video contains real source subtitles, use them faithfully!
-    if video_subtitles and len(video_subtitles) > 0:
-        lines = []
-        lead_offset = 0.12
-        for idx, sub in enumerate(video_subtitles):
-            raw_start = float(sub.get("start", 0))
-            raw_end = float(sub.get("end", raw_start + 1.5))
-            txt = clean_streamer_text(str(sub.get("text", "")))
-            if not txt:
-                continue
-
-            start_sec = max(0.0, raw_start - clip_start - lead_offset)
-            end_sec = max(start_sec + 0.6, raw_end - clip_start - (lead_offset * 0.5))
-
-            lines.append(f"{idx + 1}")
-            lines.append(f"{format_srt_timestamp(start_sec)} --> {format_srt_timestamp(end_sec)}")
-            lines.append(txt)
-            lines.append("")
-        if lines:
-            return "\n".join(lines)
-
-    if not subtitles:
-        return ""
-
-    lead_offset = 0.16  # Subtitle visual cue leads spoken speech by 160ms for optimal synchronization
-
-    # 1. Clean subtitle items
-    cleaned = []
-    for item in subtitles:
-        w = str(item.get("word", "")).strip()
-        w = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', w)
-        w = re.sub(r'[«»<>]+', '', w).strip()
-        if w:
-            cleaned.append({
-                "word": w,
-                "start": float(item.get("start", 0)),
-                "end": float(item.get("end", 0)),
-                "highlight": bool(item.get("highlight", False))
-            })
-
-    if not cleaned:
-        return ""
-
-    # 2. Group words into dynamic sentence-aware phrase chunks
-    chunks = []
-    current_chunk = []
-
-    for idx, item in enumerate(cleaned):
-        current_chunk.append(item)
-        w = item["word"]
-        ends_sentence = w.endswith((".", "!", "?"))
-        ends_pause = False
-        if idx + 1 < len(cleaned):
-            gap = cleaned[idx + 1]["start"] - item["end"]
-            if gap >= 0.38:
-                ends_pause = True
-
-        if (ends_sentence and len(current_chunk) >= 2) or len(current_chunk) >= 4 or ends_pause or idx == len(cleaned) - 1:
-            chunks.append(current_chunk)
-            current_chunk = []
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    lines = []
-    for idx, group in enumerate(chunks):
-        raw_start = float(group[0]["start"])
-        raw_end = float(group[-1]["end"])
-
-        next_raw_start = None
-        if idx + 1 < len(chunks):
-            next_raw_start = float(chunks[idx + 1][0]["start"])
-
-        if raw_start >= clip_start and clip_start > 0:
-            start_sec = max(0.0, raw_start - clip_start - lead_offset)
-            base_dur = max(1.2, (raw_end - clip_start - start_sec) + 0.45)
-            if next_raw_start and next_raw_start >= clip_start:
-                next_start_sec = max(0.0, next_raw_start - clip_start - lead_offset)
-                end_sec = min(next_start_sec - 0.05, start_sec + base_dur)
-            else:
-                end_sec = start_sec + base_dur
-        else:
-            start_sec = max(0.0, raw_start - lead_offset)
-            base_dur = max(1.2, (raw_end - start_sec) + 0.45)
-            if next_raw_start:
-                next_start_sec = max(0.0, next_raw_start - lead_offset)
-                end_sec = min(next_start_sec - 0.05, start_sec + base_dur)
-            else:
-                end_sec = start_sec + base_dur
-
-        end_sec = max(start_sec + 0.6, end_sec)
-
-        words = [item["word"] for item in group]
-        text = " ".join(words).strip()
-        if not text:
+def generate_srt(subtitles: list, clip_start: float = 0.0, video_subtitles: list = None,
+                 clip_duration: float = None) -> str:
+    """Convert absolute source timestamps to bounded, clip-relative SRT cues."""
+    cues = []
+    for item in (video_subtitles or subtitles or []):
+        text = clean_streamer_text(item.get("text", item.get("word", "")))
+        try:
+            start = float(item.get("start", 0)) - clip_start
+            end = float(item.get("end", float(item.get("start", 0)) + float(item.get("duration", 0)))) - clip_start
+        except (ValueError, TypeError):
             continue
-
-        index = idx + 1
-        start_srt = format_srt_timestamp(start_sec)
-        end_srt = format_srt_timestamp(end_sec)
-
-        lines.append(f"{index}")
-        lines.append(f"{start_srt} --> {end_srt}")
-        lines.append(text)
-        lines.append("")
-
+        if not text or not math.isfinite(start) or not math.isfinite(end) or end <= 0:
+            continue
+        start = max(0.0, start)
+        if clip_duration is not None:
+            end = min(end, clip_duration)
+        if end > start:
+            cues.append({"text": text, "start": start, "end": end})
+    cues.sort(key=lambda c: c["start"])
+    if not video_subtitles:
+        groups, group = [], []
+        for i, cue in enumerate(cues):
+            group.append(cue)
+            gap = i + 1 < len(cues) and cues[i + 1]["start"] - cue["end"] >= 0.38
+            if len(group) >= 4 or cue["text"].endswith((".", "!", "?")) or gap or i == len(cues) - 1:
+                groups.append({"text": " ".join(c["text"] for c in group),
+                               "start": group[0]["start"], "end": max(c["end"] for c in group)})
+                group = []
+        cues = groups
+    lines = []
+    for i, cue in enumerate(cues):
+        end = min(cue["end"], cues[i + 1]["start"]) if i + 1 < len(cues) else cue["end"]
+        if round(end * 1000) <= round(cue["start"] * 1000):
+            continue
+        lines.extend([str(len(lines) // 4 + 1),
+                      f"{format_srt_timestamp(cue['start'])} --> {format_srt_timestamp(end)}",
+                      cue["text"], ""])
     return "\n".join(lines)
 
+
 def format_srt_timestamp(seconds: float) -> str:
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds - int(seconds)) * 1000)
+    millis = max(0, round(seconds * 1000))
+    secs, millis = divmod(millis, 1000)
+    mins, secs = divmod(secs, 60)
+    hrs, mins = divmod(mins, 60)
     return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
 FACE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet.onnx")
@@ -391,7 +273,8 @@ def download_and_clip_video(
     subtitles: list = None,
     output_path: str = None,
     subtitle_style: str = "source",
-    video_subtitles: list = None
+    video_subtitles: list = None,
+    caption_source: str = "auto"
 ) -> str:
     """
     Download and render a Full HD 1080p (1080x1920) 9:16 short using FFmpeg.
@@ -402,102 +285,44 @@ def download_and_clip_video(
     - 'blur': Blurred ambient background (1080x1920) with crisp centered 16:9 video
     - 'fit': Fitted 16:9 on 1080x1920 canvas with clean letterbox
     """
+    if not math.isfinite(start_time) or not math.isfinite(duration) or start_time < 0 or duration <= 0:
+        raise ValueError("Clip start must be non-negative and duration must be positive")
+
     if not output_path:
         tmp_dir = os.path.join(tempfile.gettempdir(), "godd_ai_clips")
         os.makedirs(tmp_dir, exist_ok=True)
-        output_path = os.path.join(tmp_dir, f"godd_ai_{int(start_time)}_{int(duration)}.mp4")
+        fd, output_path = tempfile.mkstemp(prefix="godd_ai_", suffix=".mp4", dir=tmp_dir)
+        os.close(fd)
 
     if not yt_dlp:
         raise RuntimeError("yt-dlp is not installed")
 
-    # Map subtitle styles to ASS / SRT color palettes
-    style_colors = {
-        "source": "&H001ED2FF",    # Original source subtitles (Clean bright yellow-gold)
-        "beast": "&H001ED2FF",     # High-intensity Neon Gold (#FFD21E)
-        "hormozi": "&H002EC55E",   # Electric Lime Green (#5EC52E)
-        "cyber": "&H00FFF000",     # Electric Cyan (#00F0FF)
-        "fire": "&H00303BFF",      # Vivid Coral Red (#FF3B30)
-        "clean": "&H00FFFFFF",     # Crisp White (#FFFFFF)
-        "box": "&H001ED2FF",       # Box Highlight
-    }
-    primary_color = style_colors.get(subtitle_style, "&H001ED2FF")
-
-    # Generate SRT file: If video has real source subtitles, use them directly!
-    # If subtitle_style is "none" or "off", suppress overlay completely (for videos with burned-in captions)
-    srt_filter = ""
     srt_temp_file = None
-    is_none_style = str(subtitle_style).lower() in ("none", "off", "disable", "disabled", "false")
-
-    if not is_none_style and (video_subtitles or (subtitles and len(subtitles) > 0)):
-        try:
-            srt_content = ""
-            if video_subtitles and (subtitle_style == "source" or not subtitles):
-                # Use video's actual source subtitles directly!
-                srt_content = generate_srt(subtitles=[], clip_start=start_time, video_subtitles=video_subtitles)
-            elif subtitles and len(subtitles) > 0:
-                srt_content = generate_srt(subtitles=subtitles, clip_start=start_time, video_subtitles=video_subtitles)
-
-            if srt_content.strip():
-                srt_temp_file = os.path.join(tempfile.gettempdir(), f"subs_{int(start_time)}_{int(duration)}.srt")
-                with open(srt_temp_file, "w", encoding="utf-8") as f:
-                    f.write(srt_content)
-                esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-                srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=1080,PlayResY=1920,FontName=Arial,FontSize=52,Bold=1,PrimaryColour={primary_color},OutlineColour=&H00000000,BorderStyle=1,Outline=4.5,Shadow=2,Alignment=2,MarginV=180'"
-        except Exception as se:
-            print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
-            srt_filter = ""
-
-    # Use yt-dlp to obtain stream URL: prioritize 1080p adaptive streams for crystal-clear quality
     try:
-        ydl_opts = {
+        info = extract_youtube_info(video_url, {
             'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        stream_url = None
-        video_stream_url = None
-        audio_stream_url = None
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-            formats = info.get("formats", [])
-
-            # 1. Search for best 1080p video stream
-            best_v = None
-            for f in formats:
-                if f.get("url") and f.get("vcodec") not in ("none", None):
-                    h = f.get("height") or 0
-                    if h <= 1080 and (best_v is None or h > (best_v.get("height") or 0)):
-                        best_v = f
-
-            # 2. Search for best pristine audio stream
-            best_a = None
-            for f in formats:
-                if f.get("url") and f.get("acodec") not in ("none", None) and f.get("vcodec") in ("none", None, ""):
-                    abr = f.get("abr") or 0
-                    if best_a is None or abr > (best_a.get("abr") or 0):
-                        best_a = f
-
-            if best_v:
-                video_stream_url = best_v.get("url")
-                print(f"[VideoEngine] 1080p Video Stream selected: {best_v.get('format_id')} ({best_v.get('width')}x{best_v.get('height')})")
-            if best_a:
-                audio_stream_url = best_a.get("url")
-                print(f"[VideoEngine] Pristine Audio Stream selected: {best_a.get('format_id')} ({best_a.get('abr')}k)")
-
-            # Fallback to direct URL if separate streams not found
-            if not video_stream_url:
-                stream_url = info.get("url")
-                if not stream_url:
-                    for f in reversed(formats):
-                        if f.get("url") and f.get("vcodec") not in ("none", None) and f.get("acodec") not in ("none", None):
-                            stream_url = f.get("url")
-                            break
-
-        if not stream_url and not video_stream_url:
-            raise RuntimeError("Could not find playable video stream URL")
-
-        target_stream = video_stream_url or stream_url
+            'quiet': True, 'no_warnings': True,
+        })
+        target_stream, selected_audio, separate_audio = select_export_streams(info)
+        srt_filter = ""
+        is_none_style = str(subtitle_style).lower() in ("none", "off", "disable", "disabled", "false")
+        if not is_none_style and caption_source != "auto":
+            if not video_subtitles and not subtitles:
+                speech = transcribe_audio_with_whisper(video_url, start_time, start_time + duration,
+                                                       audio_stream_url=selected_audio)
+                # Whisper times are relative to the extracted clip. Convert once.
+                subtitles = [{"word": w["word"], "start": w["start"] + start_time,
+                              "end": w["end"] + start_time}
+                             for seg in speech for w in (seg.get("words") or [
+                                 {"word": seg["text"], "start": seg["start"], "end": seg["end"]}])]
+            srt_content = generate_srt(subtitles, start_time,
+                                       video_subtitles if subtitle_style == "source" or not subtitles else None, duration)
+            if srt_content.strip():
+                fd, srt_temp_file = tempfile.mkstemp(prefix="godd_ai_subs_", suffix=".ass")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(generate_ass(srt_content, subtitle_style, subtitles, start_time))
+                esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:').replace("'", "'\\''")
+                srt_filter = f",subtitles='{esc_srt}'"
 
         # Check whether streamer facecam exists in this video
         face_info = {"has_face": False}
@@ -557,71 +382,61 @@ def download_and_clip_video(
             filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920:flags=lanczos{srt_filter}[outv]"
 
         encoder_flags = get_video_encoder_flags()
-        fade_out_start = max(0.1, duration - 0.35)
-        audio_filter = f"volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50,afade=t=in:st=0:d=0.25,afade=t=out:st={fade_out_start:.2f}:d=0.35"
+        # Accurate seeks on both inputs share the same clip origin. Resample against
+        # timestamps to correct drift and pad a late-starting audio stream.
+        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), "-i", target_stream]
+        if separate_audio:
+            cmd += ["-ss", str(start_time), "-i", selected_audio]
+        cmd += ["-t", str(duration), "-filter_complex", filter_complex,
+                "-map", "[outv]", "-map", "1:a:0" if separate_audio else "0:a:0",
+                "-af", "aresample=async=1:first_pts=0,apad",
+                *encoder_flags, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                "-ac", "2", "-sn", "-dn", "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart", output_path]
 
-        # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement with silky smooth fade-in/fade-out
-        if video_stream_url and audio_stream_url:
-            cmd = [
-                FFMPEG_PATH,
-                "-y",
-                "-ss", str(start_time),
-                "-i", video_stream_url,
-                "-ss", str(start_time),
-                "-i", audio_stream_url,
-                "-t", str(duration),
-                "-filter_complex", filter_complex,
-                "-map", "[outv]",
-                "-map", "1:a?",
-                "-af", audio_filter,
-                *encoder_flags,
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-movflags", "+faststart",
-                output_path
-            ]
-        elif stream_url:
-            cmd = [
-                FFMPEG_PATH,
-                "-y",
-                "-ss", str(start_time),
-                "-i", stream_url,
-                "-t", str(duration),
-                "-filter_complex", filter_complex,
-                "-map", "[outv]",
-                "-map", "0:a?",
-                "-af", audio_filter,
-                *encoder_flags,
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-movflags", "+faststart",
-                output_path
-            ]
-        else:
-            cmd = [
-                FFMPEG_PATH,
-                "-y",
-                "-ss", str(start_time),
-                "-i", video_stream_url,
-                "-t", str(duration),
-                "-filter_complex", filter_complex,
-                "-map", "[outv]",
-                "-map", "0:a?",
-                "-af", audio_filter,
-                *encoder_flags,
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-movflags", "+faststart",
-                output_path
-            ]
-
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=max(120, duration * 8))
         if result.returncode != 0:
             print(f"[FFmpeg] Error: {result.stderr}")
             raise RuntimeError(f"FFmpeg render failed: {result.stderr[:200]}")
+
+        if not is_none_style and caption_source == "auto":
+            speech = transcribe_audio_with_whisper(video_url, 0.0, duration,
+                                                   audio_stream_url=output_path)
+            measured_words = speech_words_for_clip(speech, duration)
+            srt_content = generate_srt(measured_words, 0.0, clip_duration=duration)
+            if srt_content.strip():
+                fd, srt_temp_file = tempfile.mkstemp(prefix="godd_ai_aligned_", suffix=".ass")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(generate_ass(srt_content, subtitle_style, measured_words, 0.0))
+                esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:').replace("'", "'\\''")
+                fd, captioned_path = tempfile.mkstemp(prefix="godd_ai_captioned_", suffix=".mp4")
+                os.close(fd)
+                try:
+                    burn = [FFMPEG_PATH, "-y", "-i", output_path,
+                            "-vf", f"subtitles='{esc_srt}'", "-map", "0:v:0", "-map", "0:a:0",
+                            *encoder_flags, "-c:a", "copy", "-pix_fmt", "yuv420p",
+                            "-movflags", "+faststart", captioned_path]
+                    encoded = subprocess.run(burn, capture_output=True, text=True, timeout=max(120, duration * 3))
+                    if encoded.returncode:
+                        raise RuntimeError(f"Caption rendering failed: {encoded.stderr[-500:]}")
+                    shutil.move(captioned_path, output_path)
+                finally:
+                    if os.path.exists(captioned_path):
+                        os.remove(captioned_path)
+            # Sidecar timings are clip-relative and can update the site preview
+            # and SRT export without another transcription or a guessed offset.
+            with open(output_path + ".captions.json", "w", encoding="utf-8") as f:
+                json.dump({"words": measured_words, "segments": speech,
+                           "timing_origin": "clip", "measured_from": "rendered_audio"}, f, ensure_ascii=False)
+            with open(output_path + ".srt", "w", encoding="utf-8") as f:
+                f.write(srt_content)
 
         return output_path
 
     except Exception as e:
         print(f"[VideoEngine] Error rendering video: {e}")
         raise e
+
+    finally:
+        if srt_temp_file and os.path.exists(srt_temp_file):
+            os.remove(srt_temp_file)

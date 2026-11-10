@@ -184,50 +184,52 @@
         </div>
       </div>
 
-      <!-- Subtitle Style Variations (Klap Style) -->
+      <!-- Subtitle presets -->
       <div class="ctrl-box">
-        <div class="ctrl-box-title">🎨 Subtitle Mode & Preset</div>
+        <div class="ctrl-box-title">Subtitle presets <span class="preset-count">9 styles</span></div>
+        <p class="preset-hint">Smaller captions. A style for every story.</p>
         <div class="style-grid">
-          <button class="style-btn active" data-s="source" onclick="setStyle('source')" title="Use video's original closed captions">
-            <span class="style-dot dot-source"></span> 📺 Video Subtitles (Original)
+          <button class="style-btn" data-s="source" onclick="setStyle('source')" aria-pressed="false">
+            <span class="preset-sample sample-source" aria-hidden="true">Natural captions</span>
+            <span class="preset-name">Original</span><span class="preset-desc">Keep it simple</span>
           </button>
-          <button class="style-btn" data-s="beast" onclick="setStyle('beast')">
-            <span class="style-dot dot-beast"></span> Beast Gold
+          <button class="style-btn" data-s="clean" onclick="setStyle('clean')" aria-pressed="false">
+            <span class="preset-sample sample-clean" aria-hidden="true">Less, but better</span>
+            <span class="preset-name">Minimal</span><span class="preset-desc">Soft white · clean</span>
           </button>
-          <button class="style-btn" data-s="hormozi" onclick="setStyle('hormozi')">
-            <span class="style-dot dot-hormozi"></span> Hormozi Lime
+          <button class="style-btn active" data-s="beast" onclick="setStyle('beast')" aria-pressed="true">
+            <span class="preset-sample sample-beast" aria-hidden="true">MAKE IT COUNT</span>
+            <span class="preset-name">Gold Pop</span><span class="preset-desc">Warm gold · bold</span>
           </button>
-          <button class="style-btn" data-s="cyber" onclick="setStyle('cyber')">
-            <span class="style-dot dot-cyber"></span> Cyber Cyan
+          <button class="style-btn" data-s="hormozi" onclick="setStyle('hormozi')" aria-pressed="false">
+            <span class="preset-sample sample-hormozi" aria-hidden="true">A fresh perspective</span>
+            <span class="preset-name">Fresh Lime</span><span class="preset-desc">Lime · confident</span>
           </button>
-          <button class="style-btn" data-s="fire" onclick="setStyle('fire')">
-            <span class="style-dot dot-fire"></span> Viral Flame
+          <button class="style-btn" data-s="cyber" onclick="setStyle('cyber')" aria-pressed="false">
+            <span class="preset-sample sample-cyber" aria-hidden="true">THE NEXT LEVEL</span>
+            <span class="preset-name">Neon</span><span class="preset-desc">Cyan · electric</span>
           </button>
-          <button class="style-btn" data-s="clean" onclick="setStyle('clean')">
-            <span class="style-dot dot-clean"></span> Minimal White
+          <button class="style-btn" data-s="fire" onclick="setStyle('fire')" aria-pressed="false">
+            <span class="preset-sample sample-fire" aria-hidden="true">Make your move</span>
+            <span class="preset-name">Coral</span><span class="preset-desc">Coral · energetic</span>
           </button>
-          <button class="style-btn" data-s="none" onclick="setStyle('none')" title="Suppress subtitle burning for videos with burned-in captions">
-            <span class="style-dot dot-none"></span> 🚫 Off (Already in Video)
+          <button class="style-btn" data-s="cinematic" onclick="setStyle('cinematic')" aria-pressed="false">
+            <span class="preset-sample sample-cinematic" aria-hidden="true">Every moment matters</span>
+            <span class="preset-name">Cinema</span><span class="preset-desc">Serif · cinematic</span>
+          </button>
+          <button class="style-btn" data-s="rose" onclick="setStyle('rose')" aria-pressed="false">
+            <span class="preset-sample sample-rose" aria-hidden="true">A little different</span>
+            <span class="preset-name">Rose</span><span class="preset-desc">Rose · editorial</span>
+          </button>
+          <button class="style-btn" data-s="box" onclick="setStyle('box')" aria-pressed="false">
+            <span class="preset-sample sample-box" aria-hidden="true">One good idea</span>
+            <span class="preset-name">Highlight</span><span class="preset-desc">Yellow card · ink</span>
+          </button>
+          <button class="style-btn" data-s="none" onclick="setStyle('none')" aria-pressed="false">
+            <span class="preset-sample sample-none" aria-hidden="true">—</span>
+            <span class="preset-name">Off</span><span class="preset-desc">No added captions</span>
           </button>
         </div>
-      </div>
-
-      <!-- Live Audio-Subtitle Sync Calibration -->
-      <div class="ctrl-box">
-        <div class="ctrl-box-title">
-          <span>⚡ Live Audio Sync</span>
-          <span id="syncBadge" class="sync-badge">+350ms</span>
-        </div>
-        <div class="sync-row">
-          <input type="range" id="syncSlider" min="-100" max="800" step="25" value="350" oninput="onSyncChange(this.value)">
-        </div>
-        <div class="sync-presets">
-          <button class="sync-chip" onclick="setSyncOffset(0)">0ms</button>
-          <button class="sync-chip" onclick="setSyncOffset(200)">+200ms</button>
-          <button class="sync-chip active" id="chipRec" onclick="setSyncOffset(350)">+350ms (Rec)</button>
-          <button class="sync-chip" onclick="setSyncOffset(500)">+500ms</button>
-        </div>
-        <div class="sync-hint">Adjust live if your Bluetooth or browser audio has slight latency.</div>
       </div>
 
       <!-- Direct Download Box -->
@@ -236,7 +238,7 @@
         <button class="btn-download" id="mainDlBtn" onclick="downloadClip()">
           ⬇️ Download 1080p 9:16 Short (MP4)
         </button>
-        <div class="dl-note">Full HD 1080x1920 • 60 FPS • NVIDIA NVENC Hardware Accelerated</div>
+        <div class="dl-note">1080 × 1920 MP4 · Speech-matched captions · Free hosting may take a few minutes</div>
       </div>
 
     </div>

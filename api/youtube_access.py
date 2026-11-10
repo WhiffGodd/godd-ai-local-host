@@ -1,0 +1,86 @@
+"""Shared YouTube setup. Browser credentials are used only by explicit configuration."""
+import os
+import shutil
+import time
+import threading
+import urllib.parse
+
+_INFO_CACHE = {}
+_INFO_FAILURES = {}
+_INFO_LOCK = threading.Lock()
+
+
+def youtube_options(options=None):
+    result = {'noplaylist': True, 'socket_timeout': 20, 'retries': 1, 'extractor_retries': 1}
+    if shutil.which('node'):
+        result['js_runtimes'] = {'node': {'path': shutil.which('node')}}
+    elif shutil.which('deno'):
+        result['js_runtimes'] = {'deno': {'path': shutil.which('deno')}}
+    cookie_file = os.environ.get('YOUTUBE_COOKIE_FILE', '').strip()
+    browser = os.environ.get('YOUTUBE_COOKIE_BROWSER', '').strip().lower()
+    if cookie_file:
+        cookie_file = os.path.abspath(os.path.expanduser(cookie_file))
+        if not os.path.isfile(cookie_file):
+            raise RuntimeError('The configured YouTube cookie file does not exist.')
+        result['cookiefile'] = cookie_file
+    elif browser:
+        if browser not in ('chrome', 'edge', 'firefox', 'brave'):
+            raise RuntimeError('Unsupported configured YouTube cookie browser.')
+        result['cookiesfrombrowser'] = (browser,)
+    result.update(options or {})
+    return result
+
+
+def download_error_response(error):
+    text = str(error).lower()
+    if 'dpapi' in text or 'could not copy chrome cookie database' in text or 'decrypt' in text:
+        return 403, 'YOUTUBE_BROWSER_COOKIES_UNAVAILABLE', (
+            'Chrome cookies could not be read on this computer. The video has not been downloaded. '
+            'Use a YouTube-only Netscape cookies file via YOUTUBE_COOKIE_FILE, or retry when YouTube allows anonymous access.')
+    if any(term in text for term in ('confirm you', 'not a bot', 'sign in', '429', 'too many requests')):
+        return 429, 'YOUTUBE_ACCESS_BLOCKED', (
+            'YouTube blocked access to this video before rendering could start. '
+            'Wait before retrying. If it persists, configure a local YouTube cookies file; '
+            'refreshing the page or changing subtitle presets will not resolve this restriction.')
+    return 500, 'CLIP_RENDER_FAILED', str(error)
+
+
+def extract_youtube_info(url, options=None):
+    """Reuse one full extraction across metadata, captions, and clip exports.
+
+    Cache for five minutes, well below normal signed URL expiry. Keep original
+    YouTube IDs as keys so share links and watch links share the same entry.
+    """
+    import yt_dlp
+    parsed = urllib.parse.urlparse(url)
+    video_id = urllib.parse.parse_qs(parsed.query).get('v', [None])[0]
+    if parsed.hostname in ('youtu.be', 'www.youtu.be'):
+        video_id = parsed.path.strip('/').split('/')[0]
+    key = (video_id or url, os.environ.get('YOUTUBE_COOKIE_FILE', ''),
+           os.environ.get('YOUTUBE_COOKIE_BROWSER', ''))
+    with _INFO_LOCK:
+        now = time.monotonic()
+        failed = _INFO_FAILURES.get(key)
+        if failed and now - failed[0] < 60:
+            raise RuntimeError(failed[1])
+        cached = _INFO_CACHE.get(key)
+        if cached and now - cached[0] < 300:
+            return cached[1]
+        opts = dict(options or {})
+        # A complete cached response can serve every caller without another
+        # watch-page/player request. Do not cache flattened placeholder data.
+        opts.pop('extract_flat', None)
+        opts.setdefault('format', 'bestvideo[height<=1080]+bestaudio/best')
+        try:
+            with yt_dlp.YoutubeDL(youtube_options(opts)) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as error:
+            if download_error_response(error)[1] == 'YOUTUBE_ACCESS_BLOCKED':
+                _INFO_FAILURES[key] = (time.monotonic(), str(error))
+            raise
+        _INFO_FAILURES.pop(key, None)
+        _INFO_CACHE[key] = (time.monotonic(), info)
+        for old_key in list(_INFO_CACHE):
+            if time.monotonic() - _INFO_CACHE[old_key][0] >= 300:
+                del _INFO_CACHE[old_key]
+        return info

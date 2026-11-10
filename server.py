@@ -1,5 +1,8 @@
 import http.server
 import socketserver
+import socket
+import secrets
+from collections import OrderedDict
 import json
 import urllib.parse
 import os
@@ -7,6 +10,10 @@ import sys
 import mimetypes
 import traceback
 import re
+import math
+import queue
+from render_jobs import RenderJobs
+from api.youtube_access import download_error_response
 from analyzer import (
     extract_youtube_id,
     get_video_metadata,
@@ -25,6 +32,30 @@ if sys.platform == "win32":
 
 PORT = int(os.environ.get("PORT", 8080))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CAPTION_RESULTS = OrderedDict()
+
+def validate_render_payload(payload):
+    host = urllib.parse.urlparse(payload.get("url", "")).hostname
+    if host not in ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"):
+        raise ValueError("Please provide a YouTube video URL.")
+    if urllib.parse.urlparse(payload["url"]).scheme != "https" or not extract_youtube_id(payload["url"]):
+        raise ValueError("Please provide a valid HTTPS YouTube video URL.")
+    start = float(payload.get("start", 0))
+    duration = float(payload.get("duration", 30))
+    if not math.isfinite(start) or start < 0 or not math.isfinite(duration) or not 1 <= duration <= 180:
+        raise ValueError("Choose a clip between 1 and 180 seconds with a valid start time.")
+    return {**payload, "start": start, "duration": duration}
+
+
+def run_export(payload):
+    return download_and_clip_video(
+        video_url=payload["url"], start_time=payload["start"], duration=payload["duration"],
+        layout=payload.get("layout", "blur"), subtitle_style=payload.get("subtitle_style", "beast"),
+        subtitles=payload.get("subtitles", []), video_subtitles=payload.get("video_subtitles", []),
+        caption_source=payload.get("caption_source", "auto"))
+
+
+EXPORT_JOBS = RenderJobs(run_export)
 
 SAMPLE_VIDEOS = [
     {
@@ -190,7 +221,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Range, Authorization, X-Requested-With, Accept")
-        self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type")
+        self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type, X-Captions-URL")
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -205,7 +236,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai backend", "version": "1.0.0"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "app": "godd ai backend", "version": "1.3.0", "caption_renderer": "styled-ass"}).encode("utf-8"))
             return
 
         if path == "/api/samples":
@@ -219,7 +250,19 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "service": "godd-ai", "mode": "gpu_accelerated"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "service": "godd-ai", "mode": "cloud" if os.environ.get("RENDER") else "local"}).encode("utf-8"))
+            return
+
+        if path == "/api/clip-captions":
+            token = urllib.parse.parse_qs(parsed.query).get("id", [""])[0]
+            captions = CAPTION_RESULTS.get(token)
+            if captions is None:
+                self.send_error(404, "Caption result expired")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(captions, ensure_ascii=False).encode("utf-8"))
             return
 
         # Direct browser download endpoint via GET
@@ -237,40 +280,108 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "layout": layout,
                 "title": title,
                 "stream": True,
-                "subtitles": []
+                "subtitles": [],
+                "subtitle_style": query.get("subtitle_style", ["source"])[0]
             }
             self.handle_render_clip(payload)
             return
 
-        # Serve static files from BASE_DIR
-        file_path = os.path.join(BASE_DIR, path.lstrip("/"))
-        if path == "/" or not os.path.exists(file_path) or os.path.isdir(file_path):
-            file_path = os.path.join(BASE_DIR, "index.html")
-
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            self.send_response(200)
-            content_type, _ = mimetypes.guess_type(file_path)
-            self.send_header("Content-Type", content_type or "text/plain")
-            self.end_headers()
-            with open(file_path, "rb") as f:
-                self.wfile.write(f.read())
+        if path.startswith("/api/exports/"):
+            parts = path.strip("/").split("/")
+            token = parts[2] if len(parts) >= 3 else ""
+            status = EXPORT_JOBS.snapshot(token)
+            if status is None:
+                self.send_error(404, "Export expired or not found")
+                return
+            if len(parts) == 3:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(status).encode())
+                return
+            output = EXPORT_JOBS.completed_path(token)
+            if not output:
+                self.send_error(409, "Export is not ready")
+                return
+            if parts[3] == "captions":
+                caption_path = output + ".captions.json"
+                captions = {"words": []}
+                if os.path.exists(caption_path):
+                    with open(caption_path, encoding="utf-8") as f:
+                        captions = json.load(f)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps(captions, ensure_ascii=False).encode("utf-8"))
+                return
+            if parts[3] == "download":
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Disposition", 'attachment; filename="godd_ai_clip.mp4"')
+                self.send_header("Content-Length", str(os.path.getsize(output)))
+                self.send_header("X-Captions-URL", f"/api/exports/{token}/captions")
+                self.end_headers()
+                with open(output, "rb") as f:
+                    while chunk := f.read(65536):
+                        self.wfile.write(chunk)
+                return
+            self.send_error(404)
             return
 
-        self.send_error(404, "File not found")
+        static_assets = {"/": "index.html", "/index.html": "index.html",
+                         "/app.js": "app.js", "/style.css": "style.css"}
+        asset = static_assets.get(path)
+        if asset is None:
+            self.send_error(404, "File not found")
+            return
+        file_path = os.path.join(BASE_DIR, asset)
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(file_path)[0] or "application/octet-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        with open(file_path, "rb") as f:
+            self.wfile.write(f.read())
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
         content_length = int(self.headers.get("Content-Length", 0))
+        if content_length < 0 or content_length > 2_000_000:
+            self.send_error(413, "Request is too large")
+            return
         body = self.rfile.read(content_length)
 
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}
+            if not isinstance(payload, dict):
+                raise ValueError("Request must be an object")
         except Exception:
             payload = {}
 
+        if path == "/api/exports":
+            try:
+                job = EXPORT_JOBS.submit(validate_render_payload(payload))
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(job).encode())
+            except (ValueError, TypeError):
+                self.send_error(400, "Provide a valid YouTube URL and a clip of 1-180 seconds")
+            except queue.Full:
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "30")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "The export queue is full. Please try again shortly."}).encode())
+            return
+
         if path == "/api/analyze":
+            try:
+                validate_render_payload({**payload, "start": 0, "duration": 1})
+            except (ValueError, TypeError):
+                self.send_error(400, "Provide a valid HTTPS YouTube URL")
+                return
             self.handle_analyze(payload)
             return
 
@@ -363,6 +474,9 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(srt_content.encode("utf-8"))
 
     def handle_render_clip(self, payload: dict):
+        if os.environ.get("RENDER"):
+            self.send_error(410, "Use the background export endpoint /api/exports")
+            return
         url = payload.get("url", "")
         start_time = float(payload.get("start", 0))
         duration = float(payload.get("duration", 30))
@@ -381,8 +495,18 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 layout=layout,
                 subtitles=subtitles,
                 subtitle_style=subtitle_style,
-                video_subtitles=video_subtitles
+                video_subtitles=video_subtitles,
+                caption_source=payload.get("caption_source", "auto")
             )
+
+            caption_token = None
+            if os.path.exists(rendered_path + ".captions.json"):
+                with open(rendered_path + ".captions.json", encoding="utf-8") as f:
+                    measured = json.load(f)
+                caption_token = secrets.token_urlsafe(18)
+                CAPTION_RESULTS[caption_token] = measured
+                while len(CAPTION_RESULTS) > 32:
+                    CAPTION_RESULTS.popitem(last=False)
 
             # Stream the rendered MP4 file directly to the client with clean title filename
             if payload.get("stream", True):
@@ -401,6 +525,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Content-Type", "video/mp4")
                 self.send_header("Content-Disposition", f'attachment; filename="{download_filename}"')
                 self.send_header("Content-Length", str(file_size))
+                if caption_token:
+                    self.send_header("X-Captions-URL", f"/api/clip-captions?id={caption_token}")
                 self.end_headers()
                 with open(rendered_path, "rb") as f:
                     while True:
@@ -420,13 +546,22 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             }).encode("utf-8"))
         except Exception as e:
             traceback.print_exc()
-            self.send_response(500)
+            status, code, message = download_error_response(e)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            self.wfile.write(json.dumps({"error": message, "code": code}).encode("utf-8"))
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    # Windows SO_REUSEADDR can let multiple workers bind the same port and
+    # serve stale code unpredictably. Keep exactly one local backend owner.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 def run():
     server_address = ('', PORT)

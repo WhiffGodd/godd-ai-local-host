@@ -1,0 +1,13 @@
+.git
+__pycache__
+**/__pycache__
+*.pyc
+.env*
+*cookies*.txt
+**/*cookies*.txt
+public/
+tests/
+*.mp4
+**/*.mp4
+*.webm
+**/*.captions.json

@@ -6,3 +6,10 @@ __pycache__/
 *.srt
 .env
 .vercel
+
+# Local authentication files must never be committed
+*cookies*.txt
+
+# Locally generated caption verification files
+public/*.captions.json
+public/speech_accuracy_check.json

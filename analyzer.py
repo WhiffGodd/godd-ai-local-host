@@ -1,3 +1,4 @@
+from api.youtube_access import youtube_options, extract_youtube_info
 import re
 import math
 import json
@@ -226,22 +227,21 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
                 'skip_download': True,
                 'extract_flat': True
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                desc = info.get("description") or ""
-                chapters = info.get("chapters") or []
-                if not chapters:
-                    chapters = extract_chapters_from_description(desc)
+            info = extract_youtube_info(url, ydl_opts)
+            desc = info.get("description") or ""
+            chapters = info.get("chapters") or []
+            if not chapters:
+                chapters = extract_chapters_from_description(desc)
 
-                return {
-                    "title": info.get("title", f"Video {video_id}"),
-                    "author": info.get("uploader", info.get("channel", "Creator")),
-                    "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
-                    "duration": info.get("duration", 600),
-                    "description": desc[:500],
-                    "view_count": info.get("view_count", 150000),
-                    "chapters": chapters
-                }
+            return {
+                "title": info.get("title", f"Video {video_id}"),
+                "author": info.get("uploader", info.get("channel", "Creator")),
+                "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                "duration": info.get("duration", 600),
+                "description": desc[:500],
+                "view_count": info.get("view_count", 150000),
+                "chapters": chapters
+            }
         except Exception as e:
             print(f"[Metadata] yt-dlp warning: {e}, falling back to oEmbed")
 
@@ -275,92 +275,90 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None, is_english
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}}
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            subs = info.get('subtitles') or {}
-            auto_subs = info.get('automatic_captions') or {}
+        info = extract_youtube_info(url, ydl_opts)
+        subs = info.get('subtitles') or {}
+        auto_subs = info.get('automatic_captions') or {}
 
-            # Prioritize matching the video's original spoken language
-            if is_english:
-                lang_order = ['en', 'en-US', 'en-GB', 'en-CA', 'en-IN', 'en-AU']
-            else:
-                lang_order = ['hi', 'hi-Latn', 'en-IN', 'en']
+        # Prioritize matching the video's original spoken language
+        if is_english:
+            lang_order = ['en', 'en-US', 'en-GB', 'en-CA', 'en-IN', 'en-AU']
+        else:
+            lang_order = ['hi', 'hi-Latn', 'en-IN', 'en']
 
-            chosen_sub_formats = None
-            for lang in lang_order:
-                if lang in subs:
-                    chosen_sub_formats = subs[lang]
-                    break
-                if lang in auto_subs:
-                    chosen_sub_formats = auto_subs[lang]
-                    break
+        chosen_sub_formats = None
+        for lang in lang_order:
+            if lang in subs:
+                chosen_sub_formats = subs[lang]
+                break
+            if lang in auto_subs:
+                chosen_sub_formats = auto_subs[lang]
+                break
 
-            if not chosen_sub_formats:
-                if subs:
-                    chosen_sub_formats = next(iter(subs.values()))
-                elif auto_subs:
-                    chosen_sub_formats = next(iter(auto_subs.values()))
+        if not chosen_sub_formats:
+            if subs:
+                chosen_sub_formats = next(iter(subs.values()))
+            elif auto_subs:
+                chosen_sub_formats = next(iter(auto_subs.values()))
 
-            if not chosen_sub_formats:
-                return []
+        if not chosen_sub_formats:
+            return []
 
-            # Prefer json3 format for millisecond-level word timing
-            json3_url = next((f['url'] for f in chosen_sub_formats if f.get('ext') == 'json3'), None)
-            if not json3_url:
-                json3_url = chosen_sub_formats[0].get('url')
+        # Prefer json3 format for millisecond-level word timing
+        json3_url = next((f['url'] for f in chosen_sub_formats if f.get('ext') == 'json3'), None)
+        if not json3_url:
+            json3_url = chosen_sub_formats[0].get('url')
 
-            if not json3_url:
-                return []
+        if not json3_url:
+            return []
 
-            req = urllib.request.Request(json3_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                events = data.get('events', [])
-                results = []
-                for ev in events:
-                    start_sec = ev.get('tStartMs', 0) / 1000.0
-                    dur_sec = ev.get('dDurationMs', 0) / 1000.0
-                    segs = ev.get('segs', [])
-                    if not segs:
+        req = urllib.request.Request(json3_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            events = data.get('events', [])
+            results = []
+            for ev in events:
+                start_sec = ev.get('tStartMs', 0) / 1000.0
+                dur_sec = ev.get('dDurationMs', 0) / 1000.0
+                segs = ev.get('segs', [])
+                if not segs:
+                    continue
+
+                # Extract words with millisecond precision from json3 tOffsetMs
+                words_in_ev = []
+                text_parts = []
+                for s in segs:
+                    raw_w = s.get('utf8', '').replace("\n", " ").strip()
+                    cleaned_w = clean_streamer_text(raw_w)
+                    if not cleaned_w:
                         continue
+                    text_parts.append(cleaned_w)
+                    t_offset = s.get('tOffsetMs')
+                    w_start = round(start_sec + (t_offset / 1000.0), 2) if t_offset is not None else None
+                    words_in_ev.append({
+                        "word": cleaned_w,
+                        "start": w_start
+                    })
 
-                    # Extract words with millisecond precision from json3 tOffsetMs
-                    words_in_ev = []
-                    text_parts = []
-                    for s in segs:
-                        raw_w = s.get('utf8', '').replace("\n", " ").strip()
-                        cleaned_w = clean_streamer_text(raw_w)
-                        if not cleaned_w:
-                            continue
-                        text_parts.append(cleaned_w)
-                        t_offset = s.get('tOffsetMs')
-                        w_start = round(start_sec + (t_offset / 1000.0), 2) if t_offset is not None else None
-                        words_in_ev.append({
-                            "word": cleaned_w,
-                            "start": w_start
-                        })
+                cleaned = " ".join(text_parts).strip()
+                if cleaned and len(cleaned) > 1:
+                    # Link end times of words
+                    for idx, wm in enumerate(words_in_ev):
+                        if wm["start"] is not None:
+                            next_start = words_in_ev[idx + 1]["start"] if idx + 1 < len(words_in_ev) else None
+                            if next_start is not None and next_start > wm["start"]:
+                                wm["end"] = next_start
+                            else:
+                                wm["end"] = round(wm["start"] + 0.35, 2)
 
-                    cleaned = " ".join(text_parts).strip()
-                    if cleaned and len(cleaned) > 1:
-                        # Link end times of words
-                        for idx, wm in enumerate(words_in_ev):
-                            if wm["start"] is not None:
-                                next_start = words_in_ev[idx + 1]["start"] if idx + 1 < len(words_in_ev) else None
-                                if next_start is not None and next_start > wm["start"]:
-                                    wm["end"] = next_start
-                                else:
-                                    wm["end"] = round(wm["start"] + 0.35, 2)
-
-                        results.append({
-                            "text": cleaned,
-                            "start": round(start_sec, 2),
-                            "duration": round(dur_sec, 2),
-                            "end": round(start_sec + dur_sec, 2),
-                            "words": words_in_ev if any(w["start"] is not None for w in words_in_ev) else []
-                        })
-                return results
+                    results.append({
+                        "text": cleaned,
+                        "start": round(start_sec, 2),
+                        "duration": round(dur_sec, 2),
+                        "end": round(start_sec + dur_sec, 2),
+                        "words": words_in_ev if any(w["start"] is not None for w in words_in_ev) else []
+                    })
+            return results
     except Exception as e:
         print(f"[yt-dlp Captions] Notice: {e}")
         return []
@@ -453,13 +451,6 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
     except Exception as e:
         print(f"[Transcript API] Notice: {e}")
 
-    # Method 3: If YouTubeTranscriptApi returned 0 or < 5 segments, retry yt-dlp
-    if len(results) < 5 and url:
-        print(f"[Transcript] Retrying yt-dlp timedtext extraction for {video_id} (is_english={is_english})...")
-        ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url, is_english=is_english)
-        if len(ytdlp_segments) > len(results):
-            results = ytdlp_segments
-
     print(f"[Transcript] Total real spoken segments extracted: {len(results)}")
     return results
 
@@ -481,139 +472,7 @@ def estimate_word_weight(word: str) -> float:
         weight += 0.40  # Clause breathing pause
     return max(0.5, weight)
 
-INCOMPLETE_TAIL_WORDS = {
-    "and", "but", "so", "or", "because", "if", "while", "though", "although", "whereas",
-    "as", "since", "plus", "yet", "that", "which", "who", "whom", "whose", "where", "when",
-    "what", "whatever", "how", "why", "the", "a", "an", "this", "these", "those",
-    "my", "your", "his", "her", "its", "our", "their", "of", "to", "in", "for", "on",
-    "with", "at", "by", "from", "up", "about", "into", "through", "over", "after",
-    "under", "between", "against", "during", "without", "before", "towards", "upon",
-    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do",
-    "does", "did", "can", "could", "will", "would", "shall", "should", "may", "might",
-    "must", "like", "representing", "distinct", "including", "than", "well", "just"
-}
-
-def snap_to_clean_sentence_boundaries(
-    transcript: list,
-    target_start: float,
-    min_duration: float = 35.0,
-    ideal_duration: float = 58.0,
-    max_duration: float = 85.0
-) -> tuple:
-    """
-    Find complete, smooth thought boundaries so the speaker NEVER gets cut off or hanged mid-sentence.
-    Allows the speaker to finish what they are saying completely before clipping.
-    Returns (clean_start, clean_end, list_of_segments).
-    """
-    if not transcript:
-        return target_start, target_start + ideal_duration, []
-
-    # 1. Find the best starting segment near target_start
-    start_idx = 0
-    min_dist = float('inf')
-    for idx, seg in enumerate(transcript):
-        dist = abs(seg.get("start", 0) - target_start)
-        if dist < min_dist:
-            min_dist = dist
-            start_idx = idx
-
-    # If the chosen segment is mid-sentence, walk backwards up to 8 seconds to start at the true sentence beginning
-    while start_idx > 0:
-        prev_seg = transcript[start_idx - 1]
-        prev_txt = str(prev_seg.get("text", "")).strip()
-        gap = transcript[start_idx].get("start", 0) - prev_seg.get("end", 0)
-        if gap >= 0.45 or prev_txt.endswith((".", "!", "?")):
-            break
-        if target_start - prev_seg.get("start", 0) > 8.0:
-            break
-        start_idx -= 1
-
-    clean_start = round(float(transcript[start_idx].get("start", target_start)), 2)
-
-    # 2. Accumulate segments and search for complete sentence closure between min_duration and max_duration
-    best_end_idx = None
-    best_score = -1000
-    best_end_time = clean_start + ideal_duration
-
-    for idx in range(start_idx, len(transcript)):
-        seg = transcript[idx]
-        cur_end = float(seg.get("end", seg.get("start", 0) + 1.0))
-        cur_dur = cur_end - clean_start
-
-        if cur_dur < min_duration:
-            continue
-        if cur_dur > max_duration:
-            break
-
-        seg_txt = str(seg.get("text", "")).strip()
-        words = seg_txt.split()
-        last_word = words[-1].lower().strip(".,!?:;\"'()[]") if words else ""
-        
-        # Check if segment ends on incomplete tail or open clause
-        is_incomplete = (
-            last_word in INCOMPLETE_TAIL_WORDS or
-            seg_txt.endswith((",", ";", ":", "-", "..."))
-        )
-
-        has_terminal = seg_txt.endswith((".", "!", "?"))
-        next_gap = 0.0
-        next_starts_trans = False
-        next_is_lower = False
-
-        if idx + 1 < len(transcript):
-            next_seg = transcript[idx + 1]
-            next_gap = float(next_seg.get("start", cur_end)) - cur_end
-            next_txt = str(next_seg.get("text", "")).strip()
-            if next_txt and next_txt[0].islower():
-                next_is_lower = True
-            next_lower = next_txt.lower()
-            if any(next_lower.startswith(t) for t in ["now ", "so ", "next ", "but ", "however ", "in fact ", "then ", "anyway ", "moving on "]):
-                next_starts_trans = True
-
-        score = 0
-        if is_incomplete or next_is_lower:
-            score -= 200  # Disqualify incomplete clauses from cutting off speaker
-        else:
-            if has_terminal:
-                score += 70
-            if next_gap >= 0.5:
-                score += 40
-            elif next_gap >= 0.25:
-                score += 20
-            if next_starts_trans:
-                score += 30
-
-            # Conclusive phrasing bonus
-            lower_txt = seg_txt.lower()
-            if any(c in lower_txt for c in ["that's it", "that's how", "that's why", "in the end", "at the end of the day", "it's that simple", "doesn't it", "makes sense", "all there is to it", "simple as that"]):
-                score += 35
-
-            # Comfortable Short/Reel narrative duration (45s - 75s sweet spot)
-            if 45.0 <= cur_dur <= 75.0:
-                score += 25
-            else:
-                score += max(0, 15 - int(abs(cur_dur - ideal_duration) * 0.5))
-
-        if score > best_score:
-            best_score = score
-            best_end_idx = idx
-            # Add generous 0.85s tail margin so speaker's breath and vocal decay are never clipped
-            best_end_time = round(cur_end + min(0.85, max(0.4, next_gap * 0.6)), 2)
-
-    if best_end_idx is None:
-        for idx in range(start_idx, len(transcript)):
-            cur_end = float(transcript[idx].get("end", 0))
-            if cur_end - clean_start >= min_duration:
-                best_end_idx = idx
-                best_end_time = round(cur_end + 0.5, 2)
-                break
-
-    if best_end_idx is None:
-        best_end_idx = len(transcript) - 1
-        best_end_time = float(transcript[best_end_idx].get("end", clean_start + ideal_duration))
-
-    included_segs = transcript[start_idx : best_end_idx + 1]
-    return clean_start, best_end_time, included_segs
+from api.clip_boundaries import snap_to_clean_sentence_boundaries
 
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
     """
@@ -627,11 +486,13 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
         return []
 
     subtitles = []
-    lead_offset = 0.16
+    lead_offset = 0.0
 
     for seg in clip_segs:
-        s_start = max(0.0, float(seg.get("start", 0)) - lead_offset)
-        s_end = max(s_start + 0.35, float(seg.get("end", s_start + 1.0)) - (lead_offset * 0.5))
+        s_start = max(clip_start, float(seg.get("start", 0)))
+        s_end = min(clip_end, float(seg.get("end", s_start + 1.0)))
+        if s_end <= s_start:
+            continue
 
         words_meta = seg.get("words")
         if words_meta and any(wm.get("start") is not None for wm in words_meta):
@@ -641,8 +502,10 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
                     continue
                 w_start = round(max(0.0, float(wm.get("start", s_start)) - lead_offset), 2)
                 raw_end = float(wm.get("end", w_start + 0.35))
-                weight = estimate_word_weight(w_clean)
-                adapted_end = round(max(w_start + 0.18, min(raw_end, w_start + (weight * 0.28))), 2)
+                adapted_end = round(min(clip_end, raw_end), 3)
+                w_start = max(clip_start, w_start)
+                if adapted_end <= w_start:
+                    continue
                 subtitles.append({
                     "word": w_clean,
                     "start": w_start,
@@ -668,8 +531,8 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
             if not w_clean:
                 continue
             word_fraction = weights[idx] / total_weight
-            duration = max(0.18, seg_dur * word_fraction)
-            w_end = round(cur + duration, 2)
+            duration = seg_dur * word_fraction
+            w_end = min(s_end, round(cur + duration, 3))
             subtitles.append({
                 "word": w_clean,
                 "start": round(cur, 2),
@@ -686,7 +549,7 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
     if not words:
         return []
 
-    lead_offset = 0.16
+    lead_offset = 0.0
     adj_start = max(0.0, start_sec - lead_offset)
     total_duration = max(0.5, end_sec - adj_start)
     weights = [estimate_word_weight(w) for w in words]
@@ -740,8 +603,14 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 start_time,
                 min_duration=35.0,
                 ideal_duration=58.0,
-                max_duration=85.0
+                max_duration=85.0,
+                boundary_limit=min(video_duration, min(
+                    (float(other.get("time", other.get("start_time", 0))) for other in chapters
+                     if float(other.get("time", other.get("start_time", 0))) > start_time),
+                    default=video_duration))
             )
+            if not c_segs:
+                continue
             actual_dur = round(c_end - c_start, 1)
             full_text = " ".join(s.get("text", "") for s in c_segs) if c_segs else ch_title
             
@@ -780,7 +649,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
         if meaningful_clips:
             return meaningful_clips
 
-    if not transcript or len(transcript) < 5:
+    if not transcript:
         # If no transcript was fetched (e.g., auto-captions off), synthesize content-focused segments based on video title
         return synthesize_viral_clips(video_duration, title, chapters=chapters)
         
@@ -806,10 +675,11 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             target_start,
             min_duration=min_clip_length,
             ideal_duration=target_clip_length,
-            max_duration=max_clip_length
+            max_duration=max_clip_length,
+            boundary_limit=video_duration
         )
         dur = round(c_end - c_start, 1)
-        if dur < min_clip_length or dur > max_clip_length + 2.0:
+        if not c_segs or dur < min_clip_length or dur > 180.0:
             continue
             
         # Avoid duplicate snapped starts
@@ -871,7 +741,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 break
                 
     if not selected_clips:
-        return synthesize_viral_clips(video_duration, title)
+        # Do not replace rejected real speech with arbitrary fixed windows.
+        return []
         
     # Format selected clips for Klap-style display
     formatted = []
