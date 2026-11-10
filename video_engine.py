@@ -201,21 +201,57 @@ def get_video_encoder_flags():
 
 def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
     """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
-    lines = []
-    chunk_size = 3  # Punchy 3-word chunks for modern vertical short captions
+    if not subtitles:
+        return ""
+
     lead_offset = 0.16  # Subtitle visual cue leads spoken speech by 160ms for optimal synchronization
 
-    for i in range(0, len(subtitles), chunk_size):
-        group = subtitles[i:i + chunk_size]
-        if not group:
-            continue
-        raw_start = float(group[0].get("start", 0))
-        raw_end = float(group[-1].get("end", raw_start + 1.0))
+    # 1. Clean subtitle items
+    cleaned = []
+    for item in subtitles:
+        w = str(item.get("word", "")).strip()
+        w = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', w)
+        w = re.sub(r'[«»<>]+', '', w).strip()
+        if w:
+            cleaned.append({
+                "word": w,
+                "start": float(item.get("start", 0)),
+                "end": float(item.get("end", 0)),
+                "highlight": bool(item.get("highlight", False))
+            })
 
-        # Check next chunk start to avoid flicker and maintain hold screen time
+    if not cleaned:
+        return ""
+
+    # 2. Group words into dynamic sentence-aware phrase chunks
+    chunks = []
+    current_chunk = []
+
+    for idx, item in enumerate(cleaned):
+        current_chunk.append(item)
+        w = item["word"]
+        ends_sentence = w.endswith((".", "!", "?"))
+        ends_pause = False
+        if idx + 1 < len(cleaned):
+            gap = cleaned[idx + 1]["start"] - item["end"]
+            if gap >= 0.38:
+                ends_pause = True
+
+        if (ends_sentence and len(current_chunk) >= 2) or len(current_chunk) >= 4 or ends_pause or idx == len(cleaned) - 1:
+            chunks.append(current_chunk)
+            current_chunk = []
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    lines = []
+    for idx, group in enumerate(chunks):
+        raw_start = float(group[0]["start"])
+        raw_end = float(group[-1]["end"])
+
         next_raw_start = None
-        if i + chunk_size < len(subtitles):
-            next_raw_start = float(subtitles[i + chunk_size].get("start", 0))
+        if idx + 1 < len(chunks):
+            next_raw_start = float(chunks[idx + 1][0]["start"])
 
         if raw_start >= clip_start and clip_start > 0:
             start_sec = max(0.0, raw_start - clip_start - lead_offset)
@@ -236,28 +272,20 @@ def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
 
         end_sec = max(start_sec + 0.6, end_sec)
 
-        # Clean words from any speaker brackets, <<, >>, or HTML tags
-        words = []
-        for item in group:
-            w = str(item.get("word", "")).strip()
-            w = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', w)
-            w = re.sub(r'[«»<>]+', '', w).strip()
-            if w:
-                words.append(w)
-
+        words = [item["word"] for item in group]
         text = " ".join(words).strip()
         if not text:
             continue
-        
-        index = (i // chunk_size) + 1
+
+        index = idx + 1
         start_srt = format_srt_timestamp(start_sec)
         end_srt = format_srt_timestamp(end_sec)
-        
+
         lines.append(f"{index}")
         lines.append(f"{start_srt} --> {end_srt}")
         lines.append(text)
         lines.append("")
-        
+
     return "\n".join(lines)
 
 def format_srt_timestamp(seconds: float) -> str:
@@ -474,8 +502,10 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             filter_complex = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920:flags=lanczos{srt_filter}[outv]"
 
         encoder_flags = get_video_encoder_flags()
+        fade_out_start = max(0.1, duration - 0.35)
+        audio_filter = f"volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50,afade=t=in:st=0:d=0.25,afade=t=out:st={fade_out_start:.2f}:d=0.35"
 
-        # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement
+        # Run ffmpeg with fast seek (-ss before -i) and Streamer Voice audio enhancement with silky smooth fade-in/fade-out
         if video_stream_url and audio_stream_url:
             cmd = [
                 FFMPEG_PATH,
@@ -488,7 +518,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-map", "1:a?",
-                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                "-af", audio_filter,
                 *encoder_flags,
                 "-c:a", "aac",
                 "-b:a", "192k",
@@ -505,7 +535,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-map", "0:a?",
-                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                "-af", audio_filter,
                 *encoder_flags,
                 "-c:a", "aac",
                 "-b:a", "192k",
@@ -522,7 +552,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-map", "0:a?",
-                "-af", "volume=1.2,highpass=f=90,equalizer=f=1200:width_type=h:width=900:g=3.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50",
+                "-af", audio_filter,
                 *encoder_flags,
                 "-c:a", "aac",
                 "-b:a", "192k",

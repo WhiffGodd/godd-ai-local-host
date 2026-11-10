@@ -598,31 +598,52 @@ function scrubSeek(e) {
 let cachedClipKey = null;
 let cachedPhraseCards = [];
 
+function estimateWordWeightJs(word) {
+  if (!word) return 1.0;
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return 1.0;
+  const vowels = (w.match(/[aeiouy]/g) || []).length;
+  let weight = 0.6 + (w.length * 0.08) + (vowels * 0.18);
+  if (/[.!?]$/.test(word)) weight += 0.45;
+  else if (/[,;:]$/.test(word)) weight += 0.25;
+  return Math.max(0.6, weight);
+}
+
 function buildPhraseCards(subs) {
   if (!subs || !subs.length) return [];
-  const chunkSize = 3; // 3-word punchy phrase cards for vertical reels/shorts
   const cards = [];
+  let currentChunk = [];
 
-  for (let i = 0; i < subs.length; i += chunkSize) {
-    const chunk = subs.slice(i, i + chunkSize);
-    if (!chunk.length) continue;
-    const cStart = chunk[0].start;
-    const cEndRaw = chunk[chunk.length - 1].end || (cStart + 1.2);
-    // Guarantee at least 1.4s screen time + 0.5s hold time after last word
-    const cEndWithHold = Math.max(cStart + 1.4, cEndRaw + 0.5);
-    cards.push({
-      start: cStart,
-      end: cEndWithHold,
-      words: chunk,
-      startIndex: i
-    });
+  for (let i = 0; i < subs.length; i++) {
+    const item = subs[i];
+    currentChunk.push(item);
+    const wordStr = (item.word || '').trim();
+    const endsSentence = /[.!?]$/.test(wordStr);
+    let endsPause = false;
+    if (i + 1 < subs.length) {
+      const gap = subs[i + 1].start - item.end;
+      if (gap >= 0.38) endsPause = true;
+    }
+
+    if ((endsSentence && currentChunk.length >= 2) || currentChunk.length >= 4 || endsPause || i === subs.length - 1) {
+      const cStart = currentChunk[0].start;
+      const cEndRaw = currentChunk[currentChunk.length - 1].end || (cStart + 1.2);
+      const cEndWithHold = Math.max(cStart + 1.3, cEndRaw + 0.45);
+      cards.push({
+        start: cStart,
+        end: cEndWithHold,
+        words: [...currentChunk],
+        startIndex: i - currentChunk.length + 1
+      });
+      currentChunk = [];
+    }
   }
 
   // Prevent overlap with next card's start
   for (let i = 0; i < cards.length - 1; i++) {
     const nextStart = cards[i + 1].start;
     if (cards[i].end > nextStart) {
-      cards[i].end = Math.max(cards[i].start + 0.9, nextStart - 0.04);
+      cards[i].end = Math.max(cards[i].start + 0.85, nextStart - 0.04);
     }
   }
   return cards;
@@ -637,16 +658,22 @@ function genWordSubs(startSec, endSec, text) {
   const words = clean.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const dur = Math.max(1, endSec - startSec);
-  const speechDur = Math.min(dur, Math.max(words.length * 0.32, dur * 0.85));
-  const tpw = speechDur / words.length;
+  const speechDur = Math.min(dur, Math.max(words.length * 0.32, dur * 0.88));
+  const weights = words.map(w => estimateWordWeightJs(w));
+  const totalWeight = weights.reduce((a, b) => a + b, 0) || 1.0;
   const highlightWords = ['important', 'key', 'secret', 'never', 'why', 'how', 'truth', 'future', 'mind', 'huge', 'best', 'worst', 'money', 'power', 'crazy', 'realize'];
 
+  let curTime = startSec;
   return words.map((w, i) => {
     const cleanWord = w.replace(/[«»<>]+/g, '').trim();
+    const wDur = Math.max(0.18, speechDur * (weights[i] / totalWeight));
+    const wStart = Math.round(curTime * 100) / 100;
+    const wEnd = Math.round(Math.min(endSec, curTime + wDur) * 100) / 100;
+    curTime += wDur;
     return {
       word: cleanWord,
-      start: Math.round((startSec + i * tpw) * 100) / 100,
-      end:   Math.round((startSec + (i + 1) * tpw) * 100) / 100,
+      start: wStart,
+      end: wEnd,
       highlight: highlightWords.some(k => cleanWord.toLowerCase().includes(k)) || (i % 4 === 2)
     };
   }).filter(item => item.word.length > 0);

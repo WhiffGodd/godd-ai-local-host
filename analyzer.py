@@ -463,10 +463,118 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
     print(f"[Transcript] Total real spoken segments extracted: {len(results)}")
     return results
 
+def estimate_word_weight(word: str) -> float:
+    """
+    Estimate relative spoken time for a word based on syllables, character length and punctuation.
+    Allows subtitles to dynamically adapt when the speaker speaks fast vs slow.
+    """
+    w = re.sub(r'[^\w]', '', str(word or '')).strip()
+    if not w:
+        return 0.8
+    vowels = len(re.findall(r'[aeiouy]+', w.lower()))
+    syllables = max(1, vowels)
+    weight = 0.35 + (syllables * 0.42) + (len(w) * 0.04)
+    raw = str(word or '').strip()
+    if raw.endswith((".", "!", "?")):
+        weight += 0.80  # Full sentence terminal pause
+    elif raw.endswith((",", ";", ":", "-")):
+        weight += 0.40  # Clause breathing pause
+    return max(0.5, weight)
+
+def snap_to_clean_sentence_boundaries(
+    transcript: list,
+    target_start: float,
+    min_duration: float = 28.0,
+    ideal_duration: float = 42.0,
+    max_duration: float = 65.0
+) -> tuple:
+    """
+    Find complete, smooth thought boundaries so the speaker NEVER gets cut off or hanged mid-sentence.
+    Returns (clean_start, clean_end, list_of_segments).
+    """
+    if not transcript:
+        return target_start, target_start + ideal_duration, []
+
+    # 1. Find the best starting segment near target_start
+    start_idx = 0
+    min_dist = float('inf')
+    for idx, seg in enumerate(transcript):
+        dist = abs(seg.get("start", 0) - target_start)
+        if dist < min_dist:
+            min_dist = dist
+            start_idx = idx
+
+    # If the chosen segment is mid-sentence, walk backwards up to 3 segments to start at the true beginning of the sentence
+    while start_idx > 0:
+        prev_seg = transcript[start_idx - 1]
+        prev_txt = str(prev_seg.get("text", "")).strip()
+        gap = transcript[start_idx].get("start", 0) - prev_seg.get("end", 0)
+        if gap >= 0.45 or prev_txt.endswith((".", "!", "?")):
+            break
+        if target_start - prev_seg.get("start", 0) > 6.0:
+            break
+        start_idx -= 1
+
+    clean_start = round(float(transcript[start_idx].get("start", target_start)), 2)
+
+    # 2. Accumulate segments and search for complete sentence closure between min_duration and max_duration
+    best_end_idx = None
+    best_score = -1
+    best_end_time = clean_start + ideal_duration
+
+    for idx in range(start_idx, len(transcript)):
+        seg = transcript[idx]
+        cur_end = float(seg.get("end", seg.get("start", 0) + 1.0))
+        cur_dur = cur_end - clean_start
+
+        if cur_dur < min_duration:
+            continue
+        if cur_dur > max_duration:
+            break
+
+        seg_txt = str(seg.get("text", "")).strip()
+        has_terminal = seg_txt.endswith((".", "!", "?"))
+        next_gap = 0.0
+        if idx + 1 < len(transcript):
+            next_gap = float(transcript[idx + 1].get("start", cur_end)) - cur_end
+
+        # Scoring candidate end point: strong preference for complete sentence (. ! ?) and natural breath pause
+        score = 0
+        if has_terminal:
+            score += 55
+        if next_gap >= 0.45:
+            score += 30
+        elif next_gap >= 0.25:
+            score += 15
+
+        dur_diff = abs(cur_dur - ideal_duration)
+        score += max(0, 25 - int(dur_diff))
+
+        if score > best_score:
+            best_score = score
+            best_end_idx = idx
+            # Add a 0.5s tail margin after final word so speaker's natural breath isn't chopped
+            best_end_time = round(cur_end + min(0.65, max(0.25, next_gap * 0.5)), 2)
+
+    if best_end_idx is None:
+        for idx in range(start_idx, len(transcript)):
+            cur_end = float(transcript[idx].get("end", 0))
+            if cur_end - clean_start >= min_duration:
+                best_end_idx = idx
+                best_end_time = round(cur_end + 0.35, 2)
+                break
+
+    if best_end_idx is None:
+        best_end_idx = len(transcript) - 1
+        best_end_time = float(transcript[best_end_idx].get("end", clean_start + ideal_duration))
+
+    included_segs = transcript[start_idx : best_end_idx + 1]
+    return clean_start, best_end_time, included_segs
+
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
     """
     Extract word-level subtitle timings from real spoken transcript segments.
-    Applies an anticipatory lead offset (160ms) and strips speaker change markers (<<, >>).
+    Applies adaptive speech rate weighting so fast and slow speech are accurately tracked.
     """
     if not segments:
         return []
@@ -475,7 +583,7 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
         return []
 
     subtitles = []
-    lead_offset = 0.16  # Subtitles precede speech by 160ms so active word lights up right as spoken
+    lead_offset = 0.16
 
     for seg in clip_segs:
         s_start = max(0.0, float(seg.get("start", 0)) - lead_offset)
@@ -488,40 +596,36 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
                 if not w_clean:
                     continue
                 w_start = round(max(0.0, float(wm.get("start", s_start)) - lead_offset), 2)
-                w_end = round(max(w_start + 0.22, float(wm.get("end", w_start + 0.35)) - (lead_offset * 0.5)), 2)
+                raw_end = float(wm.get("end", w_start + 0.35))
+                weight = estimate_word_weight(w_clean)
+                adapted_end = round(max(w_start + 0.18, min(raw_end, w_start + (weight * 0.28))), 2)
                 subtitles.append({
                     "word": w_clean,
                     "start": w_start,
-                    "end": w_end,
+                    "end": adapted_end,
                     "highlight": any(k in w_clean.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest", "realize", "best", "worst"])
                 })
             continue
 
-        # Clean text of <<, >>, HTML tags, and sound tags
+        # Clean text
         cleaned_text = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', str(seg.get("text", "")))
         cleaned_text = re.sub(r'[«»<>]+', ' ', cleaned_text)
-
         raw_words = [w.strip() for w in cleaned_text.split() if w.strip()]
         if not raw_words:
             continue
 
         seg_dur = max(0.25, s_end - s_start)
-        # Avoid stretching words into pauses/silence: human speaking cadence is ~0.28s-0.36s per word
-        cadence_dur = len(raw_words) * 0.32
-        actual_speech_dur = min(seg_dur, max(cadence_dur, seg_dur * 0.85))
-        t_per_word = max(0.22, min(0.38, actual_speech_dur / len(raw_words)))
+        weights = [estimate_word_weight(w) for w in raw_words]
+        total_weight = sum(weights) or 1.0
 
         cur = s_start
-        for w in raw_words:
+        for idx, w in enumerate(raw_words):
             w_clean = re.sub(r'[«»<>]+', '', w).strip()
             if not w_clean:
                 continue
-            duration = t_per_word
-            if w_clean.endswith((".", "!", "?")):
-                duration *= 1.25
-            elif w_clean.endswith(","):
-                duration *= 1.12
-            w_end = round(cur + max(0.20, duration), 2)
+            word_fraction = weights[idx] / total_weight
+            duration = max(0.18, seg_dur * word_fraction)
+            w_end = round(cur + duration, 2)
             subtitles.append({
                 "word": w_clean,
                 "start": round(cur, 2),
@@ -541,10 +645,8 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
     lead_offset = 0.16
     adj_start = max(0.0, start_sec - lead_offset)
     total_duration = max(0.5, end_sec - adj_start)
-    # Natural human speech cadence: avoid stretching words across long silences
-    cadence = len(words) * 0.32
-    speech_dur = min(total_duration, max(cadence, total_duration * 0.85))
-    time_per_word = max(0.22, min(0.38, speech_dur / len(words)))
+    weights = [estimate_word_weight(w) for w in words]
+    total_weight = sum(weights) or 1.0
 
     subtitles = []
     current_time = adj_start
@@ -552,13 +654,8 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
         w_clean = re.sub(r'[«»<>]+', '', word).strip()
         if not w_clean:
             continue
-        duration = time_per_word
-        if w_clean.endswith((".", "!", "?")):
-            duration *= 1.25
-        elif w_clean.endswith(","):
-            duration *= 1.12
-
-        w_end = min(end_sec, current_time + max(0.20, duration))
+        duration = max(0.18, total_duration * (weights[i] / total_weight))
+        w_end = min(end_sec, current_time + duration)
         is_highlight = any(k in w_clean.lower() for k in HOOK_KEYWORDS + HIGH_ENERGY_WORDS)
 
         subtitles.append({
@@ -594,14 +691,15 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             start_time = float(ch.get("time", ch.get("start_time", 0)))
             ch_title = str(ch.get("title", f"Key Moment #{idx+1}")).strip()
             
-            clip_dur = 38.0
-            if start_time + clip_dur > video_duration:
-                start_time = max(0.0, video_duration - clip_dur)
-            end_time = min(video_duration, start_time + clip_dur)
-            
-            # Words spoken during this chapter window
-            ch_words = [s["text"] for s in (transcript or []) if s.get("start", 0) >= start_time and s.get("end", 0) <= end_time]
-            full_text = " ".join(ch_words) if ch_words else ch_title
+            c_start, c_end, c_segs = snap_to_clean_sentence_boundaries(
+                transcript,
+                start_time,
+                min_duration=28.0,
+                ideal_duration=42.0,
+                max_duration=65.0
+            )
+            actual_dur = round(c_end - c_start, 1)
+            full_text = " ".join(s.get("text", "") for s in c_segs) if c_segs else ch_title
             
             clip_title = generate_meaningful_content_title(clip_text=full_text, video_title=title, chapter_title=ch_title, rank=idx+1)
             
@@ -610,17 +708,17 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 "rank": idx + 1,
                 "title": clip_title,
                 "hook": ch_title,
-                "start": round(start_time, 1),
-                "end": round(end_time, 1),
-                "duration": format_duration(clip_dur),
-                "duration_sec": clip_dur,
+                "start": round(c_start, 1),
+                "end": round(c_end, 1),
+                "duration": format_duration(actual_dur),
+                "duration_sec": actual_dur,
                 "virality_score": 98 - idx * 2,
                 "virality_badge": "🔥 Core Highlight" if idx == 0 else "⚡ Key Insight",
                 "viral_reasons": ["Creator Chapter Topic", f"Content: {ch_title[:32]}"],
                 "tags": ["Key Chapter", "Deep Dive", "Must Watch"],
                 "full_text": full_text,
-                "subtitles": generate_word_subtitles_from_segments(transcript, start_time, end_time) or generate_word_subtitles(start_time, end_time, full_text),
-                "has_real_captions": bool(ch_words)
+                "subtitles": generate_word_subtitles_from_segments(transcript, c_start, c_end) or generate_word_subtitles(c_start, c_end, full_text),
+                "has_real_captions": bool(c_segs)
             })
             
         if meaningful_clips:
@@ -630,56 +728,62 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
         # If no transcript was fetched (e.g., auto-captions off), synthesize content-focused segments based on video title
         return synthesize_viral_clips(video_duration, title, chapters=chapters)
         
-    target_clip_length = 40.0 # ~40 seconds per short
-    min_clip_length = 25.0
-    max_clip_length = 60.0
+    target_clip_length = 42.0 # ~42 seconds per short
+    min_clip_length = 28.0
+    max_clip_length = 65.0
     
     candidate_windows = []
     total_segments = len(transcript)
     
-    # Slide across transcript segments
-    step = max(1, total_segments // 25)
+    # Slide across transcript segments and snap each candidate to complete thought boundaries
+    step = max(1, total_segments // 30)
+    seen_starts = set()
     for i in range(0, total_segments, step):
-        start_seg = transcript[i]
-        start_time = start_seg["start"]
+        target_start = float(transcript[i].get("start", 0))
         
         # Don't start too close to video end
-        if start_time + min_clip_length > video_duration:
+        if target_start + min_clip_length > video_duration:
             break
             
-        current_words = []
-        end_time = start_time
-        
-        for j in range(i, total_segments):
-            seg = transcript[j]
-            current_words.append(seg["text"])
-            end_time = seg["end"]
+        c_start, c_end, c_segs = snap_to_clean_sentence_boundaries(
+            transcript,
+            target_start,
+            min_duration=min_clip_length,
+            ideal_duration=target_clip_length,
+            max_duration=max_clip_length
+        )
+        dur = round(c_end - c_start, 1)
+        if dur < min_clip_length or dur > max_clip_length + 2.0:
+            continue
             
-            dur = end_time - start_time
-            if dur >= min_clip_length:
-                full_text = " ".join(current_words)
-                
-                # Calculate virality score
-                score, reasons, tags, hook_text = score_segment(
-                    start_time=start_time,
-                    duration=dur,
-                    text=full_text,
-                    first_phrase=" ".join(current_words[:min(4, len(current_words))])
-                )
-                
-                candidate_windows.append({
-                    "start": round(start_time, 2),
-                    "end": round(end_time, 2),
-                    "duration_sec": round(dur, 1),
-                    "text": full_text,
-                    "score": score,
-                    "reasons": reasons,
-                    "tags": tags,
-                    "hook": hook_text
-                })
-                
-                if dur >= max_clip_length:
-                    break
+        # Avoid duplicate snapped starts
+        start_key = round(c_start, 0)
+        if start_key in seen_starts:
+            continue
+        seen_starts.add(start_key)
+        
+        words = [s.get("text", "") for s in c_segs]
+        full_text = " ".join(words).strip()
+        if not full_text:
+            continue
+            
+        score, reasons, tags, hook_text = score_segment(
+            start_time=c_start,
+            duration=dur,
+            text=full_text,
+            first_phrase=" ".join(words[:min(5, len(words))])
+        )
+        
+        candidate_windows.append({
+            "start": round(c_start, 2),
+            "end": round(c_end, 2),
+            "duration_sec": dur,
+            "text": full_text,
+            "score": score,
+            "reasons": reasons,
+            "tags": tags,
+            "hook": hook_text
+        })
                     
     # Sort candidates by virality score descending
     candidate_windows.sort(key=lambda x: x["score"], reverse=True)
