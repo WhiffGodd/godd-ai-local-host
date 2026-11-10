@@ -275,8 +275,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             # 1. Fetch metadata
             meta = get_video_metadata(video_id, url)
             
-            # 2. Fetch or synthesize transcript
-            transcript = fetch_transcript_segments(video_id)
+            # 2. Fetch or synthesize transcript using YouTube API + yt-dlp real timedtext
+            transcript = fetch_transcript_segments(video_id, url=url)
             
             # 3. Analyze virality and generate clips
             clips = analyze_virality_and_cut_clips(

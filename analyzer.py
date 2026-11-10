@@ -239,54 +239,111 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
     meta = fetch_oembed_metadata(video_id)
     return meta
 
-def fetch_transcript_segments(video_id: str) -> list:
+def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
     """
-    Fetch transcripts with priority on streamer mic speech:
-    1. Manually created captions (creator's own subtitles)
-    2. Hindi / Hinglish captions (streamer's native language)
-    3. Auto-generated captions
-    Automatically cleans in-game sound tags ([Music], [Applause], etc.)
+    Fetch real timed text subtitles directly from YouTube timedtext API via yt-dlp.
+    Extracts the exact spoken words with millisecond timestamps.
     """
-    transcript_data = None
+    if not yt_dlp:
+        return []
+    url = video_url or f"https://www.youtube.com/watch?v={video_id}"
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'mweb']}}
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            subs = info.get('subtitles') or {}
+            auto_subs = info.get('automatic_captions') or {}
+
+            # Prioritize Hindi/Hinglish, then Indian English, then English
+            chosen_sub_formats = None
+            for lang in ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB']:
+                if lang in subs:
+                    chosen_sub_formats = subs[lang]
+                    break
+                if lang in auto_subs:
+                    chosen_sub_formats = auto_subs[lang]
+                    break
+
+            if not chosen_sub_formats:
+                if subs:
+                    chosen_sub_formats = next(iter(subs.values()))
+                elif auto_subs:
+                    chosen_sub_formats = next(iter(auto_subs.values()))
+
+            if not chosen_sub_formats:
+                return []
+
+            # Prefer json3 format for millisecond-level word timing
+            json3_url = next((f['url'] for f in chosen_sub_formats if f.get('ext') == 'json3'), None)
+            if not json3_url:
+                json3_url = chosen_sub_formats[0].get('url')
+
+            if not json3_url:
+                return []
+
+            req = urllib.request.Request(json3_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                events = data.get('events', [])
+                results = []
+                for ev in events:
+                    start_sec = ev.get('tStartMs', 0) / 1000.0
+                    dur_sec = ev.get('dDurationMs', 0) / 1000.0
+                    segs = ev.get('segs', [])
+                    text = "".join(s.get('utf8', '') for s in segs).replace("\n", " ").strip()
+                    cleaned = clean_streamer_text(text)
+                    if cleaned and len(cleaned) > 1:
+                        results.append({
+                            "text": cleaned,
+                            "start": round(start_sec, 2),
+                            "duration": round(dur_sec, 2),
+                            "end": round(start_sec + dur_sec, 2)
+                        })
+                return results
+    except Exception as e:
+        print(f"[yt-dlp Captions] Notice: {e}")
+        return []
+
+def fetch_transcript_segments(video_id: str, url: str = None) -> list:
+    """
+    Fetch REAL transcripts spoken in the video:
+    1. Try YouTubeTranscriptApi (manual creator tracks & auto-generated tracks)
+    2. Try yt-dlp direct timedtext extractor (bypasses blocks via mobile client)
+    """
+    results = []
+
+    # Method 1: YouTubeTranscriptApi
     try:
         api = YouTubeTranscriptApi()
-        
-        # Check transcript list for preferred creator/streamer languages
         try:
             t_list = api.list(video_id)
-            # Try manual creator captions first (Hindi, Hinglish, English)
-            try:
-                t = t_list.find_manually_created_transcript(['hi', 'hi-Latn', 'en-IN', 'en', 'en-US'])
-                transcript_data = t.fetch()
-            except Exception:
-                pass
-                
-            # If not found, try auto-generated Hindi / Hinglish (streamer speech)
-            if not transcript_data:
+            transcript_data = None
+            for preferred in [['hi', 'hi-Latn', 'en-IN', 'en', 'en-US'], ['hi', 'hi-Latn', 'en-IN'], ['en', 'en-US']]:
                 try:
-                    t = t_list.find_generated_transcript(['hi', 'hi-Latn', 'en-IN'])
+                    t = t_list.find_manually_created_transcript(preferred)
                     transcript_data = t.fetch()
+                    break
                 except Exception:
                     pass
-                    
-            # Fallback: English generated
-            if not transcript_data:
                 try:
-                    t = t_list.find_generated_transcript(['en', 'en-US'])
+                    t = t_list.find_generated_transcript(preferred)
                     transcript_data = t.fetch()
+                    break
                 except Exception:
                     pass
-                    
-            # Last fallback: any available transcript
             if not transcript_data:
                 for t in t_list:
                     try:
                         transcript_data = t.fetch()
                         break
                     except Exception:
-                        continue
-        except Exception as e_list:
-            print(f"[TranscriptList] list() notice: {e_list}, trying direct fetch")
+                        pass
+        except Exception:
             try:
                 transcript_data = api.fetch(video_id, languages=['hi', 'hi-Latn', 'en-IN', 'en'])
             except Exception:
@@ -295,29 +352,29 @@ def fetch_transcript_segments(video_id: str) -> list:
                 except Exception:
                     transcript_data = None
 
-        if not transcript_data:
-            return []
-
-        # Format and clean out in-game sound tags ([Music], [Gunfire], etc.)
-        results = []
-        for item in transcript_data:
-            raw_text = item.text.replace("\n", " ").strip()
-            cleaned_text = clean_streamer_text(raw_text)
-            
-            # Skip if segment was pure in-game noise like [Music] or empty
-            if not cleaned_text or len(cleaned_text) < 2:
-                continue
-
-            results.append({
-                "text": cleaned_text,
-                "start": float(item.start),
-                "duration": float(item.duration),
-                "end": float(item.start) + float(item.duration)
-            })
-        return results
+        if transcript_data:
+            for item in transcript_data:
+                raw_text = item.text.replace("\n", " ").strip()
+                cleaned_text = clean_streamer_text(raw_text)
+                if cleaned_text and len(cleaned_text) > 1:
+                    results.append({
+                        "text": cleaned_text,
+                        "start": float(item.start),
+                        "duration": float(item.duration),
+                        "end": float(item.start) + float(item.duration)
+                    })
     except Exception as e:
-        print(f"[Transcript] Notice: {e}. Generating simulated streamer transcript.")
-        return []
+        print(f"[Transcript API] Notice: {e}")
+
+    # Method 2: If YouTubeTranscriptApi returned 0 or < 5 segments, use yt-dlp timedtext
+    if len(results) < 5:
+        print(f"[Transcript] Trying yt-dlp timedtext extraction for {video_id}...")
+        ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url)
+        if len(ytdlp_segments) > len(results):
+            results = ytdlp_segments
+
+    print(f"[Transcript] Total real spoken segments extracted: {len(results)}")
+    return results
 
 def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list:
     """Generate fine-grained word timings for animated karaoke subtitles."""
@@ -472,7 +529,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "viral_reasons": clip["reasons"],
             "tags": clip["tags"],
             "full_text": clip["text"],
-            "subtitles": subtitles
+            "subtitles": subtitles,
+            "has_real_captions": True
         })
         
     return formatted
@@ -582,75 +640,50 @@ def format_duration(seconds: float) -> str:
     return f"{mins}:{secs:02d}"
 
 def synthesize_viral_clips(video_duration: float, title: str) -> list:
-    """Intelligent fallback prioritizing streamer voice and live gaming reactions."""
+    """
+    Intelligent timestamp cutting when YouTube auto-captions are not available.
+    Cuts high-potential segments across the video based on duration without fabricating fake text.
+    """
     video_dur = max(60.0, float(video_duration))
+    clean_title = re.sub(r'[^\w\s-]', '', title).strip() or "Live Stream Highlight"
+    short_title = clean_title[:32]
     
-    presets = [
-        {
-            "offset_ratio": 0.12,
-            "duration": 35.0,
-            "score": 99,
-            "title": "BHAI YEH KYA CLUTCH THA?! 🤯🔥",
-            "hook": "Chat, dekho mere haath literally kaanp rahe hain abhi...",
-            "reasons": ["Peak streamer mic reaction", "High tension clutch moment", "99% audience retention"],
-            "tags": ["Streamer Voice", "Clutch", "Top Pick"],
-            "text": "Chat, dekho mere haath, literally kaanp rahe hain abhi. Agar yeh jump miss ho gaya, pura speedrun khatam. Teen, do, ek... BHAI KAR DIYA! RECORD TOD DIYA! LET'S GOOO!"
-        },
-        {
-            "offset_ratio": 0.38,
-            "duration": 36.0,
-            "score": 96,
-            "title": "Bhai Yeh Hacker Hai Ya Pro Player?! 🚨👀",
-            "hook": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai?!",
-            "reasons": ["High curiosity streamer callout", "Spontaneous live spectator reaction", "Punchy 36s pacing"],
-            "tags": ["Streamer Voice", "Hacker?", "Live Reaction"],
-            "text": "Wait what?! Yeh banda wall ke piche se kaise dekh raha hai chat? Aisa possible hi nahi hai! Ruko ruko, isko report mat karna pehle spectate karte hain... bhai kya aim lock hai are you serious?!"
-        },
-        {
-            "offset_ratio": 0.62,
-            "duration": 38.0,
-            "score": 94,
-            "title": "1v4 Situation Mein Squad Wipe Out! 😱⚡",
-            "hook": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain...",
-            "reasons": ["Intense live callout pacing", "Climax squad wipeout", "High shareability"],
-            "tags": ["Streamer Voice", "Squad Wipe", "OP Clutch"],
-            "text": "Bhai bhai bhai! Ek goli bachi hai aur chaar bande saamne se rush kar rahe hain. Cover de jaldi! Ek down... dusra down... reload karne ka time nahi hai! BHAI KYA HEADSHOT HAI! OPPP IN THE CHAT!"
-        },
-        {
-            "offset_ratio": 0.82,
-            "duration": 32.0,
-            "score": 91,
-            "title": "Bhai Jaldi Revive Kar Zone Aa Gaya ⚠️💣",
-            "hook": "Jaldi cover mein aa warna sab khatam ho jaayega!",
-            "reasons": ["Urgent survival gameplay trigger", "Fast-paced Hindi callout", "Optimal short duration"],
-            "tags": ["Streamer Voice", "Survival", "Funny Reaction"],
-            "text": "Bhai jaldi cover mein aa, zone bhi shrink ho raha hai aur pura squad push kar raha hai. Smoke daal smoke daal! Medkit laga raha hu... chalo chalo rush karo abhi unka health low hai!"
-        }
+    # 4 high-retention windows across the video
+    intervals = [
+        {"offset": 0.08, "dur": 35.0, "rank": 1, "score": 98, "tag": "Opening Hook"},
+        {"offset": 0.32, "dur": 38.0, "rank": 2, "score": 95, "tag": "Peak Action"},
+        {"offset": 0.58, "dur": 40.0, "rank": 3, "score": 92, "tag": "Climax Moment"},
+        {"offset": 0.80, "dur": 32.0, "rank": 4, "score": 89, "tag": "Highlight Finale"}
     ]
     
     formatted = []
-    for idx, p in enumerate(presets):
-        start_time = round(video_dur * p["offset_ratio"], 1)
-        end_time = round(min(video_dur - 1, start_time + p["duration"]), 1)
+    for item in intervals:
+        start_time = round(video_dur * item["offset"], 1)
+        end_time = round(min(video_dur - 1, start_time + item["dur"]), 1)
         actual_dur = round(end_time - start_time, 1)
         
-        subtitles = generate_word_subtitles(start_time, end_time, p["text"])
+        clip_title = f"{short_title} - Clip #{item['rank']} 🔥"
+        hook_text = f"Highlight from {short_title}"
+        subtitle_text = f"{short_title} live highlight. Type or edit streamer words here!"
+        
+        subtitles = generate_word_subtitles(start_time, end_time, subtitle_text)
         
         formatted.append({
-            "id": f"clip_{idx+1}",
-            "rank": idx + 1,
-            "title": p["title"],
-            "hook": p["hook"],
+            "id": f"clip_{item['rank']}",
+            "rank": item["rank"],
+            "title": clip_title,
+            "hook": hook_text,
             "start": start_time,
             "end": end_time,
             "duration": format_duration(actual_dur),
             "duration_sec": actual_dur,
-            "virality_score": p["score"],
-            "virality_badge": "🔥 Viral Hit" if p["score"] >= 92 else "⚡ High Potential",
-            "viral_reasons": p["reasons"],
-            "tags": p["tags"],
-            "full_text": p["text"],
-            "subtitles": subtitles
+            "virality_score": item["score"],
+            "virality_badge": "🔥 Viral Hit" if item["score"] >= 92 else "⚡ High Potential",
+            "viral_reasons": ["High engagement window", f"Paced {actual_dur}s short duration"],
+            "tags": [item["tag"], "Short"],
+            "full_text": subtitle_text,
+            "subtitles": subtitles,
+            "has_real_captions": False
         })
         
     return formatted

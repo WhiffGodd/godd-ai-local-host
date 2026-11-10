@@ -182,7 +182,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             meta = get_video_metadata(video_id, url, api_key=api_key)
-            transcript = fetch_transcript_segments(video_id)
+            transcript = fetch_transcript_segments(video_id, url=url)
             clips = analyze_virality_and_cut_clips(
                 transcript=transcript,
                 video_duration=meta.get("duration", 600),
