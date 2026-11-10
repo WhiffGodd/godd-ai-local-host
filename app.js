@@ -499,18 +499,35 @@ function updatePlayIcon(playing) {
   }
 }
 
+let lastYtReportedTime = -1;
+let lastYtReportedTs   = 0;
+
 function animLoop(ts) {
   if (!isPlaying) { animId = null; return; }
   if (!ts) ts = performance.now();
-  const delta = (ts - lastTs) / 1000;
+  const delta = Math.min(0.1, (ts - lastTs) / 1000);
   lastTs = ts;
 
   if (ytPlayer && ytPlayerCreated && typeof ytPlayer.getCurrentTime === 'function') {
     try {
       const yt = ytPlayer.getCurrentTime();
-      if (activeClip && yt >= activeClip.start) {
-        currentTime = Math.min(clipDur, yt - activeClip.start);
+      if (yt !== lastYtReportedTime && yt > 0) {
+        // YouTube sent a new timestamp update
+        lastYtReportedTime = yt;
+        lastYtReportedTs = ts;
+        if (activeClip && yt >= (activeClip.start - 0.5)) {
+          const expected = Math.max(0, yt - activeClip.start);
+          const drift = Math.abs(currentTime - expected);
+          if (drift > 0.45) {
+            // Seeked or buffered, snap directly
+            currentTime = expected;
+          } else {
+            // Smoothly converge without 250ms stair-stepping stutter
+            currentTime += (expected - currentTime) * 0.35;
+          }
+        }
       } else {
+        // Smooth 60 FPS progression between YouTube iframe postMessage ticks
         currentTime = Math.min(clipDur, currentTime + delta);
       }
     } catch(_) {
@@ -558,6 +575,39 @@ function scrubSeek(e) {
 }
 
 // ─── SUBTITLES ────────────────────────────────────────────────────────────────
+let cachedClipKey = null;
+let cachedPhraseCards = [];
+
+function buildPhraseCards(subs) {
+  if (!subs || !subs.length) return [];
+  const chunkSize = 3; // 3-word punchy phrase cards for vertical reels/shorts
+  const cards = [];
+
+  for (let i = 0; i < subs.length; i += chunkSize) {
+    const chunk = subs.slice(i, i + chunkSize);
+    if (!chunk.length) continue;
+    const cStart = chunk[0].start;
+    const cEndRaw = chunk[chunk.length - 1].end || (cStart + 1.2);
+    // Guarantee at least 1.4s screen time + 0.5s hold time after last word
+    const cEndWithHold = Math.max(cStart + 1.4, cEndRaw + 0.5);
+    cards.push({
+      start: cStart,
+      end: cEndWithHold,
+      words: chunk,
+      startIndex: i
+    });
+  }
+
+  // Prevent overlap with next card's start
+  for (let i = 0; i < cards.length - 1; i++) {
+    const nextStart = cards[i + 1].start;
+    if (cards[i].end > nextStart) {
+      cards[i].end = Math.max(cards[i].start + 0.9, nextStart - 0.04);
+    }
+  }
+  return cards;
+}
+
 function genWordSubs(startSec, endSec, text) {
   const clean = (text || '')
     .replace(/&(?:lt|gt|amp|quot|apos);?/g, ' ')
@@ -567,7 +617,8 @@ function genWordSubs(startSec, endSec, text) {
   const words = clean.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const dur = Math.max(1, endSec - startSec);
-  const tpw = dur / words.length;
+  const speechDur = Math.min(dur, Math.max(words.length * 0.32, dur * 0.85));
+  const tpw = speechDur / words.length;
   const highlightWords = ['important', 'key', 'secret', 'never', 'why', 'how', 'truth', 'future', 'mind', 'huge', 'best', 'worst', 'money', 'power', 'crazy', 'realize'];
 
   return words.map((w, i) => {
@@ -586,29 +637,76 @@ function renderSubtitles(curOffset) {
   if (!box || !activeClip) return;
   const subs = activeClip.subtitles;
   if (!subs || !subs.length) {
-    box.innerHTML = '';
+    if (box.innerHTML !== '') box.innerHTML = '';
     return;
   }
 
   const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
-  // Anticipatory lead offset of 0.22s so active subtitle word highlights in exact sync with speaker articulation
-  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + 0.22;
+  // Anticipatory lead offset of 0.16s: highlights precisely as speech sounds are articulated
+  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + 0.16;
 
-  let ai = subs.findIndex(s => targetTime >= s.start && targetTime < s.end);
-  if (ai < 0) {
-    for (let i = subs.length - 1; i >= 0; i--) {
-      if (targetTime >= subs[i].start) { ai = i; break; }
+  const clipKey = `${activeClip.start}_${activeClip.end}_${subs.length}`;
+  if (cachedClipKey !== clipKey) {
+    cachedClipKey = clipKey;
+    cachedPhraseCards = buildPhraseCards(subs);
+  }
+
+  if (!cachedPhraseCards.length) {
+    if (box.innerHTML !== '') box.innerHTML = '';
+    return;
+  }
+
+  // Find active phrase card
+  let activeCard = null;
+  for (let i = 0; i < cachedPhraseCards.length; i++) {
+    const card = cachedPhraseCards[i];
+    if (targetTime >= card.start && targetTime <= card.end) {
+      activeCard = card;
+      break;
     }
   }
-  if (ai < 0) ai = 0;
 
-  // Modern interactive short-form video captions: punchy 3-4 word phrase window around active word
-  const lo = Math.max(0, ai - 1);
-  const hi = Math.min(subs.length, lo + 4);
-  const visible = subs.slice(lo, hi);
+  // If outside speech segments
+  if (!activeCard) {
+    // Before first phrase or past last phrase
+    if (targetTime < cachedPhraseCards[0].start || targetTime > cachedPhraseCards[cachedPhraseCards.length - 1].end) {
+      if (box.innerHTML !== '') box.innerHTML = '';
+      return;
+    }
+    // Hold previous card during micro-pauses (< 0.75s) so captions don't vanish abruptly
+    for (let i = cachedPhraseCards.length - 1; i >= 0; i--) {
+      if (targetTime >= cachedPhraseCards[i].start && (targetTime - cachedPhraseCards[i].end) < 0.75) {
+        activeCard = cachedPhraseCards[i];
+        break;
+      }
+    }
+    if (!activeCard) {
+      if (box.innerHTML !== '') box.innerHTML = '';
+      return;
+    }
+  }
 
-  box.innerHTML = visible.map((s, idx) => {
-    const isActive = (lo + idx) === ai;
+  // Within the active card, identify currently spoken word
+  let activeWordIdx = -1;
+  for (let j = 0; j < activeCard.words.length; j++) {
+    const w = activeCard.words[j];
+    if (targetTime >= w.start && targetTime < w.end) {
+      activeWordIdx = j;
+      break;
+    }
+  }
+  // During hold time after all words spoken, keep the last word active
+  if (activeWordIdx < 0) {
+    for (let j = activeCard.words.length - 1; j >= 0; j--) {
+      if (targetTime >= activeCard.words[j].start) {
+        activeWordIdx = j;
+        break;
+      }
+    }
+  }
+
+  const html = activeCard.words.map((s, idx) => {
+    const isActive = (idx === activeWordIdx);
     const isHl     = s.highlight && !isActive;
     const cleanWord = (s.word || '')
       .replace(/&(?:lt|gt|amp|quot|apos);?/g, '')
@@ -617,6 +715,12 @@ function renderSubtitles(curOffset) {
     if (!cleanWord) return '';
     return `<span class="sw${isActive ? ' active' : ''}${isHl ? ' hl' : ''}">${escHtml(cleanWord)}</span>`;
   }).filter(Boolean).join(' ');
+
+  // Only update DOM if the rendered content actually changed (avoids 60fps layout thrashing)
+  if (box.dataset.lastHtml !== html) {
+    box.innerHTML = html;
+    box.dataset.lastHtml = html;
+  }
 }
 
 function escHtml(s) {

@@ -323,14 +323,42 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None, is_english
                     start_sec = ev.get('tStartMs', 0) / 1000.0
                     dur_sec = ev.get('dDurationMs', 0) / 1000.0
                     segs = ev.get('segs', [])
-                    text = "".join(s.get('utf8', '') for s in segs).replace("\n", " ").strip()
-                    cleaned = clean_streamer_text(text)
+                    if not segs:
+                        continue
+
+                    # Extract words with millisecond precision from json3 tOffsetMs
+                    words_in_ev = []
+                    text_parts = []
+                    for s in segs:
+                        raw_w = s.get('utf8', '').replace("\n", " ").strip()
+                        cleaned_w = clean_streamer_text(raw_w)
+                        if not cleaned_w:
+                            continue
+                        text_parts.append(cleaned_w)
+                        t_offset = s.get('tOffsetMs')
+                        w_start = round(start_sec + (t_offset / 1000.0), 2) if t_offset is not None else None
+                        words_in_ev.append({
+                            "word": cleaned_w,
+                            "start": w_start
+                        })
+
+                    cleaned = " ".join(text_parts).strip()
                     if cleaned and len(cleaned) > 1:
+                        # Link end times of words
+                        for idx, wm in enumerate(words_in_ev):
+                            if wm["start"] is not None:
+                                next_start = words_in_ev[idx + 1]["start"] if idx + 1 < len(words_in_ev) else None
+                                if next_start is not None and next_start > wm["start"]:
+                                    wm["end"] = next_start
+                                else:
+                                    wm["end"] = round(wm["start"] + 0.35, 2)
+
                         results.append({
                             "text": cleaned,
                             "start": round(start_sec, 2),
                             "duration": round(dur_sec, 2),
-                            "end": round(start_sec + dur_sec, 2)
+                            "end": round(start_sec + dur_sec, 2),
+                            "words": words_in_ev if any(w["start"] is not None for w in words_in_ev) else []
                         })
                 return results
     except Exception as e:
@@ -353,7 +381,15 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
     else:
         preferred_langs = ['hi', 'hi-Latn', 'en-IN', 'en']
 
-    # Method 1: YouTubeTranscriptApi
+    # Method 1: Try yt-dlp timedtext first (json3 contains true millisecond word-level timing)
+    if url:
+        print(f"[Transcript] Trying high-precision yt-dlp timedtext for {video_id} (is_english={is_english})...")
+        ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url, is_english=is_english)
+        if ytdlp_segments and len(ytdlp_segments) >= 5:
+            print(f"[Transcript] yt-dlp extracted {len(ytdlp_segments)} segments with high-precision word timing.")
+            return ytdlp_segments
+
+    # Method 2: YouTubeTranscriptApi fallback
     try:
         api = YouTubeTranscriptApi()
         try:
@@ -417,9 +453,9 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
     except Exception as e:
         print(f"[Transcript API] Notice: {e}")
 
-    # Method 2: If YouTubeTranscriptApi returned 0 or < 5 segments, use yt-dlp timedtext
-    if len(results) < 5:
-        print(f"[Transcript] Trying yt-dlp timedtext extraction for {video_id} (is_english={is_english})...")
+    # Method 3: If YouTubeTranscriptApi returned 0 or < 5 segments, retry yt-dlp
+    if len(results) < 5 and url:
+        print(f"[Transcript] Retrying yt-dlp timedtext extraction for {video_id} (is_english={is_english})...")
         ytdlp_segments = fetch_transcript_from_ytdlp(video_id, url, is_english=is_english)
         if len(ytdlp_segments) > len(results):
             results = ytdlp_segments
@@ -430,7 +466,7 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
     """
     Extract word-level subtitle timings from real spoken transcript segments.
-    Applies an anticipatory lead offset (180ms) and strips speaker change markers (<<, >>).
+    Applies an anticipatory lead offset (160ms) and strips speaker change markers (<<, >>).
     """
     if not segments:
         return []
@@ -439,11 +475,27 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
         return []
 
     subtitles = []
-    lead_offset = 0.18  # Subtitles precede speech by 180ms so the viewer anticipates spoken words smoothly
+    lead_offset = 0.16  # Subtitles precede speech by 160ms so active word lights up right as spoken
 
     for seg in clip_segs:
         s_start = max(0.0, float(seg.get("start", 0)) - lead_offset)
         s_end = max(s_start + 0.35, float(seg.get("end", s_start + 1.0)) - (lead_offset * 0.5))
+
+        words_meta = seg.get("words")
+        if words_meta and any(wm.get("start") is not None for wm in words_meta):
+            for wm in words_meta:
+                w_clean = re.sub(r'[«»<>]+', '', wm.get("word", "")).strip()
+                if not w_clean:
+                    continue
+                w_start = round(max(0.0, float(wm.get("start", s_start)) - lead_offset), 2)
+                w_end = round(max(w_start + 0.22, float(wm.get("end", w_start + 0.35)) - (lead_offset * 0.5)), 2)
+                subtitles.append({
+                    "word": w_clean,
+                    "start": w_start,
+                    "end": w_end,
+                    "highlight": any(k in w_clean.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest", "realize", "best", "worst"])
+                })
+            continue
 
         # Clean text of <<, >>, HTML tags, and sound tags
         cleaned_text = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', str(seg.get("text", "")))
@@ -454,20 +506,29 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
             continue
 
         seg_dur = max(0.25, s_end - s_start)
-        t_per_word = seg_dur / len(raw_words)
+        # Avoid stretching words into pauses/silence: human speaking cadence is ~0.28s-0.36s per word
+        cadence_dur = len(raw_words) * 0.32
+        actual_speech_dur = min(seg_dur, max(cadence_dur, seg_dur * 0.85))
+        t_per_word = max(0.22, min(0.38, actual_speech_dur / len(raw_words)))
+
         cur = s_start
         for w in raw_words:
             w_clean = re.sub(r'[«»<>]+', '', w).strip()
             if not w_clean:
                 continue
-            w_end = round(cur + max(0.20, t_per_word), 2)
+            duration = t_per_word
+            if w_clean.endswith((".", "!", "?")):
+                duration *= 1.25
+            elif w_clean.endswith(","):
+                duration *= 1.12
+            w_end = round(cur + max(0.20, duration), 2)
             subtitles.append({
                 "word": w_clean,
                 "start": round(cur, 2),
                 "end": w_end,
                 "highlight": any(k in w_clean.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest", "realize", "best", "worst"])
             })
-            cur = cur + t_per_word
+            cur = cur + duration
     return subtitles
 
 def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list:
@@ -477,10 +538,13 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
     if not words:
         return []
 
-    lead_offset = 0.18
+    lead_offset = 0.16
     adj_start = max(0.0, start_sec - lead_offset)
     total_duration = max(0.5, end_sec - adj_start)
-    time_per_word = total_duration / len(words)
+    # Natural human speech cadence: avoid stretching words across long silences
+    cadence = len(words) * 0.32
+    speech_dur = min(total_duration, max(cadence, total_duration * 0.85))
+    time_per_word = max(0.22, min(0.38, speech_dur / len(words)))
 
     subtitles = []
     current_time = adj_start

@@ -204,7 +204,7 @@ def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
     """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
     lines = []
     chunk_size = 3  # Punchy 3-word chunks for modern vertical short captions
-    lead_offset = 0.18  # Subtitle visual cue leads spoken speech by 180ms for optimal synchronization
+    lead_offset = 0.16  # Subtitle visual cue leads spoken speech by 160ms for optimal synchronization
 
     for i in range(0, len(subtitles), chunk_size):
         group = subtitles[i:i + chunk_size]
@@ -212,12 +212,30 @@ def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
             continue
         raw_start = float(group[0].get("start", 0))
         raw_end = float(group[-1].get("end", raw_start + 1.0))
+
+        # Check next chunk start to avoid flicker and maintain hold screen time
+        next_raw_start = None
+        if i + chunk_size < len(subtitles):
+            next_raw_start = float(subtitles[i + chunk_size].get("start", 0))
+
         if raw_start >= clip_start and clip_start > 0:
             start_sec = max(0.0, raw_start - clip_start - lead_offset)
-            end_sec = max(start_sec + 0.45, raw_end - clip_start)
+            base_dur = max(1.2, (raw_end - clip_start - start_sec) + 0.45)
+            if next_raw_start and next_raw_start >= clip_start:
+                next_start_sec = max(0.0, next_raw_start - clip_start - lead_offset)
+                end_sec = min(next_start_sec - 0.05, start_sec + base_dur)
+            else:
+                end_sec = start_sec + base_dur
         else:
             start_sec = max(0.0, raw_start - lead_offset)
-            end_sec = max(start_sec + 0.45, raw_end)
+            base_dur = max(1.2, (raw_end - start_sec) + 0.45)
+            if next_raw_start:
+                next_start_sec = max(0.0, next_raw_start - lead_offset)
+                end_sec = min(next_start_sec - 0.05, start_sec + base_dur)
+            else:
+                end_sec = start_sec + base_dur
+
+        end_sec = max(start_sec + 0.6, end_sec)
 
         # Clean words from any speaker brackets, <<, >>, or HTML tags
         words = []
