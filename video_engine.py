@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 import json
@@ -202,7 +203,9 @@ def get_video_encoder_flags():
 def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
     """Generate SubRip (.srt) caption file content with timestamps relative to clip start."""
     lines = []
-    chunk_size = 4
+    chunk_size = 3  # Punchy 3-word chunks for modern vertical short captions
+    lead_offset = 0.18  # Subtitle visual cue leads spoken speech by 180ms for optimal synchronization
+
     for i in range(0, len(subtitles), chunk_size):
         group = subtitles[i:i + chunk_size]
         if not group:
@@ -210,12 +213,22 @@ def generate_srt(subtitles: list, clip_start: float = 0.0) -> str:
         raw_start = float(group[0].get("start", 0))
         raw_end = float(group[-1].get("end", raw_start + 1.0))
         if raw_start >= clip_start and clip_start > 0:
-            start_sec = max(0.0, raw_start - clip_start)
-            end_sec = max(start_sec + 0.6, raw_end - clip_start)
+            start_sec = max(0.0, raw_start - clip_start - lead_offset)
+            end_sec = max(start_sec + 0.45, raw_end - clip_start)
         else:
-            start_sec = max(0.0, raw_start)
-            end_sec = max(start_sec + 0.6, raw_end)
-        text = " ".join(str(item.get("word", "")).strip() for item in group).strip()
+            start_sec = max(0.0, raw_start - lead_offset)
+            end_sec = max(start_sec + 0.45, raw_end)
+
+        # Clean words from any speaker brackets, <<, >>, or HTML tags
+        words = []
+        for item in group:
+            w = str(item.get("word", "")).strip()
+            w = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', w)
+            w = re.sub(r'[«»<>]+', '', w).strip()
+            if w:
+                words.append(w)
+
+        text = " ".join(words).strip()
         if not text:
             continue
         
@@ -318,7 +331,7 @@ def download_and_clip_video(video_url: str, start_time: float, duration: float, 
             with open(srt_temp_file, "w", encoding="utf-8") as f:
                 f.write(generate_srt(subtitles, clip_start=start_time))
             esc_srt = srt_temp_file.replace('\\', '/').replace(':', '\\:')
-            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=720,PlayResY=1280,FontName=Arial,FontSize=32,Bold=1,PrimaryColour=&H0024BFFB,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=110'"
+            srt_filter = f",subtitles='{esc_srt}':force_style='PlayResX=720,PlayResY=1280,FontName=Arial,FontSize=36,Bold=1,PrimaryColour=&H001ED2FF,OutlineColour=&H00000000,BorderStyle=1,Outline=3.5,Shadow=1.5,Alignment=2,MarginV=115'"
         except Exception as se:
             print(f"[FFmpeg] Notice: Could not prepare subtitles filter: {se}")
             srt_filter = ""

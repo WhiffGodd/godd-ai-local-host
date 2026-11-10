@@ -63,13 +63,17 @@ IN_GAME_GAMEPLAY_BLACKLIST = [
 
 def clean_streamer_text(text: str) -> str:
     """
-    Remove in-game sound tags like [Music], [Applause], [Gunfire], (chuckles), ♪, 
-    and NPC/radio dialogue prefixes to isolate the streamer's spoken voice.
+    Remove speaker arrows (<<, >>, <<<, >>>), HTML entities (&lt;, &gt;, &amp;),
+    bracketed sound tags ([Music], [Applause], (laughter), ♪), and NPC/radio dialogue prefixes
+    to isolate pure spoken words without noise.
     """
     if not text:
         return ""
+    # Strip HTML entities & speaker change indicators: <<, >>, <<<, >>>, &lt;, &gt;, «, »
+    cleaned = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', text)
+    cleaned = re.sub(r'[«»<>]+', ' ', cleaned)
     # Remove bracketed sound effects: [Music], [Sound], [Laughter], (music), (cheering), etc.
-    cleaned = re.sub(r'\[.*?\]|\(.*?\)|♪+', ' ', text)
+    cleaned = re.sub(r'\[.*?\]|\(.*?\)|♪+', ' ', cleaned)
     # Remove in-game character/radio labels: e.g. "Narrator:", "Cop 1:", "Radio:", "NPC:"
     cleaned = re.sub(r'^[A-Za-z0-9_\s]{1,15}:', '', cleaned)
     # Normalize extra whitespaces
@@ -424,7 +428,10 @@ def fetch_transcript_segments(video_id: str, url: str = None, video_title: str =
     return results
 
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
-    """Extract word-level subtitle timings from real spoken transcript segments."""
+    """
+    Extract word-level subtitle timings from real spoken transcript segments.
+    Applies an anticipatory lead offset (180ms) and strips speaker change markers (<<, >>).
+    """
     if not segments:
         return []
     clip_segs = [s for s in segments if s.get("end", 0) >= clip_start and s.get("start", 0) <= clip_end]
@@ -432,69 +439,71 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
         return []
 
     subtitles = []
+    lead_offset = 0.18  # Subtitles precede speech by 180ms so the viewer anticipates spoken words smoothly
+
     for seg in clip_segs:
-        s_start = max(clip_start, float(seg.get("start", 0)))
-        s_end = min(clip_end, float(seg.get("end", s_start + 1.0)))
-        raw_words = [w.strip() for w in str(seg.get("text", "")).split() if w.strip()]
+        s_start = max(0.0, float(seg.get("start", 0)) - lead_offset)
+        s_end = max(s_start + 0.35, float(seg.get("end", s_start + 1.0)) - (lead_offset * 0.5))
+
+        # Clean text of <<, >>, HTML tags, and sound tags
+        cleaned_text = re.sub(r'&(?:lt|gt|amp|quot|apos);?', ' ', str(seg.get("text", "")))
+        cleaned_text = re.sub(r'[«»<>]+', ' ', cleaned_text)
+
+        raw_words = [w.strip() for w in cleaned_text.split() if w.strip()]
         if not raw_words:
             continue
-        seg_dur = max(0.2, s_end - s_start)
+
+        seg_dur = max(0.25, s_end - s_start)
         t_per_word = seg_dur / len(raw_words)
         cur = s_start
         for w in raw_words:
-            w_end = min(s_end, cur + t_per_word)
+            w_clean = re.sub(r'[«»<>]+', '', w).strip()
+            if not w_clean:
+                continue
+            w_end = round(cur + max(0.20, t_per_word), 2)
             subtitles.append({
-                "word": w,
+                "word": w_clean,
                 "start": round(cur, 2),
-                "end": round(w_end, 2),
-                "highlight": any(k in w.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest"])
+                "end": w_end,
+                "highlight": any(k in w_clean.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest", "realize", "best", "worst"])
             })
-            cur = w_end
+            cur = cur + t_per_word
     return subtitles
 
 def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list:
-    """Generate fine-grained word timings for animated karaoke subtitles."""
-    words = [w.strip() for w in text.split() if w.strip()]
+    """Generate fine-grained word timings for animated karaoke subtitles with lead time."""
+    clean_text = re.sub(r'[«»<>]+', ' ', text or '')
+    words = [w.strip() for w in clean_text.split() if w.strip()]
     if not words:
         return []
-        
-    total_duration = max(0.5, end_sec - start_sec)
+
+    lead_offset = 0.18
+    adj_start = max(0.0, start_sec - lead_offset)
+    total_duration = max(0.5, end_sec - adj_start)
     time_per_word = total_duration / len(words)
-    
+
     subtitles = []
-    current_time = start_sec
+    current_time = adj_start
     for i, word in enumerate(words):
+        w_clean = re.sub(r'[«»<>]+', '', word).strip()
+        if not w_clean:
+            continue
         duration = time_per_word
-        # Give slightly longer pause to commas/periods
-        if word.endswith((".", "!", "?")):
-            duration *= 1.3
-        elif word.endswith(","):
-            duration *= 1.15
-            
-        w_end = min(end_sec, current_time + duration)
-        
-        # Detect highlight emphasis and emojis
-        is_highlight = any(k in word.lower() for k in HOOK_KEYWORDS + HIGH_ENERGY_WORDS)
-        emoji = ""
-        lower_word = word.lower()
-        if "money" in lower_word or "million" in lower_word or "billion" in lower_word or "dollar" in lower_word:
-            emoji = " 💰"
-        elif "crazy" in lower_word or "insane" in lower_word or "shock" in lower_word or "mind" in lower_word:
-            emoji = " 🤯"
-        elif "fire" in lower_word or "hot" in lower_word or "game" in lower_word:
-            emoji = " 🔥"
-        elif "rocket" in lower_word or "viral" in lower_word or "growth" in lower_word:
-            emoji = " 🚀"
-        elif "secret" in lower_word or "hack" in lower_word or "key" in lower_word:
-            emoji = " 💡"
-            
+        if w_clean.endswith((".", "!", "?")):
+            duration *= 1.25
+        elif w_clean.endswith(","):
+            duration *= 1.12
+
+        w_end = min(end_sec, current_time + max(0.20, duration))
+        is_highlight = any(k in w_clean.lower() for k in HOOK_KEYWORDS + HIGH_ENERGY_WORDS)
+
         subtitles.append({
-            "word": word + emoji,
+            "word": w_clean,
             "start": round(current_time, 2),
             "end": round(w_end, 2),
             "highlight": is_highlight
         })
-        current_time = w_end
+        current_time = current_time + duration
         
     return subtitles
 

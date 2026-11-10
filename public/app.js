@@ -559,18 +559,26 @@ function scrubSeek(e) {
 
 // ─── SUBTITLES ────────────────────────────────────────────────────────────────
 function genWordSubs(startSec, endSec, text) {
-  const words = (text || '').split(/\s+/).filter(Boolean);
+  const clean = (text || '')
+    .replace(/&(?:lt|gt|amp|quot|apos);?/g, ' ')
+    .replace(/[«»<>]+/g, ' ')
+    .replace(/\[.*?\]|\(.*?\)/g, ' ')
+    .trim();
+  const words = clean.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
   const dur = Math.max(1, endSec - startSec);
   const tpw = dur / words.length;
-  const highlightWords = ['important', 'key', 'secret', 'never', 'why', 'how', 'truth', 'future', 'mind', 'huge'];
+  const highlightWords = ['important', 'key', 'secret', 'never', 'why', 'how', 'truth', 'future', 'mind', 'huge', 'best', 'worst', 'money', 'power', 'crazy', 'realize'];
 
-  return words.map((w, i) => ({
-    word: w,
-    start: Math.round((startSec + i * tpw) * 100) / 100,
-    end:   Math.round((startSec + (i + 1) * tpw) * 100) / 100,
-    highlight: highlightWords.some(k => w.toLowerCase().includes(k)) || (i % 4 === 2)
-  }));
+  return words.map((w, i) => {
+    const cleanWord = w.replace(/[«»<>]+/g, '').trim();
+    return {
+      word: cleanWord,
+      start: Math.round((startSec + i * tpw) * 100) / 100,
+      end:   Math.round((startSec + (i + 1) * tpw) * 100) / 100,
+      highlight: highlightWords.some(k => cleanWord.toLowerCase().includes(k)) || (i % 4 === 2)
+    };
+  }).filter(item => item.word.length > 0);
 }
 
 function renderSubtitles(curOffset) {
@@ -583,7 +591,8 @@ function renderSubtitles(curOffset) {
   }
 
   const isAbsolute = subs.length > 0 && subs[0].start >= (activeClip.start - 2);
-  const targetTime = isAbsolute ? (activeClip.start + curOffset) : curOffset;
+  // Anticipatory lead offset of 0.22s so active subtitle word highlights in exact sync with speaker articulation
+  const targetTime = (isAbsolute ? (activeClip.start + curOffset) : curOffset) + 0.22;
 
   let ai = subs.findIndex(s => targetTime >= s.start && targetTime < s.end);
   if (ai < 0) {
@@ -593,15 +602,21 @@ function renderSubtitles(curOffset) {
   }
   if (ai < 0) ai = 0;
 
-  const lo = Math.max(0, ai - 2);
-  const hi = Math.min(subs.length, lo + 6);
+  // Modern interactive short-form video captions: punchy 3-4 word phrase window around active word
+  const lo = Math.max(0, ai - 1);
+  const hi = Math.min(subs.length, lo + 4);
   const visible = subs.slice(lo, hi);
 
   box.innerHTML = visible.map((s, idx) => {
     const isActive = (lo + idx) === ai;
     const isHl     = s.highlight && !isActive;
-    return `<span class="sw${isActive ? ' active' : ''}${isHl ? ' hl' : ''}">${escHtml(s.word)}</span>`;
-  }).join(' ');
+    const cleanWord = (s.word || '')
+      .replace(/&(?:lt|gt|amp|quot|apos);?/g, '')
+      .replace(/[«»<>]+/g, '')
+      .trim();
+    if (!cleanWord) return '';
+    return `<span class="sw${isActive ? ' active' : ''}${isHl ? ' hl' : ''}">${escHtml(cleanWord)}</span>`;
+  }).filter(Boolean).join(' ');
 }
 
 function escHtml(s) {
