@@ -1033,6 +1033,10 @@ function closeErrModal() {
 
 // ─── SRT EXPORT ───────────────────────────────────────────────────────────────
 function downloadSRT() {
+  if (activeClip && activeClip.has_real_captions === false && !activeClip.subtitles_edited) {
+    showToast('Captions are unavailable until the source video is processed.');
+    return;
+  }
   if (!activeClip || !activeClip.subtitles) {
     showToast('No subtitles to export');
     return;
