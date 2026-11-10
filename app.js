@@ -664,7 +664,7 @@ async function analyzeVideo() {
     for (const ep of endpoints) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s for deep video transcript extraction
+            const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s: Render wake + yt-dlp + Whisper per clip
 
             const response = await fetch(ep, {
                 method: 'POST',
@@ -1271,12 +1271,13 @@ function downloadShortVideo() {
         showToast('⚠️ Please select a clip first');
         return;
     }
-    // Both local uploads AND YouTube clips go through the backend FFmpeg render
-    renderClipViaBackend();
+    renderClipViaBackend(0);
 }
 
-// Backend FFmpeg Video Render — Pure download, no screen recording fallback
-async function renderClipViaBackend() {
+// Backend FFmpeg Video Render — with auto-retry + live countdown on cold-start
+async function renderClipViaBackend(retryCount) {
+    if (retryCount === undefined) retryCount = 0;
+
     const videoUrl = currentVideoData?.url
         || (currentVideoData?.id && !currentVideoData.isLocal
             ? `https://www.youtube.com/watch?v=${currentVideoData.id}`
@@ -1291,27 +1292,52 @@ async function renderClipViaBackend() {
         return;
     }
 
-    showDownloadProgress('⚡ Connecting to godd.ai FFmpeg server… (first request may take ~30s)', 10);
-
     const DEFAULT_CLOUD_BACKEND = 'https://godd-ai.onrender.com';
     const customBackend = (localStorage.getItem('backend_api_url') || '').trim();
     const candidateEndpoints = [];
     if (customBackend) candidateEndpoints.push(`${customBackend.replace(/\/$/, '')}/api/render-clip`);
     candidateEndpoints.push(`${DEFAULT_CLOUD_BACKEND}/api/render-clip`);
     candidateEndpoints.push('/api/render-clip');
-    if (!window.location.origin.includes(':8080')) {
-        candidateEndpoints.push('http://localhost:8080/api/render-clip');
+
+    // --- First: wake up Render (ping /healthz) so FFmpeg request doesn't cold-timeout ---
+    showDownloadProgress('⏳ Waking up godd.ai server… (Render free tier sleeps when idle)', 8);
+    let serverAwake = false;
+    try {
+        const wakeUrl = customBackend ? `${customBackend.replace(/\/$/, '')}/healthz` : `${DEFAULT_CLOUD_BACKEND}/healthz`;
+        const wakeCtrl = new AbortController();
+        const wakeTimer = setTimeout(() => wakeCtrl.abort(), 65000); // give Render 65s to wake
+        const wakeRes = await fetch(wakeUrl, { signal: wakeCtrl.signal });
+        clearTimeout(wakeTimer);
+        if (wakeRes.ok) serverAwake = true;
+    } catch (e) {
+        // server still waking — continue anyway, the render request will retry
     }
+
+    if (!serverAwake && retryCount === 0) {
+        // Server didn't respond to healthz — show countdown and auto-retry
+        showDownloadProgress('🔄 Server is waking up… retrying in 30s', 15);
+        await _countdownWait(30, (remaining) => {
+            showDownloadProgress(`🔄 Server waking up — retrying in ${remaining}s…`, 15 + (30 - remaining));
+        });
+        return renderClipViaBackend(1);
+    }
+
+    showDownloadProgress('🎬 Server ready! Rendering your 9:16 clip with FFmpeg…', 40);
 
     let lastError = '';
 
     for (const endpoint of candidateEndpoints) {
         try {
-            showDownloadProgress('🎬 FFmpeg rendering your 9:16 clip… please wait (up to 2 min)', 35);
+            // Animate progress while waiting
+            let progressPct = 42;
+            const progressTimer = setInterval(() => {
+                progressPct = Math.min(88, progressPct + 1.5);
+                showDownloadProgress('🎬 Encoding your clip — please wait…', progressPct);
+            }, 3000);
 
             const controller = new AbortController();
-            // 150s — Render cold start (~50s) + yt-dlp download + FFmpeg encode
-            const timeoutId = setTimeout(() => controller.abort(), 150000);
+            // 180s total — wake already done, now just yt-dlp + FFmpeg encode
+            const timeoutId = setTimeout(() => controller.abort(), 180000);
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -1326,14 +1352,15 @@ async function renderClipViaBackend() {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
+            clearInterval(progressTimer);
 
             if (res.ok) {
                 const ctype = res.headers.get('content-type') || '';
                 if (ctype.includes('video/') || ctype.includes('octet-stream')) {
-                    showDownloadProgress('💾 Saving your MP4…', 90);
+                    showDownloadProgress('💾 Saving your MP4…', 94);
                     const blob = await res.blob();
-                    if (blob.size < 1000) {
-                        lastError = 'Backend returned an empty file';
+                    if (blob.size < 5000) {
+                        lastError = 'Server returned an empty video file — please retry';
                         continue;
                     }
                     const blobUrl = URL.createObjectURL(blob);
@@ -1346,37 +1373,64 @@ async function renderClipViaBackend() {
                     document.body.removeChild(a);
                     setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
                     hideDownloadProgress();
-                    showToast('✅ 9:16 MP4 downloaded!');
-                    return; // success — done
+                    showToast('✅ Your 9:16 MP4 is downloaded!');
+                    return; // ✅ success
                 } else {
-                    // Backend returned JSON error
                     try {
                         const errJson = await res.json();
-                        lastError = errJson.error || 'Backend error';
+                        lastError = errJson.error || `Server error (HTTP ${res.status})`;
                     } catch(_) {
-                        lastError = `Non-video response from ${endpoint}`;
+                        lastError = `Unexpected response from server (HTTP ${res.status})`;
                     }
-                    console.warn('Backend non-video response:', lastError);
+                    clearInterval(progressTimer);
                     continue;
                 }
             } else {
-                lastError = `HTTP ${res.status} from ${endpoint}`;
-                console.warn(lastError);
+                clearInterval(progressTimer);
+                lastError = `Server returned HTTP ${res.status} — ${endpoint}`;
             }
         } catch (err) {
-            lastError = err.name === 'AbortError'
-                ? 'Request timed out (backend took too long — try again, it should be warmed up now)'
-                : err.message;
-            console.warn(`Backend failed at ${endpoint}:`, lastError);
+            if (err.name === 'AbortError') {
+                lastError = 'Render timeout — the video may be very long. Try a shorter clip or retry.';
+            } else {
+                lastError = err.message || 'Network error';
+            }
+            console.warn(`Endpoint ${endpoint} failed:`, lastError);
         }
     }
 
-    // All endpoints failed — show a clean error, NO screen recording
+    // All endpoints failed
     hideDownloadProgress();
+
+    // Auto-retry once more if first attempt
+    if (retryCount < 1) {
+        showDownloadProgress('🔄 First attempt failed — waking server and retrying…', 10);
+        await _countdownWait(20, (remaining) => {
+            showDownloadProgress(`🔄 Retrying in ${remaining}s…`, 10 + (20 - remaining));
+        });
+        return renderClipViaBackend(retryCount + 1);
+    }
+
     showBackendErrorModal(lastError);
 }
 
-// Clean error modal — no recording, just helpful info
+// Helper: countdown with per-second callback
+function _countdownWait(seconds, onTick) {
+    return new Promise(resolve => {
+        let remaining = seconds;
+        onTick && onTick(remaining);
+        const interval = setInterval(() => {
+            remaining--;
+            onTick && onTick(Math.max(0, remaining));
+            if (remaining <= 0) {
+                clearInterval(interval);
+                resolve();
+            }
+        }, 1000);
+    });
+}
+
+// Error modal with smart retry button
 function showBackendErrorModal(errorDetail) {
     let modal = document.getElementById('dlErrorModal');
     if (!modal) {
@@ -1386,26 +1440,31 @@ function showBackendErrorModal(errorDetail) {
         document.body.appendChild(modal);
     }
 
+    const isTimeout = errorDetail && (errorDetail.includes('timeout') || errorDetail.includes('AbortError'));
+    const tip = isTimeout
+        ? 'The server took too long. The backend may be overloaded — try again in 1 minute.'
+        : 'Render free tier sleeps after 15 min of no activity. The server should be awake now — click Retry.';
+
     modal.innerHTML = `
         <div class="modal-card">
-            <div class="modal-icon">❌</div>
+            <div class="modal-icon">⚠️</div>
             <h3 class="modal-title">Download Failed</h3>
-            <p class="modal-body" style="font-size:13px; color:#F87171; margin-bottom:8px;">${errorDetail || 'Could not connect to the render backend.'}</p>
-            <p class="modal-body" style="font-size:13px;">
-                The godd.ai backend on Render may be spinning up (free tier sleeps after 15 min idle).
-                <strong>Wait 30 seconds and try downloading again</strong> — it usually works on the second attempt.
-            </p>
-            <div class="modal-actions" style="display:flex; flex-direction:column; gap:10px; margin-top:14px;">
+            <p class="modal-body" style="font-size:13px; color:#F87171; margin-bottom:8px; word-break:break-word;">${errorDetail || 'Could not connect to the render server.'}</p>
+            <p class="modal-body" style="font-size:13px; color:#CBD5E1;">${tip}</p>
+            <div class="modal-actions" style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
                 <button class="btn-modal-primary" type="button"
-                    onclick="document.getElementById('dlErrorModal').style.display='none'; renderClipViaBackend();"
-                    style="background: linear-gradient(135deg, #6366F1, #8B5CF6);">
-                    🔄 Retry Download
+                    onclick="document.getElementById('dlErrorModal').style.display='none'; renderClipViaBackend(2);"
+                    style="background: linear-gradient(135deg, #6366F1, #8B5CF6); padding:12px; border-radius:10px; color:#fff; font-weight:700; border:none; cursor:pointer;">
+                    🔄 Retry Download Now
                 </button>
-                <button class="btn-modal-secondary" type="button" onclick="downloadSrtCaptions()">
+                <button class="btn-modal-secondary" type="button"
+                    onclick="downloadSrtCaptions()"
+                    style="background:rgba(255,255,255,0.08); padding:11px; border-radius:10px; color:#94A3B8; font-weight:600; border:1px solid rgba(255,255,255,0.1); cursor:pointer;">
                     📄 Download SRT Captions Instead
                 </button>
                 <button class="btn-modal-close" type="button"
-                    onclick="document.getElementById('dlErrorModal').style.display='none'">
+                    onclick="document.getElementById('dlErrorModal').style.display='none'"
+                    style="background:transparent; color:#64748B; border:none; padding:8px; cursor:pointer; font-size:13px;">
                     ✕ Close
                 </button>
             </div>
@@ -1420,19 +1479,22 @@ function showDownloadProgress(label, pct) {
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'downloadProgressOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;';
         overlay.innerHTML = `
-            <div class="dl-progress-card">
-                <div class="dl-spinner">⏳</div>
-                <div id="dlProgressLabel" class="dl-label">Preparing…</div>
-                <div class="dl-bar-track"><div id="dlProgressBar" class="dl-bar-fill"></div></div>
-                <div class="dl-hint">Please wait — do not close this tab</div>
+            <div class="dl-progress-card" style="background:#0f111a;border:1px solid rgba(139,92,246,0.3);border-radius:16px;padding:28px 32px;width:340px;text-align:center;">
+                <div class="dl-spinner" style="font-size:32px;margin-bottom:12px;">⚡</div>
+                <div id="dlProgressLabel" style="color:#E2E8F0;font-size:14px;font-weight:600;margin-bottom:16px;line-height:1.5;">Preparing…</div>
+                <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:8px;overflow:hidden;margin-bottom:12px;">
+                    <div id="dlProgressBar" style="height:100%;border-radius:99px;background:linear-gradient(90deg,#6366F1,#8B5CF6);transition:width 0.5s ease;width:0%;"></div>
+                </div>
+                <div style="color:#64748B;font-size:12px;">godd.ai — do not close this tab</div>
             </div>
         `;
         document.body.appendChild(overlay);
     }
     overlay.style.display = 'flex';
     document.getElementById('dlProgressLabel').innerText = label;
-    document.getElementById('dlProgressBar').style.width = `${pct}%`;
+    document.getElementById('dlProgressBar').style.width = `${Math.min(99, pct)}%`;
 }
 
 function hideDownloadProgress() {
