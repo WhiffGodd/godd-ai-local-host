@@ -3,9 +3,9 @@ try:
 except ImportError:
     from youtube_access import youtube_options, extract_youtube_info
 try:
-    from .clip_boundaries import snap_to_clean_sentence_boundaries
+    from .clip_boundaries import select_short_clip_windows, snap_to_clean_sentence_boundaries
 except ImportError:
-    from clip_boundaries import snap_to_clean_sentence_boundaries
+    from clip_boundaries import select_short_clip_windows, snap_to_clean_sentence_boundaries
 
 import re
 import math
@@ -438,29 +438,16 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     - Pacing and climax conclusion
     """
     if not transcript:
-        # If no transcript was fetched (e.g., auto-captions off), synthesize high-potential segments based on video length
-        return synthesize_viral_clips(video_duration, title)
+        return []
         
-    target_clip_length = 58.0 # Soft duration target; completion may extend to 180 seconds
-    min_clip_length = 35.0
-    max_clip_length = 85.0
-    
+    short_windows = select_short_clip_windows(transcript, video_duration)
+    windows = short_windows or (
+        snap_to_clean_sentence_boundaries(transcript, float(seg["start"]), boundary_limit=video_duration)
+        for seg in transcript[::max(1, len(transcript) // 25)]
+        if float(seg["start"]) + 35.0 <= video_duration
+    )
     candidate_windows = []
-    total_segments = len(transcript)
-    
-    # Slide across transcript segments
-    step = max(1, total_segments // 25)
-    for i in range(0, total_segments, step):
-        start_seg = transcript[i]
-        start_time = start_seg["start"]
-        
-        # Don't start too close to video end
-        if start_time + min_clip_length > video_duration:
-            break
-            
-        start_time, end_time, segments = snap_to_clean_sentence_boundaries(
-            transcript, start_time, min_duration=min_clip_length,
-            ideal_duration=target_clip_length, max_duration=max_clip_length, boundary_limit=video_duration)
+    for start_time, end_time, segments in windows:
         if not segments:
             continue
         current_words = [seg.get("text", "") for seg in segments]
@@ -471,8 +458,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "start": start_time, "end": end_time, "duration_sec": round(end_time - start_time, 2),
             "text": full_text, "score": score, "reasons": reasons, "tags": tags, "hook": hook_text})
 
-    # Sort candidates by virality score descending
-    candidate_windows.sort(key=lambda x: x["score"], reverse=True)
+    if not short_windows:
+        candidate_windows.sort(key=lambda x: x["score"], reverse=True)
     
     # Filter out overlapping windows to give distinct, diverse viral moments
     selected_clips = []

@@ -472,7 +472,7 @@ def estimate_word_weight(word: str) -> float:
         weight += 0.40  # Clause breathing pause
     return max(0.5, weight)
 
-from api.clip_boundaries import snap_to_clean_sentence_boundaries
+from api.clip_boundaries import select_short_clip_windows, snap_to_clean_sentence_boundaries
 
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
     """
@@ -486,30 +486,50 @@ def generate_word_subtitles_from_segments(segments: list, clip_start: float, cli
         return []
 
     subtitles = []
-    lead_offset = 0.0
 
     for seg in clip_segs:
-        s_start = max(clip_start, float(seg.get("start", 0)))
-        s_end = min(clip_end, float(seg.get("end", s_start + 1.0)))
+        segment_start = float(seg.get("start", 0))
+        segment_end = float(seg.get("end", segment_start + 1.0))
+        s_start = max(clip_start, segment_start)
+        s_end = min(clip_end, segment_end)
         if s_end <= s_start:
             continue
 
-        words_meta = seg.get("words")
-        if words_meta and any(wm.get("start") is not None for wm in words_meta):
-            for wm in words_meta:
+        words_meta = seg.get("words") or []
+        if any(wm.get("start") is not None for wm in words_meta):
+            # Fill only missing offsets between the surrounding word starts.
+            # Keep the original metadata intact for other overlapping clips.
+            starts = [float(wm["start"]) if wm.get("start") is not None else None
+                      for wm in words_meta]
+            anchors = [(-1, segment_start)]
+            anchors.extend((i, time) for i, time in enumerate(starts) if time is not None)
+            anchors.append((len(starts), segment_end))
+            for (left, before), (right, after) in zip(anchors, anchors[1:]):
+                first_missing = left + 1
+                if first_missing == right:
+                    continue
+                # Leading words can begin at the start of their caption cue.
+                slots = right - left if left >= 0 else right
+                for index in range(first_missing, right):
+                    step = index - left if left >= 0 else index
+                    starts[index] = before + max(0.0, after - before) * step / slots
+
+            for i, wm in enumerate(words_meta):
                 w_clean = re.sub(r'[«»<>]+', '', wm.get("word", "")).strip()
                 if not w_clean:
                     continue
-                w_start = round(max(0.0, float(wm.get("start", s_start)) - lead_offset), 2)
-                raw_end = float(wm.get("end", w_start + 0.35))
-                adapted_end = round(min(clip_end, raw_end), 3)
-                w_start = max(clip_start, w_start)
-                if adapted_end <= w_start:
+                next_start = starts[i + 1] if i + 1 < len(starts) else segment_end
+                raw_end = float(wm["end"]) if wm.get("end") is not None else next_start
+                if i + 1 < len(starts) and words_meta[i + 1].get("start") is None:
+                    raw_end = min(raw_end, next_start)
+                w_start = max(clip_start, round(starts[i], 3))
+                w_end = min(clip_end, round(raw_end, 3))
+                if w_end <= w_start:
                     continue
                 subtitles.append({
                     "word": w_clean,
                     "start": w_start,
-                    "end": adapted_end,
+                    "end": w_end,
                     "highlight": any(k in w_clean.lower() for k in ["important", "key", "secret", "never", "why", "how", "truth", "future", "mind", "huge", "biggest", "realize", "best", "worst"])
                 })
             continue
@@ -583,7 +603,10 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     - Questions, insights, revelations & storytelling arcs
     - Spoken speech density & complete narrative thoughts
     """
-    # 1. PRIORITY: If creator provided chapter timestamps, use these real curated content moments!
+    if not transcript:
+        return []
+
+    chapter_ranges = []
     if chapters and len(chapters) >= 2:
         ignore_words = ["intro", "outro", "sponsor", "welcome", "subscribe", "disclaimer", "patreon", "merch", "credits"]
         filtered_chapters = [
@@ -592,11 +615,21 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
         ]
         if not filtered_chapters:
             filtered_chapters = chapters
-            
+        all_starts = sorted({float(ch.get("time", ch.get("start_time", 0))) for ch in chapters})
+        ends = dict(zip(all_starts, all_starts[1:] + [video_duration]))
+        chapter_ranges = sorted(
+            (start, min(ends[start], video_duration), str(ch.get("title", "")))
+            for ch in filtered_chapters
+            for start in [float(ch.get("time", ch.get("start_time", 0)))]
+            if start < video_duration
+        )
+
+    short_windows = select_short_clip_windows(
+        transcript, video_duration, [(start, end) for start, end, _ in chapter_ranges])
+    if chapter_ranges and not short_windows:
         meaningful_clips = []
-        for idx, ch in enumerate(filtered_chapters[:5]):
-            start_time = float(ch.get("time", ch.get("start_time", 0)))
-            ch_title = str(ch.get("title", f"Key Moment #{idx+1}")).strip()
+        for start_time, chapter_end, ch_title in chapter_ranges:
+            idx = len(meaningful_clips)
             
             c_start, c_end, c_segs = snap_to_clean_sentence_boundaries(
                 transcript,
@@ -604,10 +637,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 min_duration=35.0,
                 ideal_duration=58.0,
                 max_duration=85.0,
-                boundary_limit=min(video_duration, min(
-                    (float(other.get("time", other.get("start_time", 0))) for other in chapters
-                     if float(other.get("time", other.get("start_time", 0))) > start_time),
-                    default=video_duration))
+                boundary_limit=chapter_end
             )
             if not c_segs:
                 continue
@@ -631,8 +661,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 "rank": idx + 1,
                 "title": clip_title,
                 "hook": ch_title,
-                "start": round(c_start, 1),
-                "end": round(c_end, 1),
+                "start": c_start,
+                "end": c_end,
                 "duration": format_duration(actual_dur),
                 "duration_sec": actual_dur,
                 "virality_score": 98 - idx * 2,
@@ -642,42 +672,25 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 "full_text": full_text,
                 "video_subtitles": c_vsubs,
                 "has_source_subtitles": bool(c_vsubs),
-                "subtitles": generate_word_subtitles_from_segments(transcript, c_start, c_end) or generate_word_subtitles(c_start, c_end, full_text),
+                "subtitles": generate_word_subtitles_from_segments(c_segs, c_start, c_end) or generate_word_subtitles(c_start, c_end, full_text),
                 "has_real_captions": bool(c_segs)
             })
+            if len(meaningful_clips) == 5:
+                break
             
         if meaningful_clips:
             return meaningful_clips
 
-    if not transcript:
-        # If no transcript was fetched (e.g., auto-captions off), synthesize content-focused segments based on video title
-        return synthesize_viral_clips(video_duration, title, chapters=chapters)
-        
-    target_clip_length = 58.0 # ~58-65 seconds per short to let speaker finish completely
     min_clip_length = 35.0
-    max_clip_length = 85.0
-    
     candidate_windows = []
-    total_segments = len(transcript)
-    
-    # Slide across transcript segments and snap each candidate to complete thought boundaries
-    step = max(1, total_segments // 30)
+    # Search longer exchanges only when no standalone 60–90 second clips fit.
+    windows = short_windows or (
+        snap_to_clean_sentence_boundaries(transcript, float(seg["start"]), boundary_limit=video_duration)
+        for seg in transcript[::max(1, len(transcript) // 30)]
+        if float(seg["start"]) + min_clip_length <= video_duration
+    )
     seen_starts = set()
-    for i in range(0, total_segments, step):
-        target_start = float(transcript[i].get("start", 0))
-        
-        # Don't start too close to video end
-        if target_start + min_clip_length > video_duration:
-            break
-            
-        c_start, c_end, c_segs = snap_to_clean_sentence_boundaries(
-            transcript,
-            target_start,
-            min_duration=min_clip_length,
-            ideal_duration=target_clip_length,
-            max_duration=max_clip_length,
-            boundary_limit=video_duration
-        )
+    for c_start, c_end, c_segs in windows:
         dur = round(c_end - c_start, 1)
         if not c_segs or dur < min_clip_length or dur > 180.0:
             continue
@@ -723,8 +736,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "video_subtitles": c_vsubs
         })
                     
-    # Sort candidates by virality score descending
-    candidate_windows.sort(key=lambda x: x["score"], reverse=True)
+    if not short_windows:
+        candidate_windows.sort(key=lambda x: x["score"], reverse=True)
     
     # Filter out overlapping windows to give distinct, diverse viral moments
     selected_clips = []
@@ -747,10 +760,10 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     # Format selected clips for Klap-style display
     formatted = []
     for idx, clip in enumerate(selected_clips):
-        words = clip["text"].split()
-        
-        # Generate punchy, content-focused short title based on actual spoken topic
-        viral_title = generate_meaningful_content_title(clip_text=clip["text"], video_title=title, rank=idx + 1)
+        chapter_title = next((name for start, end, name in chapter_ranges
+                              if start <= clip["start"] and clip["end"] <= end), "")
+        viral_title = generate_meaningful_content_title(
+            clip_text=clip["text"], video_title=title, chapter_title=chapter_title, rank=idx + 1)
         
         formatted.append({
             "id": f"clip_{idx+1}",
@@ -768,7 +781,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             "full_text": clip["text"],
             "video_subtitles": clip.get("video_subtitles", []),
             "has_source_subtitles": bool(clip.get("video_subtitles")),
-            "subtitles": generate_word_subtitles_from_segments(transcript, clip["start"], clip["end"]) or generate_word_subtitles(clip["start"], clip["end"], clip["text"]),
+            "subtitles": generate_word_subtitles_from_segments(clip["segs"], clip["start"], clip["end"]) or generate_word_subtitles(clip["start"], clip["end"], clip["text"]),
             "has_real_captions": True
         })
         
@@ -848,8 +861,8 @@ def score_segment(start_time: float, duration: float, text: str, first_phrase: s
     elif wpm > 185:
         score += 3.0
 
-    # 8. Ideal Short Duration (30s - 45s)
-    if 30 <= duration <= 48:
+    # 8. Preferred Short Duration
+    if 60 <= duration <= 90:
         score += 4.0
         tags.append("Algorithm Pick")
 

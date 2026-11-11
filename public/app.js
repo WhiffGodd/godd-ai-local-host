@@ -10,8 +10,11 @@ let activeClip       = null;
 let activeVideoId    = '';
 
 let ytPlayer        = null;
-let ytPlayerReady   = false;
 let ytPlayerCreated = false;
+let facecamPlayer = null;
+let facecamClip = null;
+let facecamReady = false;
+let nextFacecamSync = 0;
 
 let isPlaying   = false;
 let currentTime = 0;
@@ -24,8 +27,7 @@ let currentLayout = 'split';
 
 // ─── YouTube IFrame API callback ──────────────────────────────────────────────
 window.onYouTubeIframeAPIReady = function () {
-  ytPlayerReady = true;
-  console.log('[YT] IFrame API ready');
+  if (activeClip) loadYTPlayer(activeVideoId, activeClip.start, activeClip.end);
 };
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
@@ -84,6 +86,8 @@ function showToast(msg) {
 
 function goHome() {
   pausePlayer();
+  activeClip = null;
+  destroyFacecamPlayer();
   document.getElementById('heroSection').style.display = '';
   document.getElementById('processingSection').style.display = 'none';
   document.getElementById('studioSection').style.display = 'none';
@@ -151,10 +155,20 @@ async function analyzeVideo() {
 
       if (res.ok) {
         const data = await res.json();
+        if (data.success && Array.isArray(data.clips) && data.clips.length === 0) {
+          document.getElementById('processingSection').style.display = 'none';
+          document.getElementById('heroSection').style.display = 'block';
+          showErrModal(data.transcript_available === false
+            ? 'Captions are unavailable for this video. Try a video with captions so the app can find where an answer ends.'
+            : 'No complete speech passage was found within the 3-minute clip limit. Try another video or a source with clearer captions.');
+          return;
+        }
         if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
           setProcStatus('Done! Loading Klap studio…');
           displayStudio(data.video, data.clips);
-          showToast('✅ Meaningful content clips extracted with titles!');
+          showToast(data.clips.some(c => c.has_real_captions === false)
+            ? 'Transcript unavailable: these are suggested time ranges. Review and adjust their endings.'
+            : '✅ Clips selected using speech boundaries. Review the ending before export.');
           return;
         }
       }
@@ -163,87 +177,9 @@ async function analyzeVideo() {
     }
   }
 
-  // ── FAST FALLBACK: Real YT metadata via oEmbed + Content-Focused Clips ─────
-  setProcStatus('Generating content-focused viral clips…');
-
-  let metaTitle = videoId ? `Video (${videoId})` : 'Video Content';
-  let metaAuthor = 'Creator';
-  let metaDur = 600;
-
-  if (videoId) {
-    try {
-      const oe = await fetch(
-        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
-        { signal: AbortSignal.timeout(4000) }
-      );
-      if (oe.ok) {
-        const od = await oe.json();
-        metaTitle  = od.title  || metaTitle;
-        metaAuthor = od.author_name || metaAuthor;
-      }
-    } catch (_) {}
-  }
-
-  const topic = extractContentTopic(metaTitle);
-  const placeholderClips = [
-    makeContentClip(videoId, metaTitle, topic, 1, 15, 52),
-    makeContentClip(videoId, metaTitle, topic, 2, 65, 105),
-    makeContentClip(videoId, metaTitle, topic, 3, 130, 172),
-    makeContentClip(videoId, metaTitle, topic, 4, 210, 248)
-  ];
-
-  displayStudio({
-    id: videoId,
-    url,
-    title: metaTitle,
-    author: metaAuthor,
-    thumbnail: videoId ? ytThumb(videoId) : '',
-    duration: metaDur,
-    duration_formatted: '10:00'
-  }, placeholderClips);
-
-  showToast('⚡ Content clips ready! Click to preview and render on your GPU.');
-}
-
-function extractContentTopic(title) {
-  if (!title) return "This Topic";
-  const clean = title.replace(/[^\w\s-]/g, '').trim();
-  const words = clean.split(/\s+/).filter(w => w.length > 2 && !/^(video|full|stream|live|episode|podcast|part|with|from|the|and|official|clip|highlight|gameplay)$/i.test(w));
-  return words.slice(0, 4).join(' ') || "This Key Concept";
-}
-
-function makeContentClip(videoId, metaTitle, topic, rank, start, end) {
-  const dur = end - start;
-  const titles = [
-    `The Core Truth About ${topic} 🧠`,
-    `Why ${topic} Changes Everything 💡`,
-    `The Exact Moment Everything Shifted ⚡`,
-    `What Nobody Realizes About ${topic} 🎯`
-  ];
-  const hooks = [
-    `The biggest realization from ${topic}…`,
-    `Why most people get ${topic} completely wrong…`,
-    `The major turning point in ${topic}…`,
-    `The final critical takeaway about ${topic}…`
-  ];
-  const badges = ['🔥 Core Highlight', '💡 Key Insight', '⚡ Turning Point', '🎯 Main Takeaway'];
-
-  return {
-    id: `clip_${rank}`,
-    rank,
-    start,
-    end,
-    duration: fmtSec(dur),
-    duration_sec: dur,
-    title: titles[(rank - 1) % titles.length],
-    hook: hooks[(rank - 1) % hooks.length],
-    virality_score: 98 - (rank - 1) * 3,
-    virality_badge: badges[(rank - 1) % badges.length],
-    tags: ['Key Insight', 'Deep Dive', 'High Retention'],
-    full_text: hooks[(rank - 1) % hooks.length],
-    has_real_captions: false,
-    subtitles: genWordSubs(start, end, hooks[(rank - 1) % hooks.length])
-  };
+  document.getElementById('processingSection').style.display = 'none';
+  document.getElementById('heroSection').style.display = 'block';
+  showErrModal('Could not analyze the video. Check your backend connection and try again.');
 }
 
 let _procInterval = null;
@@ -316,12 +252,8 @@ function displayStudio(video, clips) {
   document.getElementById('processingSection').style.display = 'none';
   document.getElementById('studioSection').style.display = 'block';
 
-  // Layout selection: If no facecam is present, automatically use single-section (no 2 sections)
-  if (video.has_facecam === false) {
-    setLayout('blur');
-  } else {
-    setLayout('split');
-  }
+  activeClip = null;
+  setLayout(video.recommended_layout || 'split');
 
   // Subtitle selection: If video contains real subtitles, use them by default!
   const hasSourceSubs = clips.some(c => c.has_source_subtitles || (c.video_subtitles && c.video_subtitles.length > 0));
@@ -354,22 +286,17 @@ function selectClip(clipId) {
   const label = document.getElementById('previewTopLabel');
   if (label) label.textContent = clip.title || '';
   const trimS = document.getElementById('trimStart');
-  if (trimS) trimS.value = Math.round(clip.start);
+  if (trimS) trimS.value = clip.start;
   const trimE = document.getElementById('trimEnd');
-  if (trimE) trimE.value = Math.round(clip.end);
+  if (trimE) trimE.value = clip.end;
   const durLbl = document.getElementById('trimDurLabel');
   if (durLbl) durLbl.textContent = `${Math.round(clipDur)}s`;
   const tBox = document.getElementById('transcriptBox');
   if (tBox) tBox.textContent = clip.full_text || '';
 
-  // Update streamer cam preview image in split mode
-  const camFeed = document.getElementById('camPreviewFeed');
-  if (camFeed && activeVideoId) {
-    camFeed.style.backgroundImage = `url('https://img.youtube.com/vi/${activeVideoId}/maxresdefault.jpg'), url('${ytThumb(activeVideoId)}')`;
-  }
-
   // Load YouTube player
   loadYTPlayer(activeVideoId, clip.start, clip.end);
+  updateLayoutPreview();
 
   // Subtitles & Scrubber
   renderSubtitles(0);
@@ -388,30 +315,31 @@ function loadYTPlayer(videoId, startSec, endSec) {
   const ytDiv = document.getElementById('ytPlayerDiv');
 
   // If YT API Player already initialized, seek to clip
-  if (ytPlayerCreated && ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+  if (ytPlayerCreated && ytPlayer && typeof ytPlayer.cueVideoById === 'function') {
     try {
-      ytPlayer.loadVideoById({
+      ytPlayer.cueVideoById({
         videoId: videoId,
-        startSeconds: Math.floor(startSec),
-        endSeconds: Math.floor(endSec)
+        startSeconds: startSec,
+        endSeconds: endSec
       });
-      setTimeout(() => {
-        try { ytPlayer.pauseVideo(); } catch(_) {}
-      }, 300);
       return;
     } catch (e) {
-      console.warn('[YT] loadVideoById fallback:', e);
+      console.warn('[YT] cueVideoById fallback:', e);
     }
   }
 
   // Create YouTube player via API if available
   if (window.YT && window.YT.Player) {
+    if (ytPlayer && !ytPlayerCreated) return;
     try {
+      fallback.style.display = 'none';
+      fallback.removeAttribute('src');
+      ytDiv.style.display = '';
       ytPlayer = new YT.Player('ytPlayerDiv', {
         videoId: videoId,
         playerVars: {
           start: Math.floor(startSec),
-          end: Math.floor(endSec),
+          end: Math.ceil(endSec),
           autoplay: 0,
           controls: 0,
           disablekb: 1,
@@ -423,22 +351,32 @@ function loadYTPlayer(videoId, startSec, endSec) {
         events: {
           onReady: (e) => {
             ytPlayerCreated = true;
-            try { e.target.seekTo(startSec, true); } catch(_) {}
+            if (!activeClip) return;
+            e.target.cueVideoById({videoId: activeVideoId, startSeconds: activeClip.start, endSeconds: activeClip.end});
+            if (isPlaying) e.target.playVideo();
+            updateLayoutPreview();
           },
           onStateChange: (e) => {
+            if (!activeClip) return;
             if (e.data === YT.PlayerState.PLAYING) {
               isPlaying = true;
               updatePlayIcon(true);
+              syncFacecam(true);
               if (!animId) animLoop();
             } else if (e.data === YT.PlayerState.PAUSED) {
               isPlaying = false;
               updatePlayIcon(false);
+              pauseFacecam();
+            } else if (e.data === YT.PlayerState.BUFFERING) {
+              pauseFacecam();
             } else if (e.data === YT.PlayerState.ENDED) {
               isPlaying = false;
               updatePlayIcon(false);
+              pauseFacecam();
               if (activeClip) {
                 try {
                   ytPlayer.seekTo(activeClip.start, true);
+                  seekFacecam(activeClip.start);
                   currentTime = 0;
                   updateScrubber();
                 } catch(_) {}
@@ -457,7 +395,7 @@ function loadYTPlayer(videoId, startSec, endSec) {
   if (fallback) {
     fallback.style.display = 'block';
     if (ytDiv) ytDiv.style.display = 'none';
-    fallback.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(startSec)}&end=${Math.floor(endSec)}&autoplay=0&controls=1&rel=0&playsinline=1`;
+    fallback.src = `https://www.youtube.com/embed/${videoId}?start=${Math.floor(startSec)}&end=${Math.ceil(endSec)}&autoplay=0&controls=1&rel=0&playsinline=1`;
   }
 }
 
@@ -478,11 +416,13 @@ function startPlayer() {
   if (ytPlayer && ytPlayerCreated && typeof ytPlayer.playVideo === 'function') {
     try { ytPlayer.playVideo(); } catch(_) {}
   }
+  syncFacecam(true);
   if (!animId) animLoop();
 }
 
 function pausePlayer() {
   isPlaying = false;
+  pauseFacecam();
   updatePlayIcon(false);
   if (animId) {
     cancelAnimationFrame(animId);
@@ -534,6 +474,12 @@ function setSyncOffset(val) {
 function animLoop(ts) {
   if (!isPlaying) { animId = null; return; }
   if (!ts) ts = performance.now();
+  if (ytPlayerCreated && ytPlayer.getPlayerState() === YT.PlayerState.BUFFERING) {
+    lastTs = ts;
+    animId = requestAnimationFrame(animLoop);
+    return;
+  }
+  syncFacecam();
   const delta = Math.min(0.1, (ts - lastTs) / 1000);
   lastTs = ts;
 
@@ -598,6 +544,7 @@ function scrubSeek(e) {
   if (ytPlayer && ytPlayerCreated && typeof ytPlayer.seekTo === 'function') {
     try { ytPlayer.seekTo(activeClip.start + currentTime, true); } catch(_) {}
   }
+  seekFacecam(activeClip.start + currentTime);
   updateScrubber();
   renderSubtitles(currentTime);
 }
@@ -826,11 +773,97 @@ function setStyle(name) {
 function setLayout(name) {
   currentLayout = name;
   document.querySelectorAll('.layout-btn').forEach(b => b.classList.toggle('active', b.dataset.l === name));
+  updateLayoutPreview();
+}
+
+function updateLayoutPreview() {
   const container = document.getElementById('ytContainer');
-  if (container) {
-    container.className = `yt-container layout-${name}`;
+  const clip = activeClip;
+  const region = clip?.facecamPreview?.region;
+  if (currentLayout === 'split' && ytPlayerCreated && region) {
+    loadFacecamPlayer(clip, region);
+  } else {
+    destroyFacecamPlayer();
   }
-  showToast(`Layout: ${name.toUpperCase()}`);
+  container.className = `yt-container layout-${facecamPlayer ? 'split' : currentLayout === 'split' ? 'blur' : currentLayout}`;
+  if (currentLayout === 'split' && clip && !clip.facecamPreview) {
+    const url = currentVideoData?.url || (activeVideoId && `https://www.youtube.com/watch?v=${activeVideoId}`);
+    if (!url) return;
+    const preview = clip.facecamPreview = {};
+    fetch(`${getBackend()}/api/facecam`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, start: clip.start, duration: clip.end - clip.start})
+    }).then(res => res.ok ? res.json() : null).then(data => {
+      preview.region = data?.facecam;
+      if (activeClip === clip && clip.facecamPreview === preview) updateLayoutPreview();
+    }).catch(() => {});
+  }
+}
+
+function loadFacecamPlayer(clip, region) {
+  if (facecamClip === clip) return;
+  destroyFacecamPlayer();
+  const feed = document.getElementById('camPreviewFeed');
+  feed.style.setProperty('--cam-width', region.w);
+  feed.style.setProperty('--cam-height', region.h);
+  feed.style.setProperty('--cam-aspect', region.aspect || 16 / 9);
+  feed.style.setProperty('--cam-center-x', region.x + region.w / 2);
+  feed.style.setProperty('--cam-center-y', region.y + region.h / 2);
+  const mount = document.createElement('div');
+  feed.appendChild(mount);
+  facecamClip = clip;
+  facecamPlayer = new YT.Player(mount, {
+    videoId: activeVideoId,
+    playerVars: {controls: 0, disablekb: 1, playsinline: 1, rel: 0, start: Math.floor(clip.start)},
+    events: {
+      onReady: ({target}) => {
+        if (target !== facecamPlayer) return;
+        target.mute();
+        target.getIframe().tabIndex = -1;
+        facecamReady = true;
+        if (isPlaying) syncFacecam(true);
+        else seekFacecam(clip.start + currentTime);
+      },
+      onError: ({target}) => {
+        if (target !== facecamPlayer) return;
+        clip.facecamPreview.region = null;
+        updateLayoutPreview();
+      }
+    }
+  });
+}
+
+function destroyFacecamPlayer() {
+  const player = facecamPlayer;
+  facecamPlayer = null;
+  facecamClip = null;
+  facecamReady = false;
+  nextFacecamSync = 0;
+  if (player) player.destroy();
+}
+
+function pauseFacecam() {
+  if (facecamReady) facecamPlayer.pauseVideo();
+}
+
+function seekFacecam(seconds) {
+  if (!facecamReady) return;
+  facecamPlayer.seekTo(seconds, true);
+  if (!isPlaying) pauseFacecam();
+  nextFacecamSync = performance.now() + 750;
+}
+
+function syncFacecam(force = false) {
+  if (!facecamReady || !isPlaying || ytPlayer.getPlayerState() !== YT.PlayerState.PLAYING) return;
+  const now = performance.now();
+  if (!force && now < nextFacecamSync) return;
+  nextFacecamSync = now + 750;
+  const state = facecamPlayer.getPlayerState();
+  if (state === YT.PlayerState.BUFFERING) return;
+  const seconds = ytPlayer.getCurrentTime();
+  if (Math.abs(seconds - facecamPlayer.getCurrentTime()) > 0.45) facecamPlayer.seekTo(seconds, true);
+  if (state !== YT.PlayerState.PLAYING) facecamPlayer.playVideo();
 }
 
 function applyTrim() {
@@ -840,14 +873,14 @@ function applyTrim() {
   if (e <= s) return;
   activeClip.start = s;
   activeClip.end   = e;
+  delete activeClip.facecamPreview;
+  updateLayoutPreview();
   clipDur = e - s;
   const lbl = document.getElementById('trimDurLabel');
   if (lbl) lbl.textContent = `${Math.round(clipDur)}s`;
   currentTime = 0;
   updateScrubber();
-  if (ytPlayer && ytPlayerCreated) {
-    try { ytPlayer.seekTo(s, true); ytPlayer.pauseVideo(); } catch(_) {}
-  }
+  loadYTPlayer(activeVideoId, s, e);
   showToast(`Trim updated: ${fmtSec(s)} → ${fmtSec(e)}`);
 }
 

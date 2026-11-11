@@ -115,9 +115,9 @@
           <div class="split-top-cam" id="splitTopCam">
             <div class="streamer-live-tag">
               <span class="live-dot"></span>
-              <span class="streamer-tag-text">STREAMER CAM</span>
+              <span class="streamer-tag-text">FACECAM PREVIEW</span>
             </div>
-            <div class="cam-preview-feed" id="camPreviewFeed"></div>
+            <div class="cam-preview-feed" id="camPreviewFeed" aria-hidden="true"></div>
           </div>
 
           <!-- Gameplay Player Wrap -->
@@ -168,7 +168,7 @@
       <div class="ctrl-box">
         <div class="ctrl-box-title">📐 Video Layout</div>
         <div class="layout-row">
-          <button class="layout-btn active" data-l="split" onclick="setLayout('split')">🎮 Split (Facecam + Video)</button>
+          <button class="layout-btn active" data-l="split" onclick="setLayout('split')">🎮 Auto (Facecam on Top)</button>
           <button class="layout-btn" data-l="blur" onclick="setLayout('blur')">✨ Single (Blur BG)</button>
           <button class="layout-btn" data-l="crop" onclick="setLayout('crop')">✂️ Single (9:16 Crop)</button>
           <button class="layout-btn" data-l="fit" onclick="setLayout('fit')">🔲 Single (Fit)</button>
@@ -179,8 +179,8 @@
       <div class="ctrl-box">
         <div class="ctrl-box-title">⏱️ Clip Trim <span id="trimDurLabel" class="trim-dur-badge">40s</span></div>
         <div class="trim-row">
-          <label>Start <input type="number" id="trimStart" min="0" step="1" onchange="applyTrim()">s</label>
-          <label>End <input type="number" id="trimEnd" min="1" step="1" onchange="applyTrim()">s</label>
+          <label>Start <input type="number" id="trimStart" min="0" step="0.01" onchange="applyTrim()">s</label>
+          <label>End <input type="number" id="trimEnd" min="1" step="0.01" onchange="applyTrim()">s</label>
         </div>
       </div>
 

@@ -19,10 +19,9 @@ from analyzer import (
     extract_youtube_id,
     get_video_metadata,
     fetch_transcript_segments,
-    analyze_virality_and_cut_clips,
-    synthesize_viral_clips
+    analyze_virality_and_cut_clips
 )
-from video_engine import generate_srt, download_and_clip_video, transcribe_audio_with_whisper, WHISPER_AVAILABLE
+from video_engine import generate_srt, download_and_clip_video, preview_facecam, transcribe_audio_with_whisper, WHISPER_AVAILABLE
 
 if sys.platform == "win32":
     try:
@@ -53,7 +52,7 @@ def run_export(payload):
     source_path = validate_uploaded_video(SOURCE_UPLOADS.completed_path(payload['upload_id'])) if payload.get('upload_id') else None
     return download_and_clip_video(
         video_url=payload["url"], start_time=payload["start"], duration=payload["duration"],
-        layout=payload.get("layout", "blur"), subtitle_style=payload.get("subtitle_style", "beast"),
+        layout=payload.get("layout", "split"), subtitle_style=payload.get("subtitle_style", "beast"),
         subtitles=payload.get("subtitles", []), video_subtitles=payload.get("video_subtitles", []),
         caption_source=payload.get("caption_source", "auto"), local_source_path=source_path)
 
@@ -426,6 +425,23 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_analyze(payload)
             return
 
+        if path == "/api/facecam":
+            try:
+                clip = validate_render_payload(payload)
+            except (ValueError, TypeError):
+                self.send_error(400, "Provide a valid YouTube URL and a clip of 1-180 seconds")
+                return
+            try:
+                region = preview_facecam(clip["url"], clip["start"], clip["duration"])
+            except Exception as error:
+                print(f"[FaceCam] Preview unavailable: {error}")
+                region = None
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"facecam": region}).encode())
+            return
+
         if path == "/api/download-srt":
             self.handle_srt(payload)
             return
@@ -467,12 +483,6 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 chapters=meta.get("chapters", [])
             )
 
-            # Check whether video is gaming/streamer with facecam or general content/tutorial
-            title_lower = (meta.get("title") or "").lower()
-            author_lower = (meta.get("author") or "").lower()
-            gaming_indicators = ["stream", "live", "gaming", "valorant", "gta", "minecraft", "bgmi", "clutch", "facecam", "webcam", "reaction", "playthrough"]
-            has_facecam = any(ind in title_lower or ind in author_lower for ind in gaming_indicators)
-
             # Response returned immediately — fast & reliable (2s response time)
             response_data = {
                 "success": True,
@@ -485,10 +495,10 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "duration": meta.get("duration", 600),
                     "duration_formatted": f"{int(meta.get('duration', 600) // 60)}:{int(meta.get('duration', 600) % 60):02d}",
                     "view_count": meta.get("view_count", 250000),
-                    "has_facecam": has_facecam,
-                    "recommended_layout": "split" if has_facecam else "blur"
+                    "recommended_layout": "split"
                 },
-                "clips": clips
+                "clips": clips,
+                "transcript_available": bool(transcript)
             }
 
             self.send_response(200)

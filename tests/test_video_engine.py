@@ -40,6 +40,20 @@ class CaptionsTests(unittest.TestCase):
                 {'word': 'speech', 'start': 11.4, 'end': 12}]}], 10, 12)
         self.assertEqual([(w['start'], w['end']) for w in words], [(10, 11.2), (11.4, 12)])
 
+    def test_partial_youtube_word_timing_preserves_text_and_known_starts(self):
+        from analyzer import generate_word_subtitles_from_segments
+        segment = {'start': 10, 'end': 12, 'text': 'One two three four', 'words': [
+            {'word': 'One', 'start': None, 'end': None},
+            {'word': 'two', 'start': 10.4, 'end': 10.75},
+            {'word': 'three', 'start': None},
+            {'word': 'four', 'start': 11.4, 'end': None},
+        ]}
+        words = generate_word_subtitles_from_segments([segment], 10, 12)
+        self.assertEqual([word['word'] for word in words], ['One', 'two', 'three', 'four'])
+        self.assertEqual([word['start'] for word in words], [10, 10.4, 10.9, 11.4])
+        self.assertTrue(all(10 <= word['start'] < word['end'] <= 12 for word in words))
+        self.assertIsNone(segment['words'][0]['start'])
+
     def test_estimated_fast_speech_never_runs_beyond_its_segment(self):
         from analyzer import generate_word_subtitles_from_segments
         words = generate_word_subtitles_from_segments([
@@ -132,6 +146,30 @@ class RenderTests(unittest.TestCase):
                                       output_path=out,local_source_path=self.source)
         extract.assert_not_called()
         self.assertGreater(os.path.getsize(out),1000)
+
+    def test_split_plays_the_detected_facecam_above_gameplay(self):
+        source = str(Path(self.tmp.name) / 'facecam-source.mp4')
+        out = str(Path(self.tmp.name) / 'facecam-export.mp4')
+        subprocess.run([v.FFMPEG_PATH, '-y', '-f', 'lavfi', '-i',
+                        "color=blue:s=320x180:d=2,drawbox=x=240:y=110:w=80:h=70:c=red:t=fill,"
+                        "drawbox=x=240:y=110:w=80:h=70:c=lime:t=fill:enable='gte(t,0.5)'",
+                        '-f', 'lavfi', '-i', 'sine=duration=2', '-c:v', 'libx264', source],
+                       capture_output=True, check=True)
+        facecam = {'x': 0.75, 'y': 0.62, 'w': 0.25, 'h': 0.38}
+        with patch.object(v, 'detect_facecam_in_stream', return_value=facecam), patch.object(
+                v, 'get_video_encoder_flags', return_value=['-c:v', 'libx264', '-preset', 'ultrafast']):
+            v.download_and_clip_video('test', 0, 1, layout='split', subtitle_style='off',
+                                      output_path=out, local_source_path=source)
+        for at, y, channel in ((0.2, 380, 0), (0.8, 380, 1), (0.8, 1000, 2)):
+            pixel = subprocess.run([v.FFMPEG_PATH, '-ss', str(at), '-i', out,
+                                    '-vf', f'crop=2:2:540:{y}', '-frames:v', '1',
+                                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                                   capture_output=True, check=True).stdout
+            self.assertGreater(pixel[channel], 200)
+
+    def test_facecam_candidates_ignore_a_full_frame_host(self):
+        faces = [(340, 80, 200, 250, .99), (730, 340, 45, 60, .90)]
+        self.assertEqual(len(list(v.facecam_candidates(faces, 960, 540))), 1)
 
     def test_off_skips_recognition(self):
         with patch.object(v, 'transcribe_audio_with_whisper') as transcribe:

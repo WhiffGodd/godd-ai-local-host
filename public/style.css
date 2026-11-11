@@ -332,19 +332,28 @@ input  { font-family: inherit; outline: none; }
   top: 0;
   left: 0;
   right: 0;
-  height: 44%;
+  height: 40.625%;
+  container-type: size;
   overflow: hidden;
   background: #0C0D14;
   border-bottom: 2px solid rgba(124, 58, 237, 0.4);
 }
 .cam-preview-feed {
   position: absolute;
-  inset: -10%;
-  background-size: cover;
-  background-position: top left;
-  transform: scale(2.2);
-  transform-origin: 15% 15%;
-  filter: contrast(1.12) brightness(1.04);
+  left: 50%;
+  top: 50%;
+  width: max(calc(100cqw / var(--cam-width)), calc(100cqh * var(--cam-aspect) / var(--cam-height)));
+  aspect-ratio: var(--cam-aspect);
+  transform: translate(calc(-100% * var(--cam-center-x)), calc(-100% * var(--cam-center-y)));
+  pointer-events: none;
+}
+.cam-preview-feed iframe {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 .streamer-live-tag {
   position: absolute;
@@ -373,7 +382,7 @@ input  { font-family: inherit; outline: none; }
 }
 .yt-container.layout-split .game-video-wrap {
   position: absolute;
-  top: 44%;
+  top: 41.0417%;
   left: 0;
   right: 0;
   width: 100%;

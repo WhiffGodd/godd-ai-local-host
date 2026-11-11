@@ -223,58 +223,84 @@ def format_srt_timestamp(seconds: float) -> str:
     return f"{hrs:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
 FACE_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet.onnx")
+FACECAM_WIDTH, FACECAM_HEIGHT = 1080, 780
+GAME_HEIGHT, GAME_TOP = 608, 788
 
-def detect_facecam_in_stream(stream_url: str, timestamp: float = 10.0) -> dict:
-    """
-    Sample 1 frame from the video stream using FFmpeg image2pipe and detect if a streamer
-    facecam exists using OpenCV's fast YuNet face detector.
-    Returns: {"has_face": True/False, "x": int, "y": int, "w": int, "h": int, "orig_w": int, "orig_h": int}
-    """
+
+def facecam_candidates(faces, width, height):
+    """Keep small, off-center faces consistent with an inset camera."""
+    for face in faces if faces is not None else ():
+        x, y, w, h = map(float, face[:4])
+        center_x, center_y = (x + w / 2) / width, (y + h / 2) / height
+        face_height = h / height
+        near_side = center_x <= 0.30 or center_x >= 0.70
+        tiny_at_top_or_bottom = face_height <= 0.115 and (center_y <= 0.15 or center_y >= 0.85)
+        if 0.035 <= face_height <= 0.24 and w / width <= 0.2 and (near_side or tiny_at_top_or_bottom):
+            yield center_x, center_y, w / width, face_height, float(face[-1])
+
+
+def detect_facecam_in_stream(stream_url, start, duration, input_args=()):
+    """Locate a small face that stays in the same area across distinct frames."""
     if not stream_url or not os.path.exists(FACE_MODEL_PATH):
-        return {"has_face": False}
+        return None
     try:
         import cv2
         import numpy as np
 
-        ffmpeg_bin = FFMPEG_PATH or "ffmpeg"
-        cmd = [
-            ffmpeg_bin, "-y",
-            "-ss", str(max(0.0, timestamp)),
-            "-i", stream_url,
-            "-vframes", "1",
-            "-f", "image2pipe",
-            "-vcodec", "png",
-            "-"
-        ]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out, _ = p.communicate(timeout=6)
-        if not out or len(out) < 1000:
-            return {"has_face": False}
+        detector = cv2.FaceDetectorYN.create(FACE_MODEL_PATH, "", (960, 540), score_threshold=0.65)
+        earlier = []
+        for offset in (min(1, duration * 0.15), duration * 0.40, duration * 0.75):
+            cmd = [FFMPEG_PATH, "-loglevel", "error", "-threads", "1", "-ss", str(start + offset),
+                   *input_args, "-i", stream_url, "-map", "0:v:0", "-frames:v", "1",
+                   "-vf", "scale=w='min(960,iw)':h=-2", "-c:v", "mjpeg", "-threads", "1",
+                   "-f", "image2pipe", "-"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, timeout=6)
+            except subprocess.TimeoutExpired:
+                continue
+            if result.returncode or not result.stdout:
+                continue
+            img = cv2.imdecode(np.frombuffer(result.stdout, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            height, width = img.shape[:2]
+            detector.setInputSize((width, height))
+            _, faces = detector.detect(img)
+            current = list(facecam_candidates(faces, width, height))
+            matches = [(old, new) for old in earlier for new in current
+                       if abs(old[0] - new[0]) <= 0.055 and abs(old[1] - new[1]) <= 0.08
+                       and min(old[3], new[3]) >= 0.6 * max(old[3], new[3])]
+            if matches:
+                old, new = max(matches, key=lambda pair: pair[0][-1] + pair[1][-1])
+                x = (old[0] + new[0]) * width / 2
+                y = (old[1] + new[1]) * height / 2
+                aspect = FACECAM_WIDTH / FACECAM_HEIGHT
+                crop_h = min(height, width / aspect,
+                             max(max(old[3], new[3]) * height * 2.5 + abs(old[1] - new[1]) * height,
+                                 max(old[2], new[2]) * width * 2 / aspect))
+                crop_w = max(2, int(crop_h * aspect) // 2 * 2)
+                crop_h = max(2, int(crop_h) // 2 * 2)
+                left = max(0, min(width - crop_w, round(x - crop_w / 2)))
+                top = max(0, min(height - crop_h, round(y - crop_h * 0.42)))
+                return {"x": left / width, "y": top / height,
+                        "w": crop_w / width, "h": crop_h / height, "aspect": width / height}
+            earlier.extend(current)
+    except Exception as error:
+        print(f"[FaceCam] Detection unavailable: {error}")
+    return None
 
-        arr = np.frombuffer(out, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            return {"has_face": False}
 
-        h, w = img.shape[:2]
-        detector = cv2.FaceDetectorYN.create(FACE_MODEL_PATH, "", (w, h), score_threshold=0.55)
-        _, faces = detector.detect(img)
-        if faces is not None and len(faces) > 0:
-            best = max(faces, key=lambda f: float(f[-1]))
-            fx, fy, fw, fh = [int(v) for v in best[:4]]
-            score = float(best[-1])
-            print(f"[FaceCam] Streamer face detected at x={fx}, y={fy}, w={fw}, h={fh} (confidence: {score:.2f})")
-            return {
-                "has_face": True,
-                "x": fx, "y": fy, "w": fw, "h": fh,
-                "orig_w": w, "orig_h": h,
-                "score": score
-            }
-        print("[FaceCam] No streamer facecam detected in video frame.")
-        return {"has_face": False, "orig_w": w, "orig_h": h}
-    except Exception as e:
-        print(f"[FaceCam] Detection notice: {e}")
-        return {"has_face": False}
+def youtube_render_info(video_url):
+    return extract_youtube_info(video_url, {
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        'quiet': True, 'no_warnings': True,
+    })
+
+
+def preview_facecam(video_url, start, duration):
+    info = youtube_render_info(video_url)
+    stream, _, _ = select_export_streams(info)
+    return detect_facecam_in_stream(stream, start, duration, stream_http_input_args(info, stream))
 
 def download_and_clip_video(
     video_url: str,
@@ -318,11 +344,10 @@ def download_and_clip_video(
             info = {"formats": [{"url": local_source_path, "vcodec": "local",
                                  "acodec": "local", "height": 1080}]}
         else:
-            info = extract_youtube_info(video_url, {
-                'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-                'quiet': True, 'no_warnings': True,
-            })
+            info = youtube_render_info(video_url)
         target_stream, selected_audio, separate_audio = select_export_streams(info)
+        source_protocols = ["-protocol_whitelist", "file,pipe"] if local_source_path else []
+        video_input_args = [*source_protocols, *stream_http_input_args(info, target_stream)]
         srt_filter = ""
         is_none_style = str(subtitle_style).lower() in ("none", "off", "disable", "disabled", "false")
         if not is_none_style and caption_source != "auto":
@@ -344,51 +369,22 @@ def download_and_clip_video(
                 srt_filter = f",subtitles='{esc_srt}'"
 
         # Check whether streamer facecam exists in this video
-        face_info = {"has_face": False}
+        facecam = None
         if layout == "split":
-            face_info = detect_facecam_in_stream(target_stream, start_time + 1.5)
+            facecam = detect_facecam_in_stream(target_stream, start_time, duration, video_input_args)
 
-        # Full HD 1080x1920 Filter graph based on layout & facecam detection
-        if layout == "split":
-            if face_info.get("has_face"):
-                fx = face_info["x"]
-                fy = face_info["y"]
-                fw = face_info["w"]
-                fh = face_info["h"]
-                orig_w = face_info.get("orig_w", 1920)
-                orig_h = face_info.get("orig_h", 1080)
-
-                # Head and shoulders framing: facecam fills the 1080x780 upper section prominently
-                cam_crop_h = int(fh * 2.6)
-                cam_crop_w = int(cam_crop_h * (1080.0 / 780.0))
-                cam_crop_w = max(cam_crop_w, int(orig_w * 0.20))
-                cam_crop_w = min(cam_crop_w, int(orig_w * 0.45))
-                cam_crop_h = int(cam_crop_w * (780.0 / 1080.0))
-
-                crop_x = max(0, min(orig_w - cam_crop_w, int(fx + fw/2 - cam_crop_w/2)))
-                crop_y = max(0, min(orig_h - cam_crop_h, int(fy + fh/2 - cam_crop_h/2)))
-
-                cam_filter = f"crop={cam_crop_w}:{cam_crop_h}:{crop_x}:{crop_y},scale=1080:780"
-                print(f"[VideoEngine] Framing 1080p streamer facecam: {cam_filter}")
-
-                filter_complex = (
-                    "[0:v]split=2[cam_src][game_src];"
-                    f"[cam_src]{cam_filter}[cam];"
-                    "[game_src]scale=1080:608[game];"
-                    f"color=c=#0B0C10:s=1080x1920:d={duration}[bg];"
-                    "[bg][cam]overlay=0:0:shortest=1[bg_cam];"
-                    f"[bg_cam][game]overlay=0:788:shortest=1{srt_filter}[outv]"
-                )
-            else:
-                # Unified single-section 1080p 9:16 short
-                print("[VideoEngine] No streamer facecam found — rendering unified single-section 1080p short.")
-                filter_complex = (
-                    "[0:v]split=2[bg][fg];"
-                    "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg_blurred];"
-                    "[fg]scale=1080:608[fg_scaled];"
-                    f"[bg_blurred][fg_scaled]overlay=0:(1920-608)/2{srt_filter}[outv]"
-                )
-        elif layout == "blur":
+        if facecam:
+            crop = (f"crop=iw*{facecam['w']:.8f}:ih*{facecam['h']:.8f}:"
+                    f"iw*{facecam['x']:.8f}:ih*{facecam['y']:.8f}")
+            filter_complex = (
+                "[0:v]split=2[cam_src][game_src];"
+                f"[cam_src]{crop},scale={FACECAM_WIDTH}:{FACECAM_HEIGHT},setsar=1[cam];"
+                f"[game_src]scale=1080:{GAME_HEIGHT}:force_original_aspect_ratio=decrease:"
+                f"force_divisible_by=2,pad=1080:{GAME_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+                f"pad=1080:1920:0:{GAME_TOP}:color=0x0B0C10[game];"
+                f"[game][cam]overlay=0:0:shortest=1{srt_filter}[outv]"
+            )
+        elif layout in ("split", "blur"):
             filter_complex = (
                 "[0:v]split=2[bg][fg];"
                 "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg_blurred];"
@@ -403,8 +399,7 @@ def download_and_clip_video(
         encoder_flags = get_video_encoder_flags()
         # Accurate seeks on both inputs share the same clip origin. Resample against
         # timestamps to correct drift and pad a late-starting audio stream.
-        source_protocols = ["-protocol_whitelist", "file,pipe"] if local_source_path else []
-        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), *source_protocols, *stream_http_input_args(info, target_stream), "-i", target_stream]
+        cmd = [FFMPEG_PATH, "-y", "-filter_complex_threads", os.environ.get("FFMPEG_THREADS", "2"), "-threads", os.environ.get("FFMPEG_THREADS", "2"), "-ss", str(start_time), *video_input_args, "-i", target_stream]
         if separate_audio:
             cmd += ["-ss", str(start_time), *stream_http_input_args(info, selected_audio), "-i", selected_audio]
         cmd += ["-t", str(duration), "-filter_complex", filter_complex,

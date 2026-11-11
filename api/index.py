@@ -11,16 +11,14 @@ try:
         extract_youtube_id,
         get_video_metadata,
         fetch_transcript_segments,
-        analyze_virality_and_cut_clips,
-        synthesize_viral_clips
+        analyze_virality_and_cut_clips
     )
 except Exception:
     from .analyzer import (
         extract_youtube_id,
         get_video_metadata,
         fetch_transcript_segments,
-        analyze_virality_and_cut_clips,
-        synthesize_viral_clips
+        analyze_virality_and_cut_clips
     )
 
 SAMPLE_VIDEOS = [
@@ -202,7 +200,8 @@ class handler(BaseHTTPRequestHandler):
                     "view_count": meta.get("view_count", 250000),
                     "source": meta.get("source", "oembed")
                 },
-                "clips": clips
+                "clips": clips,
+                "transcript_available": bool(transcript)
             }
 
             self.send_response(200)
@@ -211,22 +210,8 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(response_data).encode("utf-8"))
         except Exception:
-            # High-retention fallback clips
-            fallback_clips = synthesize_viral_clips(600, "Viral Video")
-            self.send_response(200)
+            self.send_response(500)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({
-                "success": True,
-                "video": {
-                    "id": video_id,
-                    "url": url,
-                    "title": "Viral Video Stream",
-                    "author": "Creator",
-                    "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
-                    "duration": 600,
-                    "duration_formatted": "10:00"
-                },
-                "clips": fallback_clips
-            }).encode("utf-8"))
+            self.wfile.write(json.dumps({"error": "Could not analyze the video."}).encode("utf-8"))
