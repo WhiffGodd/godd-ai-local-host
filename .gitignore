@@ -5,6 +5,9 @@ __pycache__/
 *.webm
 *.srt
 .env
+.env.*
+client_secret*.json
+.venv/
 .vercel
 
 # Local authentication files must never be committed

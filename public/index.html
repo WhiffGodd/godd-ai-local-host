@@ -230,6 +230,34 @@
         <div class="sync-hint">Adjust live if your Bluetooth or browser audio has slight latency.</div>
       </div>
 
+      <div class="ctrl-box youtube-box">
+        <div class="ctrl-box-title">Upload to YouTube</div>
+        <p id="youtubeStatus" role="status">Checking YouTube connection…</p>
+        <button class="layout-btn" type="button" id="youtubeConnect" disabled>Connect YouTube</button>
+        <button class="layout-btn" type="button" id="youtubeDisconnect" hidden>Disconnect</button>
+        <form id="youtubeForm" hidden>
+          <label>Title <input id="youtubeTitle" maxlength="100" required></label>
+          <label>Description <textarea id="youtubeDescription" rows="2" maxlength="5000"></textarea></label>
+          <label>Visibility
+            <select id="youtubePrivacy">
+              <option value="private">Private</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="public">Public</option>
+            </select>
+          </label>
+          <label>Is this video made for kids?
+            <select id="youtubeAudience" required>
+              <option value="">Choose an audience</option>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </label>
+          <button class="btn-download" type="submit" id="youtubeUpload">Upload to YouTube</button>
+        </form>
+        <p id="youtubeResult" role="status"></p>
+        <p class="youtube-privacy">Channel access ends when you disconnect or the server restarts. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a> · <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms</a></p>
+      </div>
+
       <!-- Direct Download Box -->
       <div class="ctrl-box download-box">
         <div class="ctrl-box-title">💾 Export Video (1080p Full HD)</div>
@@ -291,5 +319,6 @@
 <div class="toast" id="toast"></div>
 
 <script src="app.js"></script>
+<script src="youtube-studio.js"></script>
 </body>
 </html>

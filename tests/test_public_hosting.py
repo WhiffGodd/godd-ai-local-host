@@ -22,7 +22,7 @@ class PublicHostingTests(unittest.TestCase):
         self.server.server_close()
 
     def test_only_public_application_assets_are_served(self):
-        for path in ('/', '/app.js', '/style.css'):
+        for path in ('/', '/app.js', '/style.css', '/youtube-studio.js'):
             with urllib.request.urlopen(self.url + path) as response:
                 self.assertEqual(response.status, 200)
         for path in ('/.git/config', '/server.py', '/.env', '/../server.py', '/public/speech_accuracy_check.json'):
@@ -39,7 +39,8 @@ class PublicHostingTests(unittest.TestCase):
                 json.dump({'words': [{'word':'Hello','start':0,'end':1}]}, f)
             manager = RenderJobs(lambda payload: output)
             with patch('server.EXPORT_JOBS', manager):
-                payload = {'url':'https://www.youtube.com/watch?v=dNIef2fGLQY', 'start':0,'duration':2}
+                payload = {'url':'https://www.youtube.com/watch?v=dNIef2fGLQY', 'start':0,'duration':2,
+                           'title':'My_edited_clip'}
                 request = urllib.request.Request(self.url+'/api/exports', data=json.dumps(payload).encode(), headers={'Content-Type':'application/json'})
                 with urllib.request.urlopen(request) as response:
                     self.assertEqual(response.status, 202)
@@ -50,6 +51,7 @@ class PublicHostingTests(unittest.TestCase):
                 with urllib.request.urlopen(self.url+'/api/exports/'+job['id']+'/download') as response:
                     self.assertEqual(response.read(), b'test-mp4')
                     self.assertEqual(response.headers['Content-Type'], 'video/mp4')
+                    self.assertEqual(response.headers['Content-Disposition'], 'attachment; filename="My_edited_clip.mp4"')
                 with urllib.request.urlopen(self.url+'/api/exports/'+job['id']+'/captions') as response:
                     self.assertEqual(json.load(response)['words'][0]['word'], 'Hello')
 

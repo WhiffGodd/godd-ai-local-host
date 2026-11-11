@@ -235,13 +235,13 @@ function displayStudio(video, clips) {
       card.onclick = () => selectClip(clip.id);
       card.innerHTML = `
         <div class="clip-thumb-wrap">
-          ${thumbUrl ? `<img src="${thumbUrl}" alt="" loading="lazy">` : ''}
-          <span class="clip-score-pill">🔥 ${clip.virality_score}</span>
-          <span class="clip-dur-pill">⏱ ${clip.duration}</span>
+          ${thumbUrl ? `<img src="${escHtml(thumbUrl)}" alt="" loading="lazy">` : ''}
+          <span class="clip-score-pill">🔥 ${escHtml(clip.virality_score)}</span>
+          <span class="clip-dur-pill">⏱ ${escHtml(clip.duration)}</span>
         </div>
         <div class="clip-info">
-          <div class="clip-info-title">${clip.title}</div>
-          <div class="clip-info-tags">${(clip.tags||[]).map(t=>`<span class="clip-tag">${t}</span>`).join('')}</div>
+          <div class="clip-info-title">${escHtml(clip.title)}</div>
+          <div class="clip-info-tags">${(clip.tags||[]).map(t=>`<span class="clip-tag">${escHtml(t)}</span>`).join('')}</div>
         </div>`;
       container.appendChild(card);
     });
@@ -293,6 +293,7 @@ function selectClip(clipId) {
   if (durLbl) durLbl.textContent = `${Math.round(clipDur)}s`;
   const tBox = document.getElementById('transcriptBox');
   if (tBox) tBox.textContent = clip.full_text || '';
+  updateYoutubeClip(clip);
 
   // Load YouTube player
   loadYTPlayer(activeVideoId, clip.start, clip.end);
@@ -755,7 +756,7 @@ function renderSubtitles(curOffset) {
 }
 
 function escHtml(s) {
-  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function setStyle(name) {
@@ -915,8 +916,7 @@ async function downloadClip() {
   const startSec = activeClip.start;
   const durSec   = activeClip.duration_sec || Math.round(activeClip.end - activeClip.start);
   const backend  = getBackend();
-  const clipTitle = activeClip.title || `clip_${Math.round(startSec)}s`;
-  const cleanTitle = clipTitle.replace(/[^\w\s-]/g, '').trim().replace(/[-\s]+/g, '_') || `clip_${Math.round(startSec)}s`;
+  const clipTitle = clipExportTitle(activeClip);
   const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'source')}`;
 
   // 1. Show modal with immediate direct download link ready
@@ -961,13 +961,13 @@ async function downloadClip() {
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = `${cleanTitle}.mp4`;
+        a.download = `${clipTitle}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
         hideDlProgress();
-        showToast(`✅ Downloaded "${cleanTitle}.mp4"!`);
+        showToast(`✅ Downloaded "${clipTitle}.mp4"!`);
         return;
       }
     }
@@ -998,7 +998,7 @@ function setDlProgress(label, pct, directUrl) {
     const directBtn = document.getElementById('dlDirectLink');
     if (directBtn && directUrl) {
       directBtn.href = directUrl;
-      directBtn.download = `godd_ai_${(activeClip?.title||'clip').replace(/[^a-z0-9]/gi,'_').toLowerCase()}.mp4`;
+      directBtn.download = `${clipExportTitle(activeClip)}.mp4`;
     }
   }
 }

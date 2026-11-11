@@ -3,6 +3,8 @@ import socketserver
 import socket
 import secrets
 from collections import OrderedDict
+from html import escape
+from http.cookies import CookieError, SimpleCookie
 import json
 import urllib.parse
 import os
@@ -15,6 +17,9 @@ import queue
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
+from api.youtube_upload import (
+    CALLBACK_PATH, SESSION_AGE, YouTubeConnections, YouTubeUploadError, upload_metadata, upload_video,
+)
 from analyzer import (
     extract_youtube_id,
     get_video_metadata,
@@ -34,6 +39,17 @@ PORT = int(os.environ.get("PORT", 8080))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CAPTION_RESULTS = OrderedDict()
 SOURCE_UPLOADS = SourceUploads()
+YOUTUBE = YouTubeConnections()
+YOUTUBE_COOKIE = "godd_youtube"
+
+
+def download_filename(title, start):
+    stem = re.sub(r"[^a-zA-Z0-9_\s-]", "", title if isinstance(title, str) else "")
+    stem = re.sub(r"[-\s]+", "_", stem.strip())[:100]
+    if not stem or re.fullmatch(r"con|prn|aux|nul|com[0-9]|lpt[0-9]", stem, flags=re.I):
+        stem = f"clip_{round(start)}s"
+    return f"{stem}.mp4"
+
 
 def validate_render_payload(payload):
     host = urllib.parse.urlparse(payload.get("url", "")).hostname
@@ -57,7 +73,12 @@ def run_export(payload):
         caption_source=payload.get("caption_source", "auto"), local_source_path=source_path)
 
 
-EXPORT_JOBS = RenderJobs(run_export)
+def publish_to_youtube(owner, payload, path):
+    access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+    return upload_video(path, access, payload["youtube_metadata"])
+
+
+EXPORT_JOBS = RenderJobs(run_export, publisher=publish_to_youtube)
 
 SAMPLE_VIDEOS = [
     {
@@ -218,6 +239,98 @@ SAMPLE_VIDEOS = [
 ]
 
 class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def log_request(self, code="-", size="-"):
+        if urllib.parse.urlsplit(self.path).path == CALLBACK_PATH:
+            self.log_message('"%s %s %s" %s %s', self.command, CALLBACK_PATH, self.request_version, code, size)
+        else:
+            super().log_request(code, size)
+
+    def youtube_session(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+        except CookieError:
+            return None
+        return cookie[YOUTUBE_COOKIE].value if YOUTUBE_COOKIE in cookie else None
+
+    def youtube_cookie(self, session_id="", max_age=SESSION_AGE):
+        secure = "; Secure" if YOUTUBE.origin.startswith("https:") else ""
+        return f"{YOUTUBE_COOKIE}={session_id}; Path=/api/youtube; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
+
+    def youtube_json(self, status, data, cookie=None):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def youtube_host_matches(self):
+        return YOUTUBE.enabled and self.headers.get("Host") == urllib.parse.urlsplit(YOUTUBE.origin).netloc
+
+    def youtube_callback(self, query):
+        ok = False
+        try:
+            if not self.youtube_host_matches():
+                raise YouTubeUploadError("Open the studio at its configured address before connecting.")
+            YOUTUBE.complete(self.youtube_session(), query.get("state", [""])[0], query.get("code", [""])[0])
+            ok = True
+            message = "YouTube connected. You can close this tab and return to the studio."
+        except YouTubeUploadError as error:
+            message = str(error)
+        self.send_response(200 if ok else 400)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
+        close = "<script>window.close()</script>" if ok else ""
+        self.wfile.write((f"<!doctype html><html lang='en'><meta charset='utf-8'><title>YouTube connection</title>"
+                          f"<p>{escape(message)}</p>{close}</html>").encode())
+
+    def handle_youtube_post(self, path, payload):
+        if not self.youtube_host_matches():
+            self.youtube_json(503, {"error": "YouTube connection is unavailable at this address."})
+            return
+        if self.headers.get("Origin") != YOUTUBE.origin:
+            self.youtube_json(403, {"error": "Open the studio to make this request."})
+            return
+        owner = self.youtube_session()
+        if path == "/api/youtube/connect":
+            try:
+                owner, url = YOUTUBE.begin(owner)
+                self.youtube_json(200, {"url": url}, self.youtube_cookie(owner))
+            except YouTubeUploadError as error:
+                self.youtube_json(429, {"error": str(error)})
+            return
+        if path == "/api/youtube/disconnect":
+            YOUTUBE.disconnect(owner)
+            self.youtube_json(200, {"connected": False}, self.youtube_cookie(max_age=0))
+            return
+        channel = YOUTUBE.channel(owner)
+        if not channel:
+            self.youtube_json(401, {"error": "Connect your YouTube channel first."})
+            return
+        if payload.get("channel_id") != channel["id"]:
+            self.youtube_json(409, {"error": "The connected YouTube channel changed. Review the channel and try again."})
+            return
+        try:
+            request_id = payload.get("request_id", "")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[\w-]{16,80}", request_id, flags=re.ASCII):
+                raise ValueError("Could not identify this upload request. Please try again.")
+            validated = validate_render_payload(payload)
+            if payload.get("upload_id"):
+                SOURCE_UPLOADS.completed_path(payload["upload_id"])
+            validated.update(youtube_metadata=upload_metadata(payload), youtube_channel=channel["id"])
+            job = EXPORT_JOBS.submit(validated, owner=owner, request_id=request_id)
+            self.youtube_json(202, job)
+        except (TypeError, AttributeError):
+            self.youtube_json(400, {"error": "Provide a valid clip and YouTube upload settings."})
+        except ValueError as error:
+            self.youtube_json(400, {"error": str(error)})
+        except queue.Full:
+            self.youtube_json(429, {"error": "The export queue is full. Try again shortly."})
+
     def end_headers(self):
         # Enable CORS and disable aggressive caching for local testing
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -233,6 +346,23 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path == "/api/youtube/status":
+            enabled = self.youtube_host_matches()
+            self.youtube_json(200, {"enabled": enabled,
+                                    "channel": YOUTUBE.channel(self.youtube_session()) if enabled else None})
+            return
+        if path == CALLBACK_PATH:
+            self.youtube_callback(urllib.parse.parse_qs(parsed.query))
+            return
+        if path.startswith("/api/youtube/uploads/"):
+            owner = self.youtube_session()
+            job = EXPORT_JOBS.snapshot(path.rsplit("/", 1)[-1], owner) if owner and self.youtube_host_matches() else None
+            if job:
+                self.youtube_json(200, job)
+            else:
+                self.youtube_json(404, {"error": "This upload has expired or is unavailable."})
+            return
 
         if path in ("/api/status", "/healthz"):
             self.send_response(200)
@@ -319,7 +449,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             if parts[3] == "download":
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp4")
-                self.send_header("Content-Disposition", 'attachment; filename="godd_ai_clip.mp4"')
+                filename = status.get("filename", "godd_ai_clip.mp4")
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
                 self.send_header("Content-Length", str(os.path.getsize(output)))
                 self.send_header("X-Captions-URL", f"/api/exports/{token}/captions")
                 self.end_headers()
@@ -331,7 +462,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         static_assets = {"/": "index.html", "/index.html": "index.html",
-                         "/app.js": "app.js", "/style.css": "style.css"}
+                         "/app.js": "app.js", "/style.css": "style.css",
+                         "/youtube-studio.js": "public/youtube-studio.js"}
         asset = static_assets.get(path)
         if asset is None:
             self.send_error(404, "File not found")
@@ -382,6 +514,10 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             payload = {}
 
+        if path in ("/api/youtube/connect", "/api/youtube/disconnect", "/api/youtube/uploads"):
+            self.handle_youtube_post(path, payload)
+            return
+
         if path == "/api/source-uploads":
             try:
                 token = SOURCE_UPLOADS.create(payload.get("size"))
@@ -399,6 +535,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/exports":
             try:
                 validated = validate_render_payload(payload)
+                validated["filename"] = download_filename(payload.get("title"), validated["start"])
                 if payload.get("upload_id"):
                     SOURCE_UPLOADS.completed_path(payload["upload_id"])
                 job = EXPORT_JOBS.submit(validated)
@@ -562,19 +699,11 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             # Stream the rendered MP4 file directly to the client with clean title filename
             if payload.get("stream", True):
                 file_size = os.path.getsize(rendered_path)
-                raw_title = payload.get("title", "").strip()
-                if raw_title:
-                    clean = re.sub(r'[^\w\s-]', '', raw_title).strip()
-                    clean_name = re.sub(r'[-\s]+', '_', clean).strip('_')[:55]
-                else:
-                    clean_name = ""
-                if not clean_name:
-                    clean_name = f"clip_{int(start_time)}s"
-                download_filename = f"{clean_name}.mp4"
+                filename = download_filename(payload.get("title"), start_time)
 
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp4")
-                self.send_header("Content-Disposition", f'attachment; filename="{download_filename}"')
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
                 self.send_header("Content-Length", str(file_size))
                 if caption_token:
                     self.send_header("X-Captions-URL", f"/api/clip-captions?id={caption_token}")

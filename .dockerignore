@@ -3,9 +3,12 @@ __pycache__
 **/__pycache__
 *.pyc
 .env*
+.venv/
+**/client_secret*.json
 *cookies*.txt
 **/*cookies*.txt
-public/
+public/*
+!public/youtube-studio.js
 tests/
 *.mp4
 **/*.mp4

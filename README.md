@@ -24,17 +24,36 @@
 
 ---
 
-## 🚀 Quick Start
+## Run locally
 
-### 1. Start the Server
+Install Git, Python 3.11 or 3.12, and Node.js 22 or later. Clone the local
+edition, then install the Python dependencies in a virtual environment.
 
-```bash
-python server.py
+```sh
+git clone https://github.com/WhiffGodd/godd-ai-local-host.git
+cd godd-ai-local-host
+python -m venv .venv
 ```
 
-### 2. Open in Browser
+Use `python3 -m venv .venv` if your system uses the `python3` command.
 
-Visit [http://localhost:8080](http://localhost:8080)
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe server.py
+```
+
+On macOS and Linux:
+
+```sh
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python server.py
+```
+
+Open [http://localhost:8080](http://localhost:8080), paste a YouTube link, and
+select a clip to preview and download. CPU rendering works. The first export
+with automatic subtitles downloads the speech model.
 
 ---
 
@@ -68,18 +87,10 @@ restoration. Existing lip-sync errors in the source are not automatically inferr
 
 ## Complete answer boundaries
 
-Clip selection treats 58 seconds as a target and 85 seconds as a soft limit.
-It can extend up to 180 seconds when transcript pauses, conclusions, or a next
-question indicate a stronger ending. It rejects open clauses and question-only
-endings, and keeps tail padding outside the next utterance. Creator chapter
-boundaries and the video end constrain the search. Candidates without a usable
-ending are skipped rather than forced into a duration window.
-
-This uses transcript heuristics, not a semantic model of the complete answer.
-Unpunctuated speech, long multi-part answers, or an unavailable transcript still
-need review. Suggested ranges without a transcript are identified in the UI;
-connection failures no longer silently create placeholder clips. Manual trim
-changes are honored by the downloaded file as well as the preview.
+Clip selection looks for up to five standalone excerpts between 60 and 90
+seconds. When none fit, a clearly bounded exchange can run up to 180 seconds.
+The selector uses transcript and chapter cues to find endings, so preview
+the result before exporting. Manual trims apply to previews and exports.
 
 
 ## YouTube download access
@@ -174,3 +185,40 @@ that uploaded source directly and recognizes its clip audio without contacting
 YouTube. Uploads are identified by random tokens, expire after one hour, and
 are lost if the free service restarts. Only use videos you are allowed to upload.
 This is an alternative source path, not a claim that YouTube's IP block is removed.
+
+## Upload clips to YouTube
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable the
+   **YouTube Data API v3**. Set up the OAuth consent screen and create a **Web
+   application** OAuth client. If the app is in Testing, add the Google account
+   that owns the YouTube channel as a test user.
+2. Add the exact callback URL under **Authorized redirect URIs**. For the local
+   app use `http://localhost:8080/api/youtube/callback`. For Render use
+   `https://YOUR-RENDER-HOST/api/youtube/callback`.
+3. Set these environment variables where the server runs. Keep the client
+   secret in the server environment. The app does not read it from the browser.
+
+   | Variable | Value |
+   | --- | --- |
+   | `YOUTUBE_OAUTH_CLIENT_ID` | Web application's client ID |
+   | `YOUTUBE_OAUTH_CLIENT_SECRET` | Web application's client secret |
+   | `YOUTUBE_OAUTH_REDIRECT_URI` | The exact callback URL from step 2 |
+
+   For local PowerShell, set each variable with `$env:NAME = 'value'` before
+   running `python server.py`. On Render, set the variables in the service's
+   Environment settings and redeploy. Open the studio at the same origin as the
+   callback. For example, a localhost callback requires using `localhost`.
+
+4. Analyze a video and choose a clip. In **Upload to YouTube**, click
+   **Connect YouTube** and select the destination channel in Google's window.
+   Set the audience and visibility, then click **Upload to YouTube**. The app
+   renders the current clip and returns a link to it in YouTube Studio. The
+   YouTube title matches the MP4 filename without the extension. Editing the
+   title in the studio updates both.
+
+Uploads default to Private. The app asks for permission to identify the chosen
+channel and upload videos. Credentials stay in server memory, and connections
+expire after 24 hours. Each browser connects its own channel, and a server
+restart requires reconnecting. **Disconnect** removes the session and requests revocation from
+Google. Access can also be revoked from
+[Google Account connections](https://myaccount.google.com/connections).
