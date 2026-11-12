@@ -22,7 +22,7 @@ class PublicHostingTests(unittest.TestCase):
         self.server.server_close()
 
     def test_only_public_application_assets_are_served(self):
-        for path in ('/', '/app.js', '/style.css', '/youtube-studio.js'):
+        for path in ('/', '/app.js', '/style.css', '/youtube-studio.js', '/privacy.html'):
             with urllib.request.urlopen(self.url + path) as response:
                 self.assertEqual(response.status, 200)
         for path in ('/.git/config', '/server.py', '/.env', '/../server.py', '/public/speech_accuracy_check.json'):
@@ -60,3 +60,16 @@ class PublicHostingTests(unittest.TestCase):
                         {'url':'https://youtu.be/dNIef2fGLQY','duration':10000}):
             with self.assertRaises(ValueError):
                 validate_render_payload(payload)
+
+    def test_two_minute_maximum_applies_to_queued_and_direct_downloads(self):
+        payload = {'url': 'https://youtu.be/dNIef2fGLQY', 'duration': 120}
+        self.assertEqual(validate_render_payload(payload)['duration'], 120)
+        with self.assertRaises(ValueError):
+            validate_render_payload({**payload, 'duration': 120.01})
+        for path in ('/api/exports', '/api/render-clip'):
+            request = urllib.request.Request(
+                self.url + path, data=json.dumps({**payload, 'duration': 120.01}).encode(),
+                headers={'Content-Type': 'application/json'})
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request)
+            self.assertEqual(error.exception.code, 400)

@@ -160,7 +160,7 @@ async function analyzeVideo() {
           document.getElementById('heroSection').style.display = 'block';
           showErrModal(data.transcript_available === false
             ? 'Captions are unavailable for this video. Try a video with captions so the app can find where an answer ends.'
-            : 'No complete speech passage was found within the 3-minute clip limit. Try another video or a source with clearer captions.');
+            : 'No clip with a clear speech boundary was found within 2 minutes. Try another video or a source with clearer captions.', 'analysis');
           return;
         }
         if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
@@ -179,7 +179,7 @@ async function analyzeVideo() {
 
   document.getElementById('processingSection').style.display = 'none';
   document.getElementById('heroSection').style.display = 'block';
-  showErrModal('Could not analyze the video. Check your backend connection and try again.');
+  showErrModal('Could not analyze the video. Check your backend connection and try again.', 'analysis');
 }
 
 let _procInterval = null;
@@ -869,9 +869,17 @@ function syncFacecam(force = false) {
 
 function applyTrim() {
   if (!activeClip) return;
-  const s = parseFloat(document.getElementById('trimStart').value) || 0;
-  const e = parseFloat(document.getElementById('trimEnd').value)   || s + 30;
-  if (e <= s) return;
+  const startInput = document.getElementById('trimStart');
+  const endInput = document.getElementById('trimEnd');
+  const s = startInput.valueAsNumber;
+  const e = endInput.valueAsNumber;
+  const duration = Math.round((e - s) * 100) / 100;
+  if (!Number.isFinite(duration) || s < 0 || duration < 1 || duration > 120) {
+    startInput.value = activeClip.start;
+    endInput.value = activeClip.end;
+    showToast('Choose a clip between 1 second and 2 minutes.');
+    return;
+  }
   activeClip.start = s;
   activeClip.end   = e;
   delete activeClip.facecamPreview;
@@ -914,7 +922,7 @@ async function downloadClip() {
   }
 
   const startSec = activeClip.start;
-  const durSec   = activeClip.duration_sec || Math.round(activeClip.end - activeClip.start);
+  const durSec   = activeClip.end - activeClip.start;
   const backend  = getBackend();
   const clipTitle = clipExportTitle(activeClip);
   const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'source')}`;
@@ -1012,7 +1020,18 @@ function hideDlProgress() {
   }
 }
 
-function showErrModal(msg) {
+function showErrModal(msg, stage = 'download') {
+  const analyzing = stage === 'analysis';
+  document.getElementById('errTitle').textContent = analyzing ? 'Clip Analysis Failed' : 'Download Failed';
+  document.getElementById('errHelp').hidden = analyzing;
+  document.getElementById('errSrt').hidden = analyzing;
+  const retry = document.getElementById('errRetry');
+  retry.textContent = analyzing ? 'Retry Analysis' : 'Retry Download';
+  retry.onclick = () => {
+    closeErrModal();
+    if (analyzing) analyzeVideo();
+    else downloadClip();
+  };
   const d = document.getElementById('errDetail');
   if (d) d.textContent = msg;
   const m = document.getElementById('errModal');

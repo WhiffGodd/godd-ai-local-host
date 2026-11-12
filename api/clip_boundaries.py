@@ -36,6 +36,8 @@ SENTENCE_END = re.compile(r"""([.!?।]+)[\"'”’)]*$""")
 RHETORICAL_QUESTION = ("do you understand", "do you know what i mean", "what do i mean")
 ANSWER_CONTINUATIONS = (*CONTINUATIONS, "i mean", "cuz ", "you know,")
 SHORT_MIN, SHORT_TARGET, SHORT_MAX = 60.0, 75.0, 90.0
+MAX_CLIP_SECONDS = 120.0
+SPEECH_RESTART = re.compile(r"^(?:okay|ok|oh|yo|now|wait|all right|alright|nice|look|here|watch)\b", re.I)
 DEPENDENT_START = re.compile(
     r"^(?:and|but|so|because|then|also|which|that|this|these|those|it|they|he|she"
     r"|yes|no|right|yeah|exactly|like|um|uh|okay|well|to|by|cuz|you know|i mean)\b",
@@ -168,6 +170,9 @@ def short_clip_windows(transcript, video_duration, ranges=()):
 def select_short_clip_windows(transcript, video_duration, ranges=(), limit=5):
     ranked = sorted(short_clip_windows(transcript, video_duration, ranges),
                     key=lambda clip: (-clip[3], abs(clip[1] - clip[0] - SHORT_TARGET)))
+    if not ranked and not any(re.search(r"[.!?।](?:\s|$)", cue["text"]) for cue in transcript):
+        ranked = sorted(pause_clip_windows(transcript, video_duration, ranges),
+                        key=lambda clip: (-clip[3], abs(clip[1] - clip[0] - SHORT_TARGET)))
     selected = []
 
     def add(candidates):
@@ -189,6 +194,37 @@ def select_short_clip_windows(transcript, video_duration, ranges=(), limit=5):
     if ranges:
         selected.sort(key=lambda clip: clip[0])
     return [(start, end, segments) for start, end, segments, _ in selected]
+
+
+def pause_clip_windows(transcript, video_duration, ranges):
+    """Find passages between measured pauses and fresh utterances in plain captions."""
+    cuts = []
+    for index, (cue, following) in enumerate(zip(transcript, transcript[1:])):
+        words = cue.get("words") or []
+        if not words or words[-1].get("end") is None:
+            continue
+        last_word = words[-1]["word"].lower().strip(".,!?:;\"'()[]")
+        if not last_word or last_word in INCOMPLETE_TAIL_WORDS:
+            continue
+        start_next = float(following["start"])
+        end = min(float(cue["end"]), float(words[-1]["end"]))
+        gap = start_next - end
+        if gap < 1.15 or not SPEECH_RESTART.match(following["text"].strip()):
+            continue
+        cuts.append((index + 1, round(end + min(0.18, gap / 2), 2), round(start_next, 2), min(gap, 3)))
+
+    for section_start, section_end in ranges or [(0, video_duration)]:
+        opening_cuts = [cut for cut in cuts if section_start <= cut[2] < section_end]
+        for opening_index, (first, _, start, opening_gap) in enumerate(opening_cuts):
+            for closing_index in range(opening_index + 1, len(opening_cuts)):
+                stop, end, _, closing_gap = opening_cuts[closing_index]
+                duration = round(end - start, 2)
+                if duration > SHORT_MAX or end > section_end:
+                    break
+                if duration < SHORT_MIN:
+                    continue
+                segments = clip_before_question(transcript, first, stop, 0, end)
+                yield start, end, segments, opening_gap + closing_gap
 
 
 def clip_before_question(transcript, start_idx, question_idx, word_idx, end):
@@ -213,7 +249,7 @@ def clip_before_question(transcript, start_idx, question_idx, word_idx, end):
 
 def snap_to_clean_sentence_boundaries(transcript, target_start, min_duration=35.0,
                                       ideal_duration=58.0, max_duration=85.0,
-                                      completion_limit=180.0, boundary_limit=None):
+                                      completion_limit=MAX_CLIP_SECONDS, boundary_limit=None):
     """Find an exchange or a passage with an identifiable ending.
 
     Question-led clips need a follow-up, an explicit transition, or the end
@@ -233,7 +269,7 @@ def snap_to_clean_sentence_boundaries(transcript, target_start, min_duration=35.
             return target_start, target_start, []
         start_idx -= 1
     start = float(transcript[start_idx].get("start", target_start))
-    hard_end = start + completion_limit
+    hard_end = start + min(completion_limit, MAX_CLIP_SECONDS)
     if boundary_limit is not None:
         hard_end = min(hard_end, boundary_limit)
     # Use an actual follow-up as the end of an exchange. A pause inside an

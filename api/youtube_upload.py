@@ -109,6 +109,8 @@ class YouTubeConnections:
                                     headers={"Authorization": f"Bearer {token['access']}"}, timeout=15)
             response.raise_for_status()
             items = response.json()["items"]
+            if not items:
+                raise YouTubeUploadError("This Google account has no YouTube channel. Choose an account with a channel.")
             if len(items) != 1:
                 raise YouTubeUploadError("Select a single YouTube channel during Google sign-in.")
             channel = {"id": items[0]["id"], "title": items[0]["snippet"]["title"]}

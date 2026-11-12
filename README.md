@@ -88,7 +88,7 @@ restoration. Existing lip-sync errors in the source are not automatically inferr
 ## Complete answer boundaries
 
 Clip selection looks for up to five standalone excerpts between 60 and 90
-seconds. When none fit, a clearly bounded exchange can run up to 180 seconds.
+seconds. When none fit, a clearly bounded exchange can run up to 2 minutes.
 The selector uses transcript and chapter cues to find endings, so preview
 the result before exporting. Manual trims apply to previews and exports.
 
@@ -210,7 +210,8 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
    callback. For example, a localhost callback requires using `localhost`.
 
 4. Analyze a video and choose a clip. In **Upload to YouTube**, click
-   **Connect YouTube** and select the destination channel in Google's window.
+   **Connect YouTube** and select the destination channel on Google's sign-in
+   page. The studio reopens the selected clip after sign-in.
    Set the audience and visibility, then click **Upload to YouTube**. The app
    renders the current clip and returns a link to it in YouTube Studio. The
    YouTube title matches the MP4 filename without the extension. Editing the
@@ -222,3 +223,8 @@ expire after 24 hours. Each browser connects its own channel, and a server
 restart requires reconnecting. **Disconnect** removes the session and requests revocation from
 Google. Access can also be revoked from
 [Google Account connections](https://myaccount.google.com/connections).
+
+For public sign-in, configure a production web client with your site's HTTPS
+callback and complete Google's [OAuth verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
+Set the credentials on that server once. Visitors connect through Google with
+their own accounts. A project in Testing allows only its listed test users.

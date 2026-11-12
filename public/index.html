@@ -32,7 +32,7 @@
   <div class="hero-wrap">
     <div class="hero-badge">⚡ Free Alternative to Klap &amp; Opus Clip</div>
     <h1 class="hero-h1">Turn long videos into<br><span class="hero-grad">viral content Shorts &amp; Reels</span></h1>
-    <p class="hero-sub">Paste any YouTube link. AI finds the most meaningful moments, creates compelling titles, and renders 9:16 vertical clips ready to download in one click.</p>
+    <p class="hero-sub">Find moments in YouTube videos, then render vertical clips to download or upload to your connected YouTube channel. <a href="/privacy.html" class="privacy-link">Privacy policy</a></p>
 
     <div class="url-card">
       <div class="url-row">
@@ -234,6 +234,7 @@
         <div class="ctrl-box-title">Upload to YouTube</div>
         <p id="youtubeStatus" role="status">Checking YouTube connection…</p>
         <button class="layout-btn" type="button" id="youtubeConnect" disabled>Connect YouTube</button>
+        <a id="youtubeSetup" href="https://github.com/WhiffGodd/godd-ai-local-host#upload-clips-to-youtube" target="_blank" rel="noopener noreferrer" hidden>Google sign-in setup instructions</a>
         <button class="layout-btn" type="button" id="youtubeDisconnect" hidden>Disconnect</button>
         <form id="youtubeForm" hidden>
           <label>Title <input id="youtubeTitle" maxlength="100" required></label>
@@ -255,7 +256,7 @@
           <button class="btn-download" type="submit" id="youtubeUpload">Upload to YouTube</button>
         </form>
         <p id="youtubeResult" role="status"></p>
-        <p class="youtube-privacy">Channel access ends when you disconnect or the server restarts. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a> · <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms</a></p>
+        <p class="youtube-privacy">Channel access ends when you disconnect or the server restarts. <a href="/privacy.html" target="_blank" rel="noopener noreferrer">Godd AI privacy policy</a></p>
       </div>
 
       <!-- Direct Download Box -->
@@ -304,12 +305,12 @@
 <div class="modal-bg" id="errModal" style="display:none" onclick="if(event.target===this)closeErrModal()">
   <div class="modal-card">
     <div class="modal-icon">⚠️</div>
-    <h3>Download Failed</h3>
+    <h3 id="errTitle">Download Failed</h3>
     <p class="modal-p err-detail" id="errDetail"></p>
-    <p class="modal-p" style="color:#94A3B8;font-size:13px;">The Render free server sleeps after 15 min idle. Click Retry — the wake-up ping already happened, it should work now.</p>
+    <p id="errHelp" class="modal-p" style="color:#94A3B8;font-size:13px;">Try downloading again once the server is ready.</p>
     <div class="modal-actions">
-      <button class="btn-modal-primary" onclick="closeErrModal();downloadClip()">🔄 Retry Download</button>
-      <button class="btn-modal-sec" onclick="closeErrModal();downloadSRT()">📄 Get SRT Instead</button>
+      <button class="btn-modal-primary" id="errRetry">Retry Download</button>
+      <button class="btn-modal-sec" id="errSrt" onclick="closeErrModal();downloadSRT()">Get SRT Instead</button>
       <button class="btn-modal-sec" onclick="closeErrModal()">Close</button>
     </div>
   </div>

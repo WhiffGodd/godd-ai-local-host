@@ -2,6 +2,7 @@
 const youtubeUI = {
   status: document.getElementById('youtubeStatus'),
   connect: document.getElementById('youtubeConnect'),
+  setup: document.getElementById('youtubeSetup'),
   disconnect: document.getElementById('youtubeDisconnect'),
   form: document.getElementById('youtubeForm'),
   title: document.getElementById('youtubeTitle'),
@@ -12,7 +13,9 @@ const youtubeUI = {
   result: document.getElementById('youtubeResult')
 };
 const youtubeJobKey = 'godd_youtube_upload_job';
+const youtubeDraftKey = 'godd_youtube_connect_draft';
 let youtubeChannel;
+let youtubeConfigured = true;
 let youtubeBusy = false;
 let youtubeJob = sessionStorage.getItem(youtubeJobKey);
 
@@ -31,7 +34,8 @@ async function youtubeRequest(path, body) {
 }
 
 function youtubeControls() {
-  youtubeUI.connect.hidden = !!youtubeChannel;
+  youtubeUI.connect.hidden = !!youtubeChannel || !youtubeConfigured;
+  youtubeUI.setup.hidden = youtubeConfigured;
   youtubeUI.disconnect.hidden = !youtubeChannel;
   youtubeUI.disconnect.disabled = youtubeBusy;
   youtubeUI.form.hidden = !youtubeChannel;
@@ -48,9 +52,11 @@ async function refreshYoutubeConnection() {
   try {
     const state = await youtubeRequest('status');
     youtubeChannel = state.channel;
-    youtubeUI.connect.disabled = !state.enabled;
+    youtubeConfigured = state.enabled === true;
+    youtubeUI.connect.disabled = !youtubeConfigured;
     youtubeUI.status.textContent = youtubeChannel ? `Connected to ${youtubeChannel.title}` :
-      state.enabled ? 'Connect your channel to upload this clip.' : 'YouTube sign-in needs setup on this server.';
+      youtubeConfigured ? 'Connect your channel to upload this clip.' :
+        'This server needs Google OAuth credentials before you can connect a YouTube channel.';
     youtubeControls();
     if (youtubeChannel && youtubeJob && !youtubeBusy) await monitorYoutubeUpload();
   } catch (_) {
@@ -83,32 +89,46 @@ youtubeUI.title.addEventListener('blur', () => {
 });
 
 youtubeUI.connect.addEventListener('click', async () => {
-  const popup = window.open('', 'goddYoutubeConnect', 'popup,width=520,height=680');
-  if (!popup) {
-    youtubeUI.status.textContent = 'Allow pop-ups to sign in to YouTube.';
-    return;
-  }
   youtubeUI.connect.disabled = true;
   try {
+    sessionStorage.setItem(youtubeDraftKey, JSON.stringify({
+      video: currentVideoData, clips: currentClips, clipId: activeClip?.id,
+      layout: currentLayout, style: currentStyle,
+      description: youtubeUI.description.value, privacy: youtubeUI.privacy.value,
+      audience: youtubeUI.audience.value
+    }));
     const {url} = await youtubeRequest('connect', {});
-    popup.location.replace(url);
-    youtubeUI.status.textContent = 'Choose your YouTube channel in the Google sign-in window.';
-    for (let attempt = 0; attempt < 120; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const state = await youtubeRequest('status');
-      if (state.channel) {
-        await refreshYoutubeConnection();
-        return;
-      }
-    }
-    youtubeUI.status.textContent = 'Sign-in is still pending. Refresh after connecting or try again.';
+    window.location.assign(url);
   } catch (error) {
-    popup.close();
+    sessionStorage.removeItem(youtubeDraftKey);
     youtubeUI.status.textContent = error.message;
-  } finally {
     youtubeUI.connect.disabled = false;
   }
 });
+
+function restoreYoutubeDraft() {
+  const url = new URL(window.location.href);
+  if (!['connected', 'retry'].includes(url.searchParams.get('youtube'))) return;
+  url.searchParams.delete('youtube');
+  window.history.replaceState(null, '', url);
+  const saved = sessionStorage.getItem(youtubeDraftKey);
+  sessionStorage.removeItem(youtubeDraftKey);
+  if (!saved) return;
+  let draft;
+  try {
+    draft = JSON.parse(saved);
+  } catch (_) {
+    return;
+  }
+  if (!draft?.video || !Array.isArray(draft.clips) || !draft.clips.length) return;
+  displayStudio(draft.video, draft.clips);
+  if (draft.clipId !== activeClip?.id) selectClip(draft.clipId);
+  setLayout(draft.layout);
+  setStyle(draft.style);
+  youtubeUI.description.value = draft.description;
+  youtubeUI.privacy.value = draft.privacy;
+  youtubeUI.audience.value = draft.audience;
+}
 
 youtubeUI.disconnect.addEventListener('click', async () => {
   try {
@@ -243,4 +263,5 @@ youtubeUI.upload.addEventListener('click', event => {
   event.preventDefault();
   startYoutubeUpload();
 });
+restoreYoutubeDraft();
 refreshYoutubeConnection();

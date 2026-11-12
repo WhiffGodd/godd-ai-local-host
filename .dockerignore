@@ -9,6 +9,7 @@ __pycache__
 **/*cookies*.txt
 public/*
 !public/youtube-studio.js
+!public/privacy.html
 tests/
 *.mp4
 **/*.mp4

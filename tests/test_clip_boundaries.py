@@ -31,23 +31,23 @@ class ClipBoundaryTests(unittest.TestCase):
     def test_follow_up_beats_mid_answer_pause_and_trims_rolling_caption(self):
         t = [seg(0, 8, "How do you earn people's trust?"),
              seg(8, 55, "The first step is to listen carefully."),
-             seg(58, 106, "Give people space to finish before sharing your perspective."),
-             seg(106, 143, "I mean, do this consistently, especially in difficult conversations."),
-             {**seg(140, 147, "Trust builds over time. How do you"),
+             seg(48, 83, "Give people space to finish before sharing your perspective."),
+             seg(83, 113, "I mean, do this consistently, especially in difficult conversations."),
+             {**seg(110, 117, "Trust builds over time. How do you"),
               "words": [{"word": word, "start": start} for word, start in zip(
                   "Trust builds over time. How do you".split(),
-                  (140, 140.5, 141, 141.5, 142.25, 143, 144))]},
-             seg(145, 149, "repair it after a mistake?"),
-             seg(150, 170, "Start by acknowledging what went wrong.")]
+                  (110, 110.5, 111, 111.5, 112.25, 113, 114))]},
+             seg(115, 119, "repair it after a mistake?"),
+             seg(120, 140, "Start by acknowledging what went wrong.")]
         for analyze in (analyze_virality_and_cut_clips, hosted_analyze):
             with self.subTest(analyze=analyze.__module__):
-                clip = analyze(t, 170, "Trust")[0]
-                self.assertEqual(clip["end"], 142.25)
+                clip = analyze(t, 140, "Trust")[0]
+                self.assertEqual(clip["end"], 112.25)
                 self.assertTrue(clip["full_text"].endswith("Trust builds over time."))
         chapter = [{"start_time": 0, "title": "Trust"},
-                   {"start_time": 150, "title": "Repair"}]
-        clip = analyze_virality_and_cut_clips(t, 170, "Trust", chapter)[0]
-        self.assertEqual(clip["end"], 142.25)
+                   {"start_time": 120, "title": "Repair"}]
+        clip = analyze_virality_and_cut_clips(t, 140, "Trust", chapter)[0]
+        self.assertEqual(clip["end"], 112.25)
         self.assertNotIn("How do you", clip["video_subtitles"][-1]["text"])
         self.assertLessEqual(clip["subtitles"][-1]["end"], clip["end"])
 
@@ -56,10 +56,10 @@ class ClipBoundaryTests(unittest.TestCase):
              seg(8, 48, "Start by listening carefully."),
              seg(50, 58, "What is the most common mistake?"),
              seg(58, 90, "I mean, we often jump in before the other person can finish."),
-             seg(90, 120, "It takes practice to give people room to speak."),
-             seg(122, 128, "How can you rebuild trust after a mistake?"),
+             seg(90, 118, "It takes practice to give people room to speak."),
+             seg(120, 128, "How can you rebuild trust after a mistake?"),
              seg(128, 140, "Start with an honest apology.")]
-        self.assertEqual(snap(t, 0)[1], 122)
+        self.assertEqual(snap(t, 0)[1], 120)
         self.assertEqual(snap(t, 0, boundary_limit=110)[2], [])
 
     def test_no_captions_does_not_propose_unverified_clips(self):
@@ -118,9 +118,20 @@ class ClipBoundaryTests(unittest.TestCase):
         self.assertLessEqual(snap(t, 0, boundary_limit=100)[1], 100)
 
     def test_no_forced_cut_when_completion_exceeds_hard_limit(self):
-        t = [seg(0, 80, "The explanation continues because"), seg(80, 200, "the details take a long time.")]
-        self.assertEqual(snap(t, 0)[2], [])
-        self.assertEqual(analyze_virality_and_cut_clips(t, 200, "Example"), [])
+        t = [seg(0, 80, "The explanation continues because"), seg(80, 130, "the details take a long time.")]
+        self.assertEqual(snap(t, 0, completion_limit=180)[2], [])
+        self.assertEqual(analyze_virality_and_cut_clips(t, 130, "Example"), [])
+
+    def test_plain_captions_find_clips_between_measured_restarts(self):
+        t = [{**seg(0, 8, "we won the first round"), "words": [{"word": "round", "end": 4}]},
+             seg(6, 40, "okay lets set up for a retake"),
+             {**seg(40, 78, "they held the site and won the round"), "words": [{"word": "round", "end": 73}]},
+             seg(76, 90, "all right lets check the score")]
+        for analyze in (analyze_virality_and_cut_clips, hosted_analyze):
+            with self.subTest(analyze=analyze.__module__):
+                clip = analyze(t, 90, "Match recap")[0]
+                self.assertEqual((clip["start"], clip["end"]), (6, 73.18))
+                self.assertTrue(clip["full_text"].endswith("won the round"))
 
     def test_local_and_hosted_analysis_accept_long_complete_answer(self):
         t = [seg(0, 8, "How does the system work?"), seg(8, 40, "First prepare the input."),

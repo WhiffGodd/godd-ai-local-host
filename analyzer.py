@@ -472,7 +472,7 @@ def estimate_word_weight(word: str) -> float:
         weight += 0.40  # Clause breathing pause
     return max(0.5, weight)
 
-from api.clip_boundaries import select_short_clip_windows, snap_to_clean_sentence_boundaries
+from api.clip_boundaries import MAX_CLIP_SECONDS, select_short_clip_windows, snap_to_clean_sentence_boundaries
 
 def generate_word_subtitles_from_segments(segments: list, clip_start: float, clip_end: float) -> list:
     """
@@ -692,7 +692,7 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     seen_starts = set()
     for c_start, c_end, c_segs in windows:
         dur = round(c_end - c_start, 1)
-        if not c_segs or dur < min_clip_length or dur > 180.0:
+        if not c_segs or dur < min_clip_length or dur > MAX_CLIP_SECONDS:
             continue
             
         # Avoid duplicate snapped starts

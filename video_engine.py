@@ -8,6 +8,7 @@ import threading
 import json
 import gc
 from caption_styles import generate_ass
+from api.clip_boundaries import MAX_CLIP_SECONDS
 from api.youtube_access import youtube_options, extract_youtube_info
 
 _WHISPER_LOCK = threading.Lock()
@@ -323,8 +324,9 @@ def download_and_clip_video(
     - 'blur': Blurred ambient background (1080x1920) with crisp centered 16:9 video
     - 'fit': Fitted 16:9 on 1080x1920 canvas with clean letterbox
     """
-    if not math.isfinite(start_time) or not math.isfinite(duration) or start_time < 0 or duration <= 0:
-        raise ValueError("Clip start must be non-negative and duration must be positive")
+    if (not math.isfinite(start_time) or not math.isfinite(duration) or start_time < 0
+            or not 0 < round(duration, 6) <= MAX_CLIP_SECONDS):
+        raise ValueError("Clip start must be non-negative and duration must be at most 2 minutes.")
 
     owns_output = output_path is None
     if not output_path:

@@ -76,8 +76,9 @@ class YouTubeUploadTests(unittest.TestCase):
                 conn.request(method, path, json.dumps(body) if body is not None else None, headers)
                 resp = conn.getresponse()
                 content = resp.read()
-                data = json.loads(content) if resp.getheader("Content-Type").startswith("application/json") else content
-                return resp.status, data, resp.getheader("Set-Cookie")
+                content_type = resp.getheader("Content-Type", "")
+                data = json.loads(content) if content_type.startswith("application/json") else content
+                return resp.status, data, resp.getheader("Set-Cookie") or resp.getheader("Location")
             finally:
                 conn.close()
 
@@ -104,7 +105,7 @@ class YouTubeUploadTests(unittest.TestCase):
                 state = parse_qs(urlsplit(link["url"]).query)["state"][0]
                 callback = youtube.CALLBACK_PATH + f"?code=fake&state={state}"
                 self.assertEqual(request("GET", callback)[0], 400)
-                self.assertEqual(request("GET", callback, cookie=cookie)[0], 200)
+                self.assertEqual(request("GET", callback, cookie=cookie), (303, b"", "/?youtube=connected"))
                 self.assertEqual(request("GET", callback, cookie=cookie)[0], 400)
                 self.assertEqual(request("GET", "/api/youtube/status")[1]["channel"], None)
                 self.assertEqual(request("GET", "/api/youtube/status", cookie=cookie)[1]["channel"]["id"], "test-channel")

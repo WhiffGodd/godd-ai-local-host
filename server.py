@@ -17,6 +17,7 @@ import queue
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
+from api.clip_boundaries import MAX_CLIP_SECONDS
 from api.youtube_upload import (
     CALLBACK_PATH, SESSION_AGE, YouTubeConnections, YouTubeUploadError, upload_metadata, upload_video,
 )
@@ -59,8 +60,8 @@ def validate_render_payload(payload):
         raise ValueError("Please provide a valid HTTPS YouTube video URL.")
     start = float(payload.get("start", 0))
     duration = float(payload.get("duration", 30))
-    if not math.isfinite(start) or start < 0 or not math.isfinite(duration) or not 1 <= duration <= 180:
-        raise ValueError("Choose a clip between 1 and 180 seconds with a valid start time.")
+    if not math.isfinite(start) or start < 0 or not math.isfinite(duration) or not 1 <= round(duration, 6) <= MAX_CLIP_SECONDS:
+        raise ValueError("Choose a clip between 1 second and 2 minutes with a valid start time.")
     return {**payload, "start": start, "duration": duration}
 
 
@@ -270,23 +271,25 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         return YOUTUBE.enabled and self.headers.get("Host") == urllib.parse.urlsplit(YOUTUBE.origin).netloc
 
     def youtube_callback(self, query):
-        ok = False
         try:
             if not self.youtube_host_matches():
                 raise YouTubeUploadError("Open the studio at its configured address before connecting.")
             YOUTUBE.complete(self.youtube_session(), query.get("state", [""])[0], query.get("code", [""])[0])
-            ok = True
-            message = "YouTube connected. You can close this tab and return to the studio."
         except YouTubeUploadError as error:
-            message = str(error)
-        self.send_response(200 if ok else 400)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_response(400)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write((f"<!doctype html><html lang='en'><meta charset='utf-8'><title>YouTube connection</title>"
+                              f"<p>{escape(str(error))}</p><a href='/?youtube=retry'>Return to the clip studio</a>"
+                              "</html>").encode())
+            return
+        self.send_response(303)
+        self.send_header("Location", "/?youtube=connected")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
-        close = "<script>window.close()</script>" if ok else ""
-        self.wfile.write((f"<!doctype html><html lang='en'><meta charset='utf-8'><title>YouTube connection</title>"
-                          f"<p>{escape(message)}</p>{close}</html>").encode())
 
     def handle_youtube_post(self, path, payload):
         if not self.youtube_host_matches():
@@ -401,8 +404,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/render-clip":
             query = urllib.parse.parse_qs(parsed.query)
             url = query.get("url", [""])[0]
-            start_time = float(query.get("start", [0])[0])
-            duration = float(query.get("duration", [30])[0])
+            start_time = query.get("start", [0])[0]
+            duration = query.get("duration", [30])[0]
             layout = query.get("layout", ["split"])[0]
             title = query.get("title", [""])[0]
             payload = {
@@ -463,7 +466,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         static_assets = {"/": "index.html", "/index.html": "index.html",
                          "/app.js": "app.js", "/style.css": "style.css",
-                         "/youtube-studio.js": "public/youtube-studio.js"}
+                         "/youtube-studio.js": "public/youtube-studio.js",
+                         "/privacy.html": "public/privacy.html"}
         asset = static_assets.get(path)
         if asset is None:
             self.send_error(404, "File not found")
@@ -544,7 +548,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(job).encode())
             except (ValueError, TypeError):
-                self.send_error(400, "Provide a valid YouTube URL and a clip of 1-180 seconds")
+                self.send_error(400, "Provide a valid YouTube URL and a clip of 1 second to 2 minutes")
             except queue.Full:
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json")
@@ -566,7 +570,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 clip = validate_render_payload(payload)
             except (ValueError, TypeError):
-                self.send_error(400, "Provide a valid YouTube URL and a clip of 1-180 seconds")
+                self.send_error(400, "Provide a valid YouTube URL and a clip of 1 second to 2 minutes")
                 return
             try:
                 region = preview_facecam(clip["url"], clip["start"], clip["duration"])
@@ -662,12 +666,17 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(srt_content.encode("utf-8"))
 
     def handle_render_clip(self, payload: dict):
+        try:
+            payload = validate_render_payload(payload)
+        except (ValueError, TypeError, AttributeError):
+            self.send_error(400, "Provide a valid YouTube URL and a clip of 1 second to 2 minutes")
+            return
         if os.environ.get("RENDER"):
             self.send_error(410, "Use the background export endpoint /api/exports")
             return
         url = payload.get("url", "")
-        start_time = float(payload.get("start", 0))
-        duration = float(payload.get("duration", 30))
+        start_time = payload["start"]
+        duration = payload["duration"]
         layout = payload.get("layout", "split")
         subtitles = payload.get("subtitles", [])
         subtitle_style = payload.get("subtitle_style", "source")
