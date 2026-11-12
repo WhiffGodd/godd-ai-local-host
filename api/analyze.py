@@ -7,6 +7,11 @@ import os
 # Ensure local imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
+    from .clip_metadata import add_clip_metadata
+except ImportError:
+    from clip_metadata import add_clip_metadata
+
+try:
     from analyzer import (
         extract_youtube_id,
         get_video_metadata,
@@ -62,7 +67,8 @@ class handler(BaseHTTPRequestHandler):
                     "duration_formatted": f"{int(meta.get('duration', 600) // 60)}:{int(meta.get('duration', 600) % 60):02d}",
                     "view_count": meta.get("view_count", 250000)
                 },
-                "clips": clips,
+                "clips": add_clip_metadata(clips, meta.get("title", ""), meta.get("author", ""),
+                                           f"https://www.youtube.com/watch?v={video_id}"),
                 "transcript_available": bool(transcript)
             }
 

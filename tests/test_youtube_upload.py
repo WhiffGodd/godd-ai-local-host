@@ -23,6 +23,38 @@ def response(code, data=None, headers=None):
 
 
 class YouTubeUploadTests(unittest.TestCase):
+    def test_short_thumbnail_waits_for_processing_and_targets_uploaded_video(self):
+        def processing(state):
+            return response(200, {"items": [{"processingDetails": {"processingStatus": state}}]})
+
+        accepted = response(200)
+        accepted.ok = True
+        with patch.object(youtube.requests, "get", side_effect=[
+            processing("processing"), processing("succeeded"),
+        ]) as status, patch.object(youtube.requests, "post", return_value=accepted) as upload, patch.object(
+            youtube.time, "sleep"
+        ):
+            self.assertIsNone(youtube.set_video_thumbnail("abcdefghijk", "token", b"jpeg"))
+        self.assertEqual(status.call_count, 2)
+        self.assertEqual(upload.call_args.kwargs["params"], {"videoId": "abcdefghijk", "uploadType": "media"})
+        self.assertEqual(upload.call_args.kwargs["data"], b"jpeg")
+
+    def test_thumbnail_failure_does_not_fail_or_repeat_the_video_upload(self):
+        warning = "Channel does not allow custom thumbnails."
+        publisher = Mock(return_value={"video_id": "abcdefghijk", "privacy": "private"})
+        thumbnailer = Mock(return_value=warning)
+        jobs = RenderJobs(lambda payload: "rendered.mp4", publisher=publisher, thumbnailer=thumbnailer)
+        job = jobs.submit({"thumbnail_time": 10}, owner="browser")
+        jobs.pending.join()
+        jobs.thumbnails.join()
+        result = jobs.snapshot(job["id"], "browser")
+        self.assertEqual(result["state"], "complete")
+        self.assertEqual(result["video_id"], "abcdefghijk")
+        self.assertFalse(result["thumbnail_applied"])
+        self.assertEqual(result["thumbnail_warning"], warning)
+        publisher.assert_called_once()
+        thumbnailer.assert_called_once()
+
     def test_resumes_same_session_after_a_lost_response(self):
         metadata = youtube.upload_metadata({"title": "A clip", "made_for_kids": False})
         self.assertEqual(metadata["status"]["privacyStatus"], "private")

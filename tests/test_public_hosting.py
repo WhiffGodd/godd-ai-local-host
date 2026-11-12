@@ -30,6 +30,16 @@ class PublicHostingTests(unittest.TestCase):
                 urllib.request.urlopen(self.url + path)
             self.assertEqual(error.exception.code, 404)
 
+    def test_thumbnail_endpoint_returns_a_jpeg_at_the_requested_time(self):
+        data = json.dumps({"url": "https://youtu.be/abcdefghijk", "timestamp": 235.5}).encode()
+        request = urllib.request.Request(self.url + "/api/thumbnail", data=data,
+                                         headers={"Content-Type": "application/json"})
+        with patch("server.capture_thumbnail", return_value=b"\xff\xd8test") as capture:
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.headers["Content-Type"], "image/jpeg")
+                self.assertEqual(response.read(), b"\xff\xd8test")
+        capture.assert_called_once_with("https://youtu.be/abcdefghijk", 235.5, None)
+
     def test_export_job_returns_quickly_and_downloads_finished_mp4(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = os.path.join(tmp, 'clip.mp4')

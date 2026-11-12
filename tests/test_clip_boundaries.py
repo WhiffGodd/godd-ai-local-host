@@ -1,6 +1,7 @@
 import unittest
 from api.clip_boundaries import snap_to_clean_sentence_boundaries as snap
 from api.clip_boundaries import select_short_clip_windows
+from api.clip_metadata import add_clip_metadata
 from analyzer import analyze_virality_and_cut_clips
 from api.analyzer import analyze_virality_and_cut_clips as hosted_analyze
 
@@ -10,6 +11,24 @@ def seg(start, end, text):
 
 
 class ClipBoundaryTests(unittest.TestCase):
+    def test_clip_metadata_uses_source_context_and_a_time_in_the_clip(self):
+        clip = {"start": 20, "end": 95, "title": "Late-round clutch 🔥",
+                "full_text": "He holds the site until the other players arrive."}
+        add_clip_metadata([clip], "Valorant ranked gameplay", "Example creator",
+                          "https://www.youtube.com/watch?v=abcdefghijk")
+        self.assertEqual(clip["hashtags"], ["#Valorant", "#Gaming", "#Shorts"])
+        self.assertIn("Example creator", clip["description"])
+        self.assertIn("https://www.youtube.com/watch?v=abcdefghijk", clip["description"])
+        self.assertIn("#Valorant", clip["description"])
+        self.assertGreater(clip["thumbnail_time"], clip["start"])
+        self.assertLess(clip["thumbnail_time"], clip["end"])
+
+    def test_gaming_banter_does_not_add_unrelated_hashtags(self):
+        clip = {"start": 20, "end": 95, "title": "Game two: Fracture conclusion",
+                "full_text": "I don't think we're cooking okay we need to be walking up with our team"}
+        add_clip_metadata([clip], "This INDIAN SILVER Says He Deserves ASCENDANT")
+        self.assertEqual(clip["hashtags"], ["#Valorant", "#Gaming", "#Shorts"])
+
     def test_extend_past_85_to_finish_answer(self):
         transcript = [seg(0, 8, "How do you make this work?"),
                       seg(8, 40, "Start with the basic system."),

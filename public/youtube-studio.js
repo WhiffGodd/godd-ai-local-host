@@ -7,6 +7,10 @@ const youtubeUI = {
   form: document.getElementById('youtubeForm'),
   title: document.getElementById('youtubeTitle'),
   description: document.getElementById('youtubeDescription'),
+  thumbnail: document.getElementById('clipThumbnail'),
+  thumbnailTime: document.getElementById('thumbnailTime'),
+  thumbnailStatus: document.getElementById('thumbnailStatus'),
+  downloadThumbnail: document.getElementById('downloadThumbnail'),
   privacy: document.getElementById('youtubePrivacy'),
   audience: document.getElementById('youtubeAudience'),
   upload: document.getElementById('youtubeUpload'),
@@ -18,6 +22,9 @@ let youtubeChannel;
 let youtubeConfigured = true;
 let youtubeBusy = false;
 let youtubeJob = sessionStorage.getItem(youtubeJobKey);
+const clipThumbnails = new WeakMap();
+let thumbnailRequest;
+let thumbnailObjectUrl;
 
 async function youtubeRequest(path, body) {
   const options = body === undefined ? {} : {
@@ -76,9 +83,91 @@ function clipExportTitle(clip) {
 
 function updateYoutubeClip(clip) {
   youtubeUI.title.value = clipExportTitle(clip);
-  youtubeUI.description.value = '';
+  youtubeUI.description.value = clip.exportDescription ?? clip.description ??
+    `${clip.title || 'Video highlight'}\n\n#Shorts`;
   if (!youtubeBusy && !youtubeJob) youtubeUI.result.replaceChildren();
+  youtubeUI.thumbnailTime.value = clip.thumbnail_time ?? Math.round(clip.start * 100) / 100;
+  updateThumbnail(clip, youtubeUI.thumbnailTime.valueAsNumber);
 }
+
+function showThumbnail(image) {
+  if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
+  thumbnailObjectUrl = image ? URL.createObjectURL(image) : null;
+  youtubeUI.thumbnail.hidden = !image;
+  youtubeUI.downloadThumbnail.hidden = !image;
+  if (image) {
+    youtubeUI.thumbnail.src = thumbnailObjectUrl;
+    youtubeUI.downloadThumbnail.href = thumbnailObjectUrl;
+  } else {
+    youtubeUI.thumbnail.removeAttribute('src');
+    youtubeUI.downloadThumbnail.removeAttribute('href');
+  }
+}
+
+async function updateThumbnail(clip, timestamp) {
+  thumbnailRequest?.abort();
+  const cached = clipThumbnails.get(clip);
+  showThumbnail(cached?.image);
+  if (!Number.isFinite(timestamp) || timestamp < 0) {
+    youtubeUI.thumbnailStatus.textContent = 'Enter a valid time in the original video.';
+    return;
+  }
+  if (cached?.timestamp === timestamp) {
+    youtubeUI.thumbnailStatus.textContent = '';
+    return;
+  }
+  const controller = new AbortController();
+  thumbnailRequest = controller;
+  youtubeUI.thumbnailStatus.textContent = 'Capturing the selected frame…';
+  try {
+    const response = await fetch(`${getBackend()}/api/thumbnail`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        url: currentVideoData?.url || `https://www.youtube.com/watch?v=${activeVideoId}`,
+        timestamp,
+        upload_id: currentVideoData?.upload_id
+      }),
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45000)])
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Could not load this thumbnail.');
+    }
+    const image = await response.blob();
+    if (activeClip !== clip || controller.signal.aborted) return;
+    clip.thumbnail_time = timestamp;
+    clipThumbnails.set(clip, {timestamp, image});
+    showThumbnail(image);
+    youtubeUI.thumbnailStatus.textContent = '';
+  } catch (error) {
+    if (activeClip !== clip || controller.signal.aborted) return;
+    youtubeUI.thumbnailStatus.textContent = error.name === 'TimeoutError' ?
+      'Thumbnail capture took too long. Try previewing the frame again.' : error.message;
+  }
+}
+
+youtubeUI.description.addEventListener('input', () => {
+  if (activeClip) activeClip.exportDescription = youtubeUI.description.value;
+});
+
+document.getElementById('copyDescription').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(youtubeUI.description.value);
+    showToast('Description and hashtags copied.');
+  } catch (_) {
+    youtubeUI.description.select();
+    showToast('The description is selected. Press Ctrl+C to copy.');
+  }
+});
+
+document.getElementById('previewThumbnail').addEventListener('click', () => {
+  if (activeClip) updateThumbnail(activeClip, youtubeUI.thumbnailTime.valueAsNumber);
+});
+
+youtubeUI.downloadThumbnail.addEventListener('click', () => {
+  youtubeUI.downloadThumbnail.download = `${clipExportTitle(activeClip)}_thumbnail.jpg`;
+});
 
 youtubeUI.title.addEventListener('input', () => {
   if (activeClip) activeClip.exportTitle = youtubeUI.title.value;
@@ -146,6 +235,16 @@ function clearYoutubeJob() {
   sessionStorage.removeItem(youtubeJobKey);
 }
 
+function showUploadedVideo(status, message) {
+  const link = document.createElement('a');
+  link.href = `https://studio.youtube.com/video/${encodeURIComponent(status.video_id)}/edit`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'Open in YouTube Studio';
+  const visibility = ['private', 'unlisted', 'public'].includes(status.privacy) ? ` (${status.privacy})` : '';
+  youtubeUI.result.replaceChildren(`Uploaded${visibility}. ${message} `, link);
+}
+
 async function monitorYoutubeUpload(retrySource) {
   youtubeBusy = true;
   youtubeControls();
@@ -169,13 +268,8 @@ async function monitorYoutubeUpload(retrySource) {
       }
       if (status.state === 'complete') {
         clearYoutubeJob();
-        const link = document.createElement('a');
-        link.href = `https://studio.youtube.com/video/${encodeURIComponent(status.video_id)}/edit`;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = 'Open in YouTube Studio';
-        const visibility = ['private', 'unlisted', 'public'].includes(status.privacy) ? ` (${status.privacy})` : '';
-        youtubeUI.result.replaceChildren(`Uploaded${visibility}. YouTube may still be processing the clip. `, link);
+        showUploadedVideo(status, status.thumbnail_applied ? 'Thumbnail applied.' :
+          status.thumbnail_warning || 'YouTube may still be processing the clip.');
         return;
       }
       if (status.state === 'failed') {
@@ -187,11 +281,15 @@ async function monitorYoutubeUpload(retrySource) {
         }
         return;
       }
-      youtubeUI.result.textContent = {
-        queued: 'Upload queued.',
-        rendering: 'Rendering your clip with the selected captions and layout…',
-        uploading: 'Sending the clip to YouTube…'
-      }[status.state] || 'Preparing upload…';
+      if (status.state === 'thumbnail_processing') {
+        showUploadedVideo(status, 'Waiting for YouTube to process the clip before applying the thumbnail.');
+      } else {
+        youtubeUI.result.textContent = {
+          queued: 'Upload queued.',
+          rendering: 'Rendering your clip with the selected captions and layout…',
+          uploading: 'Sending the clip to YouTube…'
+        }[status.state] || 'Preparing upload…';
+      }
       await new Promise(resolve => setTimeout(resolve, 2500));
     }
     youtubeUI.result.textContent = 'The job is taking longer than expected. Check its status before trying another upload.';
@@ -209,6 +307,12 @@ async function startYoutubeUpload() {
   if (!activeClip || !currentVideoData || !youtubeUI.form.reportValidity()) return;
   const clip = activeClip;
   const video = currentVideoData;
+  const timestamp = youtubeUI.thumbnailTime.valueAsNumber;
+  if (!Number.isFinite(timestamp) || timestamp < 0) {
+    youtubeUI.thumbnailStatus.textContent = 'Enter a valid time in the original video.';
+    youtubeUI.thumbnailTime.focus();
+    return;
+  }
   const title = clipExportTitle(clip);
   youtubeUI.title.value = title;
   const payload = {
@@ -225,6 +329,7 @@ async function startYoutubeUpload() {
     upload_id: video.upload_id || undefined,
     title,
     description: youtubeUI.description.value,
+    thumbnail_time: timestamp,
     privacy: youtubeUI.privacy.value,
     made_for_kids: youtubeUI.audience.value === 'yes'
   };

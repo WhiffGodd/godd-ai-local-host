@@ -14,12 +14,14 @@ import traceback
 import re
 import math
 import queue
+from threading import BoundedSemaphore
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
 from api.clip_boundaries import MAX_CLIP_SECONDS
+from api.clip_metadata import add_clip_metadata
 from api.youtube_upload import (
-    CALLBACK_PATH, SESSION_AGE, YouTubeConnections, YouTubeUploadError, upload_metadata, upload_video,
+    CALLBACK_PATH, SESSION_AGE, YouTubeConnections, YouTubeUploadError, set_video_thumbnail, upload_metadata, upload_video,
 )
 from analyzer import (
     extract_youtube_id,
@@ -27,7 +29,7 @@ from analyzer import (
     fetch_transcript_segments,
     analyze_virality_and_cut_clips
 )
-from video_engine import generate_srt, download_and_clip_video, preview_facecam, transcribe_audio_with_whisper, WHISPER_AVAILABLE
+from video_engine import capture_thumbnail, generate_srt, download_and_clip_video, preview_facecam, transcribe_audio_with_whisper, WHISPER_AVAILABLE
 
 if sys.platform == "win32":
     try:
@@ -42,6 +44,7 @@ CAPTION_RESULTS = OrderedDict()
 SOURCE_UPLOADS = SourceUploads()
 YOUTUBE = YouTubeConnections()
 YOUTUBE_COOKIE = "godd_youtube"
+THUMBNAIL_SLOTS = BoundedSemaphore(2)
 
 
 def download_filename(title, start):
@@ -66,7 +69,7 @@ def validate_render_payload(payload):
 
 
 def run_export(payload):
-    source_path = validate_uploaded_video(SOURCE_UPLOADS.completed_path(payload['upload_id'])) if payload.get('upload_id') else None
+    source_path = uploaded_source_path(payload)
     return download_and_clip_video(
         video_url=payload["url"], start_time=payload["start"], duration=payload["duration"],
         layout=payload.get("layout", "split"), subtitle_style=payload.get("subtitle_style", "beast"),
@@ -79,7 +82,36 @@ def publish_to_youtube(owner, payload, path):
     return upload_video(path, access, payload["youtube_metadata"])
 
 
-EXPORT_JOBS = RenderJobs(run_export, publisher=publish_to_youtube)
+def uploaded_source_path(payload):
+    if payload.get("upload_id"):
+        return validate_uploaded_video(SOURCE_UPLOADS.completed_path(payload["upload_id"]))
+    return None
+
+
+def thumbnail_time(value):
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Enter a valid thumbnail timestamp.") from None
+    if not math.isfinite(timestamp) or timestamp < 0:
+        raise ValueError("Enter a valid thumbnail timestamp.")
+    return timestamp
+
+
+def apply_youtube_thumbnail(owner, payload, path, video_id):
+    timestamp = payload["thumbnail_time"]
+    try:
+        image = capture_thumbnail(payload["url"], timestamp, uploaded_source_path(payload))
+    except Exception:
+        relative = timestamp - payload["start"]
+        if not 0 <= relative < payload["duration"]:
+            return "Could not capture the selected thumbnail. The video is already uploaded."
+        image = capture_thumbnail(payload["url"], relative, path)
+    access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+    return set_video_thumbnail(video_id, access, image)
+
+
+EXPORT_JOBS = RenderJobs(run_export, publisher=publish_to_youtube, thumbnailer=apply_youtube_thumbnail)
 
 SAMPLE_VIDEOS = [
     {
@@ -322,6 +354,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(request_id, str) or not re.fullmatch(r"[\w-]{16,80}", request_id, flags=re.ASCII):
                 raise ValueError("Could not identify this upload request. Please try again.")
             validated = validate_render_payload(payload)
+            if payload.get("thumbnail_time") is not None:
+                validated["thumbnail_time"] = thumbnail_time(payload["thumbnail_time"])
             if payload.get("upload_id"):
                 SOURCE_UPLOADS.completed_path(payload["upload_id"])
             validated.update(youtube_metadata=upload_metadata(payload), youtube_channel=channel["id"])
@@ -583,6 +617,10 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({"facecam": region}).encode())
             return
 
+        if path == "/api/thumbnail":
+            self.handle_thumbnail(payload)
+            return
+
         if path == "/api/download-srt":
             self.handle_srt(payload)
             return
@@ -592,6 +630,31 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         self.send_error(404, "Endpoint not found")
+
+    def handle_thumbnail(self, payload):
+        try:
+            source = validate_render_payload({**payload, "start": 0, "duration": 1})
+            timestamp = thumbnail_time(payload.get("timestamp"))
+            local_path = uploaded_source_path(payload)
+        except (ValueError, TypeError, AttributeError) as error:
+            self.youtube_json(400, {"error": str(error)})
+            return
+        if not THUMBNAIL_SLOTS.acquire(blocking=False):
+            self.youtube_json(429, {"error": "Thumbnail capture is busy. Try again shortly."})
+            return
+        try:
+            image = capture_thumbnail(source["url"], timestamp, local_path)
+        except Exception:
+            self.youtube_json(502, {"error": "Could not load this source frame. Try another timestamp or use the original video file."})
+            return
+        finally:
+            THUMBNAIL_SLOTS.release()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(image)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(image)
 
     def handle_analyze(self, payload: dict):
         url = payload.get("url", "").strip()
@@ -638,7 +701,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "view_count": meta.get("view_count", 250000),
                     "recommended_layout": "split"
                 },
-                "clips": clips,
+                "clips": add_clip_metadata(clips, meta.get("title", ""), meta.get("author", ""),
+                                           f"https://www.youtube.com/watch?v={video_id}"),
                 "transcript_available": bool(transcript)
             }
 

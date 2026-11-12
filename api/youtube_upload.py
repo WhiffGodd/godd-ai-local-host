@@ -168,6 +168,39 @@ def _upload_error(response):
     return YouTubeUploadError(f"YouTube could not finish the upload (HTTP {response.status_code}). Check YouTube Studio before retrying.")
 
 
+def set_video_thumbnail(video_id, token, image, wait_seconds=120):
+    """Wait for Shorts processing before setting the thumbnail on the existing upload."""
+    auth = {"Authorization": f"Bearer {token}"}
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(API_URL + "/videos",
+                                    params={"part": "processingDetails", "id": video_id},
+                                    headers=auth, timeout=10)
+            if response.status_code == 200:
+                items = response.json().get("items", [])
+                status = items[0].get("processingDetails", {}).get("processingStatus") if items else None
+                if status == "succeeded":
+                    upload = requests.post("https://www.googleapis.com/upload/youtube/v3/thumbnails/set",
+                                           params={"videoId": video_id, "uploadType": "media"},
+                                           headers={**auth, "Content-Type": "image/jpeg"},
+                                           data=image, timeout=20, allow_redirects=False)
+                    if upload.ok:
+                        return None
+                    if upload.status_code == 403:
+                        return "YouTube did not allow a custom thumbnail on this channel. Check thumbnail eligibility in YouTube Studio."
+                    if upload.status_code < 500 and upload.status_code != 429:
+                        return "YouTube declined the thumbnail. You can add the JPG in YouTube Studio."
+                elif status in ("failed", "terminated"):
+                    return "YouTube could not finish processing the video. Check YouTube Studio."
+            elif response.status_code < 500 and response.status_code != 429:
+                return "Could not check processing status. You can add the thumbnail in YouTube Studio."
+        except (requests.RequestException, ValueError):
+            pass
+        time.sleep(min(6, max(0, deadline - time.monotonic())))
+    return "YouTube was still processing the video. You can add the thumbnail in YouTube Studio when it finishes."
+
+
 def upload_video(path, token, metadata):
     """Resume within the same Google upload session after a network error."""
     total = os.path.getsize(path)

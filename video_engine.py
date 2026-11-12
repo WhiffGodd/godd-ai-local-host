@@ -303,6 +303,33 @@ def preview_facecam(video_url, start, duration):
     stream, _, _ = select_export_streams(info)
     return detect_facecam_in_stream(stream, start, duration, stream_http_input_args(info, stream))
 
+
+def capture_thumbnail(video_url, timestamp, local_source_path=None):
+    """Capture a 9:16 JPEG while keeping the original frame visible."""
+    if local_source_path:
+        stream = local_source_path
+        input_args = ["-protocol_whitelist", "file,pipe"]
+    else:
+        info = youtube_render_info(video_url)
+        stream, _, _ = select_export_streams(info)
+        input_args = stream_http_input_args(info, stream)
+    filters = (
+        "[0:v]split[background][foreground];"
+        "[background]scale=720:1280:force_original_aspect_ratio=increase,"
+        "crop=720:1280,setsar=1,boxblur=18:4[blurred];"
+        "[foreground]scale=720:1280:force_original_aspect_ratio=decrease,"
+        "setsar=1[fit];[blurred][fit]overlay=(W-w)/2:(H-h)/2"
+    )
+    command = [FFMPEG_PATH, "-v", "error", "-threads", "1", "-ss", str(timestamp),
+               *input_args, "-i", stream, "-filter_complex_threads", "1", "-filter_complex", filters,
+               "-frames:v", "1", "-an", "-c:v", "mjpeg", "-threads", "1", "-q:v", "3",
+               "-f", "image2pipe", "-"]
+    result = subprocess.run(command, capture_output=True, timeout=15)
+    if result.returncode or not result.stdout.startswith(b"\xff\xd8"):
+        raise ValueError("Could not capture a frame at that time. Try another timestamp.")
+    return result.stdout
+
+
 def download_and_clip_video(
     video_url: str,
     start_time: float,

@@ -217,6 +217,12 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
    YouTube title matches the MP4 filename without the extension. Editing the
    title in the studio updates both.
 
+Each clip has a suggested description with relevant hashtags and a thumbnail
+from the source video. Edit the description, enter another timestamp in seconds
+to preview a different frame, or download the JPG. The studio sends your
+description with the video and applies the thumbnail after YouTube processing
+finishes if the channel is eligible.
+
 Uploads default to Private. The app asks for permission to identify the chosen
 channel and upload videos. Credentials stay in server memory, and connections
 expire after 24 hours. Each browser connects its own channel, and a server

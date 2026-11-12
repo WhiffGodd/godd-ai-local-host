@@ -1,4 +1,5 @@
 import array
+import io
 import json
 import os
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import video_engine as v
+import av
 
 
 class CaptionsTests(unittest.TestCase):
@@ -166,6 +168,15 @@ class RenderTests(unittest.TestCase):
                                     '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
                                    capture_output=True, check=True).stdout
             self.assertGreater(pixel[channel], 200)
+
+    def test_thumbnail_uses_the_requested_source_frame(self):
+        for timestamp, red in ((1, False), (3, True)):
+            with self.subTest(timestamp=timestamp):
+                jpeg = v.capture_thumbnail("unused", timestamp, self.source)
+                with av.open(io.BytesIO(jpeg), format="mjpeg") as image:
+                    frame = next(image.decode(video=0))
+                    self.assertEqual((frame.width, frame.height), (720, 1280))
+                    self.assertEqual(frame.to_ndarray(format="rgb24")[640, 360, 0] > 200, red)
 
     def test_facecam_candidates_ignore_a_full_frame_host(self):
         faces = [(340, 80, 200, 250, .99), (730, 340, 45, 60, .90)]

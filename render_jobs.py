@@ -10,14 +10,18 @@ from api.youtube_upload import YouTubeUploadError
 
 
 class RenderJobs:
-    def __init__(self, renderer, max_pending=4, lifetime=1800, publisher=None):
+    def __init__(self, renderer, max_pending=4, lifetime=1800, publisher=None, thumbnailer=None):
         self.renderer = renderer
         self.publisher = publisher
+        self.thumbnailer = thumbnailer
         self.pending = queue.Queue(maxsize=max_pending)
         self.jobs = OrderedDict()
         self.lock = threading.Lock()
         self.lifetime = lifetime
         threading.Thread(target=self._work, daemon=True).start()
+        if thumbnailer:
+            self.thumbnails = queue.Queue()
+            threading.Thread(target=self._finish_thumbnails, daemon=True).start()
 
     def _prune(self):
         now = time.monotonic()
@@ -56,7 +60,8 @@ class RenderJobs:
 
     @staticmethod
     def _status(job):
-        return {k: job[k] for k in ('id', 'state', 'error', 'code', 'video_id', 'privacy', 'filename') if k in job}
+        return {k: job[k] for k in ('id', 'state', 'error', 'code', 'video_id', 'privacy', 'filename',
+                                   'thumbnail_applied', 'thumbnail_warning') if k in job}
 
     def snapshot(self, token, owner=None):
         with self.lock:
@@ -86,8 +91,12 @@ class RenderJobs:
                     if job['owner']:
                         job['state'] = 'uploading'
                 result = self.publisher(job['owner'], payload, path) if job['owner'] else {}
+                needs_thumbnail = self.thumbnailer and result.get('video_id') and payload.get('thumbnail_time') is not None
                 with self.lock:
-                    job.update(state='complete', updated=time.monotonic(), **result)
+                    job.update(state='thumbnail_processing' if needs_thumbnail else 'complete',
+                               updated=time.monotonic(), **result)
+                if needs_thumbnail:
+                    self.thumbnails.put_nowait((token, job['owner'], payload, path, result['video_id']))
             except YouTubeUploadError as error:
                 with self.lock:
                     self.jobs[token].update(state='failed', code='YOUTUBE_UPLOAD_FAILED', error=str(error),
@@ -98,3 +107,15 @@ class RenderJobs:
                     self.jobs[token].update(state='failed', code=code, error=message, updated=time.monotonic())
             finally:
                 self.pending.task_done()
+
+    def _finish_thumbnails(self):
+        while True:
+            token, owner, payload, path, video_id = self.thumbnails.get()
+            try:
+                warning = self.thumbnailer(owner, payload, path, video_id)
+            except Exception:
+                warning = "Could not apply the thumbnail. The uploaded video is available in YouTube Studio."
+            with self.lock:
+                self.jobs[token].update(state='complete', updated=time.monotonic(),
+                                        thumbnail_applied=not warning, thumbnail_warning=warning)
+            self.thumbnails.task_done()
