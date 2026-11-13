@@ -60,7 +60,7 @@ class YouTubeConnections:
         self.sessions = {}
         self.lock = threading.Lock()
 
-    def begin(self, session_id):
+    def begin(self, session_id, ai_studio=False):
         with self.lock:
             now = time.monotonic()
             for key, session in list(self.sessions.items()):
@@ -70,7 +70,7 @@ class YouTubeConnections:
                 if len(self.sessions) >= 128:
                     raise YouTubeUploadError("Too many YouTube connections. Please try again later.")
                 session_id = secrets.token_urlsafe(32)
-            state = secrets.token_urlsafe(32)
+            state = ("ai." if ai_studio else "") + secrets.token_urlsafe(32)
             self.sessions[session_id] = {"expires": now + SESSION_AGE, "state": state, "state_expires": now + 600}
         params = {"client_id": self.client_id, "redirect_uri": self.redirect_uri,
                   "response_type": "code", "scope": " ".join(SCOPES), "state": state,

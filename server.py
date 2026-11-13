@@ -14,7 +14,11 @@ import traceback
 import re
 import math
 import queue
+import shutil
+import tempfile
 from threading import BoundedSemaphore
+from ai_video import ExplainerError, generation_settings, render_explainer, validate_generation
+from explainer_templates import template_catalog
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
@@ -45,6 +49,7 @@ SOURCE_UPLOADS = SourceUploads()
 YOUTUBE = YouTubeConnections()
 YOUTUBE_COOKIE = "godd_youtube"
 THUMBNAIL_SLOTS = BoundedSemaphore(2)
+AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=3600)
 
 
 def download_filename(title, start):
@@ -69,6 +74,18 @@ def validate_render_payload(payload):
 
 
 def run_export(payload):
+    if "generated_video_id" in payload:
+        source = AI_VIDEO_JOBS.completed_path(payload["generated_video_id"])
+        if not source:
+            raise ExplainerError("This AI video expired. Generate it again before uploading.")
+        fd, output = tempfile.mkstemp(prefix="godd_ai_publish_", suffix=".mp4")
+        os.close(fd)
+        try:
+            shutil.copyfile(source, output)
+        except OSError:
+            os.remove(output)
+            raise ExplainerError("The generated video is no longer available. Generate it again.") from None
+        return output
     source_path = uploaded_source_path(payload)
     return download_and_clip_video(
         video_url=payload["url"], start_time=payload["start"], duration=payload["duration"],
@@ -100,6 +117,10 @@ def thumbnail_time(value):
 
 def apply_youtube_thumbnail(owner, payload, path, video_id):
     timestamp = payload["thumbnail_time"]
+    if "generated_video_id" in payload:
+        image = capture_thumbnail("", timestamp, path)
+        access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+        return set_video_thumbnail(video_id, access, image)
     try:
         image = capture_thumbnail(payload["url"], timestamp, uploaded_source_path(payload))
     except Exception:
@@ -303,6 +324,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         return YOUTUBE.enabled and self.headers.get("Host") == urllib.parse.urlsplit(YOUTUBE.origin).netloc
 
     def youtube_callback(self, query):
+        ai_studio = query.get("state", [""])[0].startswith("ai.")
+        destination = "/ai-videos.html" if ai_studio else "/"
         try:
             if not self.youtube_host_matches():
                 raise YouTubeUploadError("Open the studio at its configured address before connecting.")
@@ -314,11 +337,11 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write((f"<!doctype html><html lang='en'><meta charset='utf-8'><title>YouTube connection</title>"
-                              f"<p>{escape(str(error))}</p><a href='/?youtube=retry'>Return to the clip studio</a>"
+                              f"<p>{escape(str(error))}</p><a href='{destination}?youtube=retry'>Return to the studio</a>"
                               "</html>").encode())
             return
         self.send_response(303)
-        self.send_header("Location", "/?youtube=connected")
+        self.send_header("Location", f"{destination}?youtube=connected")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
@@ -333,7 +356,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         owner = self.youtube_session()
         if path == "/api/youtube/connect":
             try:
-                owner, url = YOUTUBE.begin(owner)
+                owner, url = YOUTUBE.begin(owner, ai_studio=payload.get("studio") == "ai-videos")
                 self.youtube_json(200, {"url": url}, self.youtube_cookie(owner))
             except YouTubeUploadError as error:
                 self.youtube_json(429, {"error": str(error)})
@@ -353,11 +376,17 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             request_id = payload.get("request_id", "")
             if not isinstance(request_id, str) or not re.fullmatch(r"[\w-]{16,80}", request_id, flags=re.ASCII):
                 raise ValueError("Could not identify this upload request. Please try again.")
-            validated = validate_render_payload(payload)
-            if payload.get("thumbnail_time") is not None:
-                validated["thumbnail_time"] = thumbnail_time(payload["thumbnail_time"])
-            if payload.get("upload_id"):
-                SOURCE_UPLOADS.completed_path(payload["upload_id"])
+            generated = payload.get("generated_video_id")
+            if generated is not None:
+                if not isinstance(generated, str) or not AI_VIDEO_JOBS.completed_path(generated):
+                    raise ValueError("This AI video expired. Generate it again before uploading.")
+                validated = {"generated_video_id": generated, "thumbnail_time": 0.8}
+            else:
+                validated = validate_render_payload(payload)
+                if payload.get("thumbnail_time") is not None:
+                    validated["thumbnail_time"] = thumbnail_time(payload["thumbnail_time"])
+                if payload.get("upload_id"):
+                    SOURCE_UPLOADS.completed_path(payload["upload_id"])
             validated.update(youtube_metadata=upload_metadata(payload), youtube_channel=channel["id"])
             job = EXPORT_JOBS.submit(validated, owner=owner, request_id=request_id)
             self.youtube_json(202, job)
@@ -399,6 +428,13 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.youtube_json(200, job)
             else:
                 self.youtube_json(404, {"error": "This upload has expired or is unavailable."})
+            return
+
+        if path == "/api/ai-videos/templates":
+            self.youtube_json(200, {"templates": template_catalog(), **generation_settings()})
+            return
+        if path.startswith("/api/ai-videos/"):
+            self.handle_ai_video_get(path, urllib.parse.parse_qs(parsed.query))
             return
 
         if path in ("/api/status", "/healthz"):
@@ -501,7 +537,9 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         static_assets = {"/": "index.html", "/index.html": "index.html",
                          "/app.js": "app.js", "/style.css": "style.css",
                          "/youtube-studio.js": "public/youtube-studio.js",
-                         "/privacy.html": "public/privacy.html"}
+                         "/privacy.html": "public/privacy.html",
+                         "/ai-videos": "public/ai-videos.html", "/ai-videos.html": "public/ai-videos.html",
+                         "/ai-videos.js": "public/ai-videos.js", "/ai-videos.css": "public/ai-videos.css"}
         asset = static_assets.get(path)
         if asset is None:
             self.send_error(404, "File not found")
@@ -554,6 +592,20 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         if path in ("/api/youtube/connect", "/api/youtube/disconnect", "/api/youtube/uploads"):
             self.handle_youtube_post(path, payload)
+            return
+
+        if path == "/api/ai-videos":
+            try:
+                origin = self.headers.get("Origin")
+                if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
+                    self.youtube_json(403, {"error": "Open AI Videos in the studio to generate a video."})
+                    return
+                generation = validate_generation(payload)
+                self.youtube_json(202, AI_VIDEO_JOBS.submit(generation))
+            except ValueError as error:
+                self.youtube_json(400, {"error": str(error)})
+            except queue.Full:
+                self.youtube_json(429, {"error": "The AI video queue is full. Try again shortly."})
             return
 
         if path == "/api/source-uploads":
@@ -630,6 +682,64 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         self.send_error(404, "Endpoint not found")
+
+    def handle_ai_video_get(self, path, query):
+        parts = path.split("/")
+        job = AI_VIDEO_JOBS.snapshot(parts[3])
+        if not job:
+            self.youtube_json(404, {"error": "This AI video expired or could not be found."})
+            return
+        if len(parts) == 4:
+            self.youtube_json(200, job)
+            return
+        if parts[4:] != ["video"]:
+            self.send_error(404)
+            return
+        output = AI_VIDEO_JOBS.completed_path(parts[3])
+        if not output:
+            self.youtube_json(409, {"error": "The video is still rendering."})
+            return
+        try:
+            video = open(output, "rb")
+        except OSError:
+            self.youtube_json(404, {"error": "This AI video expired. Generate it again."})
+            return
+        with video:
+            size = os.fstat(video.fileno()).st_size
+            start, end = 0, size - 1
+            range_header = self.headers.get("Range")
+            if range_header:
+                match = re.fullmatch(r"bytes=(\d{0,20})-(\d{0,20})", range_header)
+                first, last = match.groups() if match else ("", "")
+                if first:
+                    start = int(first)
+                    end = min(end, int(last)) if last else end
+                elif last:
+                    start = max(0, size - int(last))
+                if not (first or last) or not 0 <= start <= end < size:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+            self.send_response(206 if range_header else 200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "private, no-store")
+            if range_header:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            if query.get("download") == ["1"]:
+                filename = download_filename(job["metadata"]["title"], 0)
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            remaining = end - start + 1
+            self.send_header("Content-Length", str(remaining))
+            self.end_headers()
+            video.seek(start)
+            try:
+                while remaining and (chunk := video.read(min(65536, remaining))):
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
     def handle_thumbnail(self, payload):
         try:

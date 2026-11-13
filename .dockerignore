@@ -10,6 +10,9 @@ __pycache__
 public/*
 !public/youtube-studio.js
 !public/privacy.html
+!public/ai-videos.html
+!public/ai-videos.js
+!public/ai-videos.css
 tests/
 *.mp4
 **/*.mp4

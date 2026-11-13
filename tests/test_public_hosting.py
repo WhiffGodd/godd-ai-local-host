@@ -8,6 +8,7 @@ import urllib.error
 from unittest.mock import patch
 from server import ThreadedHTTPServer, GoddAIRequestHandler, validate_render_payload
 from render_jobs import RenderJobs
+from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _validate_plan, validate_generation
 
 
 class PublicHostingTests(unittest.TestCase):
@@ -22,13 +23,69 @@ class PublicHostingTests(unittest.TestCase):
         self.server.server_close()
 
     def test_only_public_application_assets_are_served(self):
-        for path in ('/', '/app.js', '/style.css', '/youtube-studio.js', '/privacy.html'):
+        for path in ('/', '/app.js', '/style.css', '/youtube-studio.js', '/privacy.html',
+                     '/ai-videos.html', '/ai-videos.js', '/ai-videos.css'):
             with urllib.request.urlopen(self.url + path) as response:
                 self.assertEqual(response.status, 200)
         for path in ('/.git/config', '/server.py', '/.env', '/../server.py', '/public/speech_accuracy_check.json'):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.url + path)
             self.assertEqual(error.exception.code, 404)
+
+    def test_ai_video_template_catalog_and_seekable_preview(self):
+        with patch("server.generation_settings", return_value={"available": False}):
+            with urllib.request.urlopen(self.url + "/api/ai-videos/templates") as response:
+                catalog = json.load(response)
+        self.assertEqual(len({template["id"] for template in catalog["templates"]}), 62)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "preview.mp4")
+            with open(output, "wb") as stream:
+                stream.write(b"example MP4 data")
+            manager = RenderJobs(lambda _: (output, {"title": "A test explainer", "description": "#Shorts"}))
+            with patch("server.AI_VIDEO_JOBS", manager):
+                request = urllib.request.Request(
+                    self.url + "/api/ai-videos", data=b'{"template":"blueprint-lab","example":true}',
+                    headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(request) as response:
+                    self.assertEqual(response.status, 202)
+                    job_id = json.load(response)["id"]
+                manager.pending.join()
+                source = self.url + f"/api/ai-videos/{job_id}"
+                with urllib.request.urlopen(source) as response:
+                    self.assertEqual(json.load(response)["metadata"]["title"], "A test explainer")
+                request = urllib.request.Request(source + "/video?download=1", headers={"Range": "bytes=8-10"})
+                with urllib.request.urlopen(request) as response:
+                    self.assertEqual(response.status, 206)
+                    self.assertEqual(response.headers["Content-Range"], "bytes 8-10/16")
+                    self.assertEqual(response.headers["Content-Disposition"], 'attachment; filename="A_test_explainer.mp4"')
+                    self.assertEqual(response.read(), b"MP4")
+
+    def test_explainer_hook_precedes_the_complete_story_and_voice_is_validated(self):
+        _, _, scenes = _validate_plan(_EXAMPLE)
+        self.assertEqual(scenes[0]["heading"], _EXAMPLE["hook"])
+        self.assertEqual(scenes[0]["narration"], _EXAMPLE["hook"])
+        self.assertTrue(scenes[0]["opening"])
+        self.assertEqual([scene["narration"] for scene in scenes[1:]],
+                         [scene["narration"] for scene in _EXAMPLE["scenes"]])
+        with self.assertRaises(ValueError):
+            _validate_plan({**_EXAMPLE, "hook": "Hello"})
+        sample = {"template": "blueprint-lab", "example": True}
+        self.assertEqual(validate_generation(sample)["voice"], "expressive")
+        self.assertEqual(validate_generation({**sample, "voice": "energetic"})["voice"], "energetic")
+        with self.assertRaises(ValueError):
+            validate_generation({**sample, "voice": "unknown"})
+
+    def test_explainer_runtime_fits_narration_and_scene_boundaries_together(self):
+        for seconds, expected in ((44, 50), (50, 50), (55, 55), (60, 60), (66, 60)):
+            with self.subTest(seconds=seconds):
+                frames, tempo = _fit_runtime([3 * FPS, (seconds - 3) * FPS])
+                self.assertEqual(sum(frames), expected * FPS)
+                self.assertEqual(tempo, seconds / expected)
+                self.assertAlmostEqual(frames[0], 3 * FPS / tempo, delta=0.5)
+        for seconds in (25, 90):
+            with self.assertRaises(ExplainerError):
+                _fit_runtime([seconds * FPS])
 
     def test_thumbnail_endpoint_returns_a_jpeg_at_the_requested_time(self):
         data = json.dumps({"url": "https://youtu.be/abcdefghijk", "timestamp": 235.5}).encode()

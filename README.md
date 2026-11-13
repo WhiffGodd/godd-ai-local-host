@@ -190,6 +190,32 @@ YouTube. Uploads are identified by random tokens, expire after one hour, and
 are lost if the free service restarts. Only use videos you are allowed to upload.
 This is an alternative source path, not a claim that YouTube's IP block is removed.
 
+## AI Video Studio
+
+Open **AI Videos** from the main navigation. Choose from 62 motion-graphics
+templates, describe what to explain, and click **Generate video**. The studio
+creates a short English script, opens with a spoken and on-screen hook, and
+renders a 50–60 second narrated 720 × 1280 MP4. Pick Friendly, Energetic, or Documentary
+to change the delivery. **Render sample** works without a storyboard model. Generated
+videos are temporary, so download a copy before closing the studio.
+
+- **Local setup**: Install [Ollama](https://ollama.com/download), start it, and
+  run `ollama pull qwen3:4b`. Then start Godd AI with `python server.py`.
+  For continuous narration, download `kokoro-v1.0.onnx` and `voices-v1.0.bin`
+  from [Kokoro ONNX model files v1.1](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1).
+  Save them as `timed-kokoro-v1.0.onnx` and `timed-voices-v1.0.bin` in
+  `%LOCALAPPDATA%\GoddAI\voices` on Windows or `~/.local/share/godd-ai/voices` on Linux.
+  Set `AI_VIDEO_VOICE_DIR` to use a different directory. If Kokoro's files are
+  absent, the studio uses installed Piper voices, Windows speech, or eSpeak NG.
+- **Hosted setup**: Set `AI_VIDEO_GEMINI_API_KEY` in the server environment to
+  use Gemini for the storyboard. The default is `gemini-3.1-flash-lite`.
+  Keep this key server-side. Prompts go to Gemini when this option is enabled.
+  The Docker image includes the narration engine. The static Vercel version
+  needs the Python rendering server for this feature.
+- **Publishing**: Preview the video, review its suggested title, description
+  and hashtags, then use **Upload to YouTube**. The AI studio and clip studio
+  share the same connected channel. Uploads default to Private.
+
 ## Upload clips to YouTube
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable the

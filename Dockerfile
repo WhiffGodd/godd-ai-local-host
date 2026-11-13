@@ -24,6 +24,7 @@ ENV PYTHONUNBUFFERED=1
 # Install system FFmpeg with codecs, ca-certificates, and curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    espeak-ng \
     fonts-dejavu-core \
     fonts-noto-core \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 \
@@ -37,6 +38,11 @@ WORKDIR /app
 # Install Python requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+ENV AI_VIDEO_VOICE_DIR=/opt/godd-ai/voices
+RUN python -m piper.download_voices --download-dir "$AI_VIDEO_VOICE_DIR" en_US-amy-medium en_US-lessac-medium
+RUN base=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1 \
+    && curl -fLsS --retry 3 "$base/kokoro-v1.0.onnx" -o "$AI_VIDEO_VOICE_DIR/timed-kokoro-v1.0.onnx" \
+    && curl -fLsS --retry 3 "$base/voices-v1.0.bin" -o "$AI_VIDEO_VOICE_DIR/timed-voices-v1.0.bin"
 # Cache the free-hosting model during build instead of each cold start.
 ARG WHISPER_MODEL=base
 RUN python -c "import os; from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-' + os.environ.get('WHISPER_MODEL', 'base'))"

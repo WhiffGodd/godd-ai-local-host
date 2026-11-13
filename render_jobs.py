@@ -60,7 +60,7 @@ class RenderJobs:
 
     @staticmethod
     def _status(job):
-        return {k: job[k] for k in ('id', 'state', 'error', 'code', 'video_id', 'privacy', 'filename',
+        return {k: job[k] for k in ('id', 'state', 'error', 'code', 'video_id', 'privacy', 'filename', 'metadata',
                                    'thumbnail_applied', 'thumbnail_warning') if k in job}
 
     def snapshot(self, token, owner=None):
@@ -85,9 +85,12 @@ class RenderJobs:
                     job = self.jobs[token]
                     job['state'] = 'rendering'
                     payload = job.pop('payload')
-                path = self.renderer(payload)
+                rendered = self.renderer(payload)
+                path, metadata = rendered if isinstance(rendered, tuple) else (rendered, None)
                 with self.lock:
                     job['path'] = path
+                    if metadata:
+                        job['metadata'] = metadata
                     if job['owner']:
                         job['state'] = 'uploading'
                 result = self.publisher(job['owner'], payload, path) if job['owner'] else {}
