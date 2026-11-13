@@ -65,6 +65,10 @@ with automatic subtitles downloads the speech model.
 
 ## Clip subtitles and audio
 
+Hindi captions are automatically shown in English letters in the preview,
+downloaded SRT files, and rendered clips. The original speech and caption
+timing stay the same.
+
 Install dependencies with `python -m pip install -r requirements.txt`, then run
 `python server.py`. FFmpeg must support the `subtitles` filter (the Docker image
 and bundled imageio-ffmpeg build do). On Linux, install a font covering the spoken

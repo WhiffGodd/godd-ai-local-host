@@ -9,6 +9,7 @@ import json
 import gc
 from caption_styles import generate_ass
 from api.clip_boundaries import MAX_CLIP_SECONDS
+from api.roman_hindi import roman_hindi, romanize_cues, romanize_speech
 from api.youtube_access import youtube_options, extract_youtube_info
 
 _WHISPER_LOCK = threading.Lock()
@@ -181,7 +182,7 @@ def generate_srt(subtitles: list, clip_start: float = 0.0, video_subtitles: list
     """Convert absolute source timestamps to bounded, clip-relative SRT cues."""
     cues = []
     for item in (video_subtitles or subtitles or []):
-        text = clean_streamer_text(item.get("text", item.get("word", "")))
+        text = roman_hindi(clean_streamer_text(item.get("text", item.get("word", ""))))
         try:
             start = float(item.get("start", 0)) - clip_start
             end = float(item.get("end", float(item.get("start", 0)) + float(item.get("duration", 0)))) - clip_start
@@ -307,12 +308,23 @@ def preview_facecam(video_url, start, duration):
 def capture_thumbnail(video_url, timestamp, local_source_path=None):
     """Capture a 9:16 JPEG while keeping the original frame visible."""
     if local_source_path:
-        stream = local_source_path
-        input_args = ["-protocol_whitelist", "file,pipe"]
+        inputs = [(local_source_path, ["-protocol_whitelist", "file,pipe"])]
     else:
         info = youtube_render_info(video_url)
-        stream, _, _ = select_export_streams(info)
-        input_args = stream_http_input_args(info, stream)
+        formats = info.get("formats") or info.get("requested_formats") or [info]
+        videos = [fmt for fmt in formats if fmt.get("url") and fmt.get("vcodec") not in (None, "none", "")]
+        # Prefer a smaller direct stream, with the usual export rendition as a fallback.
+        streams = []
+        if videos:
+            preview = max(videos, key=lambda fmt: (fmt.get("protocol") == "https",
+                          (fmt.get("height") or 0) <= 720, fmt.get("ext") == "mp4", fmt.get("height") or 0))
+            streams.append(preview["url"])
+            alternate = max((fmt for fmt in videos if fmt["url"] != preview["url"]),
+                            key=lambda fmt: ((fmt.get("height") or 0) <= 1080, fmt.get("height") or 0,
+                                             fmt.get("tbr") or 0), default=None)
+            if alternate:
+                streams.append(alternate["url"])
+        inputs = [(stream, stream_http_input_args(info, stream)) for stream in streams]
     filters = (
         "[0:v]split[background][foreground];"
         "[background]scale=720:1280:force_original_aspect_ratio=increase,"
@@ -320,14 +332,18 @@ def capture_thumbnail(video_url, timestamp, local_source_path=None):
         "[foreground]scale=720:1280:force_original_aspect_ratio=decrease,"
         "setsar=1[fit];[blurred][fit]overlay=(W-w)/2:(H-h)/2"
     )
-    command = [FFMPEG_PATH, "-v", "error", "-threads", "1", "-ss", str(timestamp),
-               *input_args, "-i", stream, "-filter_complex_threads", "1", "-filter_complex", filters,
-               "-frames:v", "1", "-an", "-c:v", "mjpeg", "-threads", "1", "-q:v", "3",
-               "-f", "image2pipe", "-"]
-    result = subprocess.run(command, capture_output=True, timeout=15)
-    if result.returncode or not result.stdout.startswith(b"\xff\xd8"):
-        raise ValueError("Could not capture a frame at that time. Try another timestamp.")
-    return result.stdout
+    for stream, input_args in inputs:
+        command = [FFMPEG_PATH, "-v", "error", "-threads", "1", "-ss", str(timestamp),
+                   *input_args, "-i", stream, "-filter_complex_threads", "1", "-filter_complex", filters,
+                   "-frames:v", "1", "-an", "-c:v", "mjpeg", "-threads", "1", "-q:v", "3",
+                   "-f", "image2pipe", "-"]
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=15 if local_source_path else 10)
+        except subprocess.TimeoutExpired:
+            continue
+        if not result.returncode and result.stdout.startswith(b"\xff\xd8"):
+            return result.stdout
+    raise ValueError("Could not capture a frame at that time. Try another timestamp.")
 
 
 def download_and_clip_video(
@@ -388,6 +404,8 @@ def download_and_clip_video(
                               "end": w["end"] + start_time}
                              for seg in speech for w in (seg.get("words") or [
                                  {"word": seg["text"], "start": seg["start"], "end": seg["end"]}])]
+            subtitles = romanize_cues(subtitles, "word")
+            video_subtitles = romanize_cues(video_subtitles, "text")
             srt_content = generate_srt(subtitles, start_time,
                                        video_subtitles if subtitle_style == "source" or not subtitles else None, duration)
             if srt_content.strip():
@@ -446,6 +464,7 @@ def download_and_clip_video(
         if not is_none_style and caption_source == "auto":
             speech = transcribe_audio_with_whisper(video_url, 0.0, duration,
                                                    audio_stream_url=output_path)
+            speech = romanize_speech(speech)
             measured_words = speech_words_for_clip(speech, duration)
             srt_content = generate_srt(measured_words, 0.0, clip_duration=duration)
             if srt_content.strip():

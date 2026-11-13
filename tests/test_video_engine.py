@@ -34,6 +34,22 @@ class CaptionsTests(unittest.TestCase):
         dub = {'url': 'dub', 'vcodec': 'none', 'acodec': 'aac', 'abr': 192}
         self.assertEqual(v.select_export_streams({'formats': [video, original, dub]}), ('video', 'original', True))
 
+    def test_thumbnail_retries_a_different_video_stream_without_audio(self):
+        streams = [{'url': f'video-{height}', 'vcodec': 'h264', 'acodec': 'none',
+                    'height': height, 'protocol': protocol, 'ext': 'mp4'}
+                   for height, protocol in ((480, 'https'), (720, 'https'), (1080, 'm3u8_native'))]
+        image = b'\xff\xd8thumbnail'
+        with patch.object(v, 'youtube_render_info', return_value={'formats': streams}), \
+                patch.object(v.subprocess, 'run', side_effect=[
+                    subprocess.TimeoutExpired('ffmpeg', 10),
+                    subprocess.CompletedProcess('ffmpeg', 0, stdout=image),
+                ]) as run:
+            self.assertEqual(v.capture_thumbnail('https://youtu.be/abcdefghijk', 235.5), image)
+        for call, height in zip(run.call_args_list, (720, 1080), strict=True):
+            command = call.args[0]
+            self.assertEqual(command[command.index('-i') + 1], f'video-{height}')
+            self.assertEqual(command[command.index('-ss') + 1], '235.5')
+
     def test_source_word_timestamps_are_not_shortened_or_shifted(self):
         from analyzer import generate_word_subtitles_from_segments
         words = generate_word_subtitles_from_segments([
@@ -120,8 +136,8 @@ class RenderTests(unittest.TestCase):
                     self.assertEqual(pixel[0] > 150, red)
 
     def test_whisper_uses_export_audio_and_relative_word_timing(self):
-        speech = [{'text': 'Hello', 'start': 0.5, 'end': 1.0,
-                   'words': [{'word': 'Hello', 'start': 0.5, 'end': 1.0}]}]
+        speech = [{'text': 'नमस्ते', 'start': 0.5, 'end': 1.0,
+                   'words': [{'word': 'नमस्ते', 'start': 0.5, 'end': 1.0}]}]
         original = v.generate_srt
         captured = []
         def capture(*args, **kwargs):
@@ -133,9 +149,11 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(transcribe.call_args.args[1], 0.0)
         self.assertEqual(transcribe.call_args.kwargs['audio_stream_url'], str(Path(self.tmp.name) / 'separate.mp4'))
         self.assertIn('00:00:00,500 --> 00:00:01,000', captured[0])
+        self.assertIn('namaste', captured[0])
         self.assertNotIn('WRONG', captured[0])
         sidecar = json.loads((Path(self.tmp.name) / 'separate.mp4.captions.json').read_text(encoding='utf-8'))
         self.assertEqual(sidecar['measured_from'], 'rendered_audio')
+        self.assertEqual(sidecar['words'][0]['word'], 'namaste')
         self.assertEqual(sidecar['words'][0]['start'], .5)
         self.assertEqual(sidecar['words'][0]['end'], 1.0)
 

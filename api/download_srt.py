@@ -1,5 +1,9 @@
 import json
 from http.server import BaseHTTPRequestHandler
+try:
+    from .roman_hindi import roman_hindi
+except ImportError:
+    from roman_hindi import roman_hindi
 
 def format_srt_timestamp(seconds: float) -> str:
     hrs = int(seconds // 3600)
@@ -34,7 +38,7 @@ class handler(BaseHTTPRequestHandler):
                 continue
             start_sec = group[0]["start"]
             end_sec = group[-1]["end"]
-            text = " ".join(item["word"] for item in group)
+            text = roman_hindi(" ".join(item["word"] for item in group))
             idx = (i // chunk_size) + 1
             lines.append(f"{idx}\n{format_srt_timestamp(start_sec)} --> {format_srt_timestamp(end_sec)}\n{text}\n")
         

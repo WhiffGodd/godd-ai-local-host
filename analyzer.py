@@ -1,4 +1,4 @@
-from api.youtube_access import youtube_options, extract_youtube_info
+from api.youtube_access import youtube_options, extract_youtube_info, original_caption_formats
 import re
 import math
 import json
@@ -277,29 +277,13 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None, is_english
             'skip_download': True,
         }
         info = extract_youtube_info(url, ydl_opts)
-        subs = info.get('subtitles') or {}
-        auto_subs = info.get('automatic_captions') or {}
-
         # Prioritize matching the video's original spoken language
         if is_english:
             lang_order = ['en', 'en-US', 'en-GB', 'en-CA', 'en-IN', 'en-AU']
         else:
             lang_order = ['hi', 'hi-Latn', 'en-IN', 'en']
 
-        chosen_sub_formats = None
-        for lang in lang_order:
-            if lang in subs:
-                chosen_sub_formats = subs[lang]
-                break
-            if lang in auto_subs:
-                chosen_sub_formats = auto_subs[lang]
-                break
-
-        if not chosen_sub_formats:
-            if subs:
-                chosen_sub_formats = next(iter(subs.values()))
-            elif auto_subs:
-                chosen_sub_formats = next(iter(auto_subs.values()))
+        chosen_sub_formats = original_caption_formats(info, lang_order)
 
         if not chosen_sub_formats:
             return []

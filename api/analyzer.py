@@ -1,7 +1,7 @@
 try:
-    from .youtube_access import youtube_options, extract_youtube_info
+    from .youtube_access import youtube_options, extract_youtube_info, original_caption_formats
 except ImportError:
-    from youtube_access import youtube_options, extract_youtube_info
+    from youtube_access import youtube_options, extract_youtube_info, original_caption_formats
 try:
     from .clip_boundaries import select_short_clip_windows, snap_to_clean_sentence_boundaries
 except ImportError:
@@ -262,24 +262,7 @@ def fetch_transcript_from_ytdlp(video_id: str, video_url: str = None) -> list:
             'skip_download': True,
         }
         info = extract_youtube_info(url, ydl_opts)
-        subs = info.get('subtitles') or {}
-        auto_subs = info.get('automatic_captions') or {}
-
-        # Prioritize Hindi/Hinglish, then Indian English, then English
-        chosen_sub_formats = None
-        for lang in ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB']:
-            if lang in subs:
-                chosen_sub_formats = subs[lang]
-                break
-            if lang in auto_subs:
-                chosen_sub_formats = auto_subs[lang]
-                break
-
-        if not chosen_sub_formats:
-            if subs:
-                chosen_sub_formats = next(iter(subs.values()))
-            elif auto_subs:
-                chosen_sub_formats = next(iter(auto_subs.values()))
+        chosen_sub_formats = original_caption_formats(info, ['hi', 'hi-Latn', 'en-IN', 'en', 'en-US', 'en-GB'])
 
         if not chosen_sub_formats:
             return []

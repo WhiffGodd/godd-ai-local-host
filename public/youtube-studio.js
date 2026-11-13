@@ -93,26 +93,43 @@ function updateYoutubeClip(clip) {
 function showThumbnail(image) {
   if (thumbnailObjectUrl) URL.revokeObjectURL(thumbnailObjectUrl);
   thumbnailObjectUrl = image ? URL.createObjectURL(image) : null;
-  youtubeUI.thumbnail.hidden = !image;
+  const preview = youtubeUI.thumbnail;
+  const youtubeThumbnail = activeVideoId ? ytThumb(activeVideoId) : '';
+  const sources = [...new Set([currentVideoData?.thumbnail, youtubeThumbnail].filter(Boolean))];
+  const src = thumbnailObjectUrl || sources.shift();
+  preview.hidden = !src;
+  preview.alt = image ? 'Selected clip thumbnail' : 'Original video thumbnail';
   youtubeUI.downloadThumbnail.hidden = !image;
   if (image) {
-    youtubeUI.thumbnail.src = thumbnailObjectUrl;
     youtubeUI.downloadThumbnail.href = thumbnailObjectUrl;
   } else {
-    youtubeUI.thumbnail.removeAttribute('src');
     youtubeUI.downloadThumbnail.removeAttribute('href');
   }
+  preview.onerror = () => {
+    if (image) {
+      clipThumbnails.delete(activeClip);
+      showThumbnail();
+      youtubeUI.thumbnailStatus.textContent = 'Could not display the captured frame. Preview it again to retry.';
+      return;
+    }
+    const fallback = sources.shift();
+    if (fallback) preview.src = fallback;
+    else preview.hidden = true;
+  };
+  if (src) preview.src = src;
+  else preview.removeAttribute('src');
 }
 
 async function updateThumbnail(clip, timestamp) {
   thumbnailRequest?.abort();
   const cached = clipThumbnails.get(clip);
-  showThumbnail(cached?.image);
+  const hasFrame = cached?.timestamp === timestamp && cached?.image;
+  showThumbnail(hasFrame);
   if (!Number.isFinite(timestamp) || timestamp < 0) {
     youtubeUI.thumbnailStatus.textContent = 'Enter a valid time in the original video.';
     return;
   }
-  if (cached?.timestamp === timestamp) {
+  if (hasFrame) {
     youtubeUI.thumbnailStatus.textContent = '';
     return;
   }
@@ -135,6 +152,9 @@ async function updateThumbnail(clip, timestamp) {
       throw new Error(error.error || 'Could not load this thumbnail.');
     }
     const image = await response.blob();
+    if (image.type !== 'image/jpeg' || !image.size) {
+      throw new Error('The server did not return a thumbnail. Try previewing the frame again.');
+    }
     if (activeClip !== clip || controller.signal.aborted) return;
     clip.thumbnail_time = timestamp;
     clipThumbnails.set(clip, {timestamp, image});

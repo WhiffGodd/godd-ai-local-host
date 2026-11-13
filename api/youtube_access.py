@@ -5,6 +5,22 @@ import time
 import threading
 import urllib.parse
 
+
+def original_caption_formats(info, preferred_languages):
+    """Use the original audio language before considering translated tracks."""
+    manual = info.get("subtitles") or {}
+    automatic = info.get("automatic_captions") or {}
+    originals = [lang for lang, formats in automatic.items() if lang.endswith("-orig") and formats]
+    if originals:
+        lang = next((code + "-orig" for code in preferred_languages if code + "-orig" in originals),
+                    originals[0])
+        return manual.get(lang.removesuffix("-orig")) or automatic[lang]
+    for lang in preferred_languages:
+        formats = manual.get(lang) or automatic.get(lang)
+        if formats:
+            return formats
+    return next(iter((manual or automatic).values()), [])
+
 _INFO_CACHE = {}
 _INFO_FAILURES = {}
 _INFO_LOCK = threading.Lock()

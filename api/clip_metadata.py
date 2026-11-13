@@ -2,6 +2,11 @@
 
 import re
 
+try:
+    from .roman_hindi import romanize_clip_captions
+except ImportError:
+    from roman_hindi import romanize_clip_captions
+
 
 TOPIC_TAGS = (
     (r"\b(?:minecraft|fortnite|roblox|counter-strike|warzone|gta)\b", None),
@@ -54,4 +59,5 @@ def add_clip_metadata(clips, video_title, author="", source_url=""):
         clip["description"] = description.replace("<", "").replace(">", "")
         clip["hashtags"] = hashtags
         clip["thumbnail_time"] = round(clip["start"] + min(12, (clip["end"] - clip["start"]) * .25), 2)
+        romanize_clip_captions(clip)
     return clips
