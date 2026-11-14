@@ -87,6 +87,15 @@ class CaptionsTests(unittest.TestCase):
                                  {'word': 'this', 'start': .6, 'end': 1}])
 
 
+    def test_transcription_loop_is_removed_across_segments(self):
+        tokens = ['boring', 'boring', 'business', 'to', 'to,', 'to', 'to', 'next']
+        words = [{'word': token, 'start': i * .25, 'end': (i + 1) * .25}
+                 for i, token in enumerate(tokens)]
+        result = v.speech_words_for_clip([{'words': words[:5]}, {'words': words[5:]}], 2)
+        self.assertEqual([word['word'] for word in result], ['boring', 'boring', 'business', 'to', 'next'])
+        self.assertEqual(result[-1]['start'], 1.75)
+
+
 class RenderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

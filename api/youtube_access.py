@@ -12,7 +12,13 @@ def original_caption_formats(info, preferred_languages):
     automatic = info.get("automatic_captions") or {}
     originals = [lang for lang, formats in automatic.items() if lang.endswith("-orig") and formats]
     if originals:
-        lang = next((code + "-orig" for code in preferred_languages if code + "-orig" in originals),
+        # A dubbed track can also be marked "-orig" within its own language.
+        # Prefer the video's declared original language over guesses from its title.
+        language = info.get("language")
+        candidates = [language] if isinstance(language, str) and language else []
+        if candidates:
+            candidates.append(language.split("-")[0])
+        lang = next((code + "-orig" for code in (*candidates, *preferred_languages) if code + "-orig" in originals),
                     originals[0])
         return manual.get(lang.removesuffix("-orig")) or automatic[lang]
     for lang in preferred_languages:

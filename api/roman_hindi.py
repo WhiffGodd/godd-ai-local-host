@@ -41,6 +41,14 @@ COMMON = {
     "मिनट": "minute", "सेकंड": "second", "नया": "naya", "नई": "nayi",
     "चैनल": "channel", "सब्सक्राइब": "subscribe", "लाइक": "like", "शॉर्ट्स": "shorts",
     "हिंदी": "Hindi", "हिन्दी": "Hindi", "इंग्लिश": "English",
+    "कबाड़ी": "kabadi", "कबाडी": "kabadi", "कबादी": "kabadi",
+    "बिज़नेस": "business", "बिजनेस": "business", "बिसनेस": "business",
+    "बिज़नेसेस": "businesses", "बिजनेसेस": "businesses", "बोरिंग": "boring",
+    "लिथियम": "lithium", "बैटरी": "battery", "बैटरीज": "batteries",
+    "रीसायकल": "recycle", "रिसाइकल": "recycle", "स्क्रैप": "scrap",
+    "पैकेजिंग": "packaging", "पैकेजिं": "packaging", "स्टार्टअप्स": "startups",
+    "ब्रांड": "brand", "कंसलटेंसी": "consultancy", "टेक्निकली": "technically",
+    "पोटेंशियल": "potential", "वेस्ट": "waste", "तरह": "tarah",
 }
 PUNCTUATION_AND_DIGITS = str.maketrans("।॥०१२३४५६७८९", "..0123456789")
 

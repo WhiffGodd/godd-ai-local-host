@@ -65,10 +65,14 @@ def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: flo
         # Serialize model use and loading across HTTP request threads.
         with _WHISPER_LOCK:
             model = _get_whisper_model()
+            language = os.environ.get("WHISPER_LANGUAGE") or None
             segments, _ = model.transcribe(wav_path, beam_size=5, temperature=0.0,
-                                            task="transcribe", language=os.environ.get("WHISPER_LANGUAGE") or None,
-                                            vad_filter=False, word_timestamps=True,
-                                            hallucination_silence_threshold=2.0,
+                                            task="transcribe", language=language,
+                                            multilingual=language is None and model.model.is_multilingual,
+                                            vad_filter=True, word_timestamps=True, chunk_length=18,
+                                            vad_parameters={"min_silence_duration_ms": 450, "max_speech_duration_s": 15},
+                                            repetition_penalty=1.12, no_repeat_ngram_size=4,
+                                            hallucination_silence_threshold=1.0,
                                             condition_on_previous_text=False)
             recognized = [{"text": seg.text.strip(), "start": float(seg.start),
                      "end": float(seg.end), "duration": float(seg.end - seg.start),
@@ -100,7 +104,20 @@ def speech_words_for_clip(speech, duration):
                                            if float(other["start"]) > start), float(segment.get("end", start))))
             if word.get("word") and start < duration and end > start:
                 result.append({"word": word["word"], "start": start, "end": end})
-    return result
+    # Decoder loops can survive generation penalties and span multiple segments.
+    # Keep short, natural repetitions such as "boring, boring business".
+    filtered = []
+    i = 0
+    while i < len(result):
+        j = i + 1
+        token = re.sub(r"[^\w]+", "", result[i]["word"].casefold())
+        while (token and j < len(result)
+               and result[j]["start"] - result[j - 1]["end"] < 0.5
+               and re.sub(r"[^\w]+", "", result[j]["word"].casefold()) == token):
+            j += 1
+        filtered.extend(result[i:j] if j - i < 4 else result[i:i + 1])
+        i = j
+    return filtered
 
 
 def select_export_streams(info):
@@ -201,8 +218,11 @@ def generate_srt(subtitles: list, clip_start: float = 0.0, video_subtitles: list
         for i, cue in enumerate(cues):
             group.append(cue)
             gap = i + 1 < len(cues) and cues[i + 1]["start"] - cue["end"] >= 0.38
-            if len(group) >= 4 or cue["text"].endswith((".", "!", "?")) or gap or i == len(cues) - 1:
-                groups.append({"text": " ".join(c["text"] for c in group),
+            phrase = " ".join(c["text"] for c in group)
+            last = i == len(cues) - 1
+            next_too_long = not last and len(phrase) + len(cues[i + 1]["text"]) + 1 > 38
+            if len(group) >= 4 or cue["text"].endswith((".", "!", "?")) or gap or last or next_too_long:
+                groups.append({"text": phrase,
                                "start": group[0]["start"], "end": max(c["end"] for c in group)})
                 group = []
         cues = groups
