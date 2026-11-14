@@ -43,18 +43,42 @@ class PublicHostingTests(unittest.TestCase):
             output = os.path.join(tmp, "preview.mp4")
             with open(output, "wb") as stream:
                 stream.write(b"example MP4 data")
-            manager = RenderJobs(lambda _: (output, {"title": "A test explainer", "description": "#Shorts"}))
+            rendering = threading.Event()
+            finish = threading.Event()
+
+            def render(payload, report_progress):
+                self.assertEqual(payload["max_seconds"], 90)
+                report_progress("rendering", 40)
+                rendering.set()
+                if not finish.wait(5):
+                    raise RuntimeError("Preview test did not release the render")
+                return output, {"title": "A test explainer", "description": "#Shorts"}
+
+            manager = RenderJobs(render, report_progress=True)
             with patch("server.AI_VIDEO_JOBS", manager):
                 request = urllib.request.Request(
-                    self.url + "/api/ai-videos", data=b'{"template":"blueprint-lab","example":true}',
+                    self.url + "/api/ai-videos", data=b'{"template":"blueprint-lab","example":true,"max_seconds":90}',
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(request) as response:
                     self.assertEqual(response.status, 202)
                     job_id = json.load(response)["id"]
-                manager.pending.join()
                 source = self.url + f"/api/ai-videos/{job_id}"
+                try:
+                    self.assertTrue(rendering.wait(3))
+                    with urllib.request.urlopen(source) as response:
+                        job = json.load(response)
+                    self.assertEqual(job["state"], "rendering")
+                    self.assertEqual(job["progress"], {"stage": "rendering", "percent": 40})
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        urllib.request.urlopen(source + "/video")
+                    self.assertEqual(error.exception.code, 409)
+                finally:
+                    finish.set()
+                manager.pending.join()
                 with urllib.request.urlopen(source) as response:
-                    self.assertEqual(json.load(response)["metadata"]["title"], "A test explainer")
+                    job = json.load(response)
+                self.assertEqual(job["metadata"]["title"], "A test explainer")
+                self.assertNotIn("progress", job)
                 request = urllib.request.Request(source + "/video?download=1", headers={"Range": "bytes=8-10"})
                 with urllib.request.urlopen(request) as response:
                     self.assertEqual(response.status, 206)
@@ -87,6 +111,12 @@ class PublicHostingTests(unittest.TestCase):
         for seconds in (25, 90):
             with self.assertRaises(ExplainerError):
                 _fit_runtime([seconds * FPS])
+        frames, tempo = _fit_runtime([3 * FPS, 93 * FPS], max_seconds=90)
+        self.assertEqual(sum(frames), 90 * FPS)
+        self.assertEqual(tempo, 96 / 90)
+        self.assertEqual(_fit_runtime([70 * FPS], max_seconds=90), ([70 * FPS], 1.0))
+        with self.assertRaises(ValueError):
+            validate_generation({"example": True, "max_seconds": 91})
 
     def test_explainer_auto_selects_template_and_keeps_manual_override(self):
         template_id = "marker-room"

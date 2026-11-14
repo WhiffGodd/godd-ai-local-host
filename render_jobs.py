@@ -10,10 +10,12 @@ from api.youtube_upload import YouTubeUploadError
 
 
 class RenderJobs:
-    def __init__(self, renderer, max_pending=4, lifetime=1800, publisher=None, thumbnailer=None):
+    def __init__(self, renderer, max_pending=4, lifetime=1800, publisher=None, thumbnailer=None,
+                 report_progress=False):
         self.renderer = renderer
         self.publisher = publisher
         self.thumbnailer = thumbnailer
+        self.report_progress = report_progress
         self.pending = queue.Queue(maxsize=max_pending)
         self.jobs = OrderedDict()
         self.lock = threading.Lock()
@@ -61,7 +63,17 @@ class RenderJobs:
     @staticmethod
     def _status(job):
         return {k: job[k] for k in ('id', 'state', 'error', 'code', 'video_id', 'privacy', 'filename', 'metadata',
-                                   'thumbnail_applied', 'thumbnail_warning') if k in job}
+                                   'thumbnail_applied', 'thumbnail_warning', 'progress') if k in job}
+
+    def _render(self, job, payload):
+        if not self.report_progress:
+            return self.renderer(payload)
+
+        def update(stage, percent):
+            with self.lock:
+                job["progress"] = {"stage": stage, "percent": percent}
+
+        return self.renderer(payload, report_progress=update)
 
     def snapshot(self, token, owner=None):
         with self.lock:
@@ -85,7 +97,7 @@ class RenderJobs:
                     job = self.jobs[token]
                     job['state'] = 'rendering'
                     payload = job.pop('payload')
-                rendered = self.renderer(payload)
+                rendered = self._render(job, payload)
                 path, metadata = rendered if isinstance(rendered, tuple) else (rendered, None)
                 with self.lock:
                     job['path'] = path
@@ -96,6 +108,7 @@ class RenderJobs:
                 result = self.publisher(job['owner'], payload, path) if job['owner'] else {}
                 needs_thumbnail = self.thumbnailer and result.get('video_id') and payload.get('thumbnail_time') is not None
                 with self.lock:
+                    job.pop('progress', None)
                     job.update(state='thumbnail_processing' if needs_thumbnail else 'complete',
                                updated=time.monotonic(), **result)
                 if needs_thumbnail:
@@ -107,6 +120,7 @@ class RenderJobs:
             except Exception as error:
                 _, code, message = download_error_response(error)
                 with self.lock:
+                    self.jobs[token].pop('progress', None)
                     self.jobs[token].update(state='failed', code=code, error=message, updated=time.monotonic())
             finally:
                 self.pending.task_done()

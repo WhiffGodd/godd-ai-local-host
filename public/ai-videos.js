@@ -30,8 +30,9 @@ function message(id, text, error = false) {
 function save() {
   sessionStorage.setItem(storeKey, JSON.stringify({
     generation: page.generation, upload: page.upload, template: page.selected?.id || "auto",
-    prompt: $("prompt").value, voice: $("voice").value,
-    draft: Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
+    prompt: $("prompt").value, voice: $("voice").value, maxSeconds: $("maxSeconds").value,
+    draft: $("video").hidden ? null :
+      Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
   }));
 }
 
@@ -255,8 +256,11 @@ function showVideo(job, draft = null) {
   $("video").src = source;
   $("video").hidden = false;
   $("stylePreview").hidden = true;
-  $("selectedStyle").textContent = job.metadata.template || "";
+  const seconds = Math.round(job.metadata.duration);
+  const runtime = Number.isFinite(seconds) ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") : "";
+  $("selectedStyle").textContent = [job.metadata.template, runtime].filter(Boolean).join(" · ");
   $("downloadVideo").href = source + "?download=1";
+  $("previewLink").hidden = false;
   $("exportTools").hidden = false;
   document.querySelector(".workbench").dataset.generated = "true";
   $("title").value = job.metadata.title;
@@ -269,30 +273,54 @@ function showVideo(job, draft = null) {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function showGenerationProgress(job) {
+  const stage = job.progress?.stage;
+  const percent = job.progress?.percent;
+  const labels = {
+    storyboard: "Writing the storyboard…",
+    revising: "Adjusting the script to fit your chosen length…",
+    narration: "Generating the voice-over…",
+    rendering: "Rendering the animation…",
+    finalizing: "Finishing the MP4…",
+  };
+  const text = job.state === "queued" ? "Your video is queued…" : labels[stage] || "Preparing your video…";
+  const bar = $("generationProgress");
+  bar.hidden = false;
+  if (Number.isFinite(percent)) bar.value = percent;
+  else bar.removeAttribute("value");
+  message("generationStatus", Number.isFinite(percent) ? text + " " + percent + "%" : text);
+  message("previewStatus", "The finished video will appear here.");
+}
+
 async function watchGeneration(draft) {
+  $("checkGeneration").hidden = true;
   page.generating = true;
   generationControls();
   try {
-    const end = Date.now() + 600000;
+    const end = Date.now() + 20 * 60 * 1000;
     while (Date.now() < end) {
       const job = await request("/api/ai-videos/" + encodeURIComponent(page.generation));
       if (job.state === "failed") throw Object.assign(new Error(job.error), {finished: true});
       if (job.state === "complete") {
         showVideo(job, draft);
         message("generationStatus", "Your video is ready.");
+        message("previewStatus", "");
         return;
       }
-      message("generationStatus", job.state === "queued" ? "Your video is in the queue…" : "Creating the storyboard, narration and animation…");
+      showGenerationProgress(job);
       await delay(2000);
     }
-    throw new Error("Generation is taking longer than expected. Refresh to check its progress.");
+    throw new Error("The video is taking longer than expected.");
   } catch (error) {
     if (error.finished || error.status === 404) {
       page.generation = null;
       save();
     }
-    message("generationStatus", error.message, true);
+    $("checkGeneration").hidden = !page.generation;
+    message("generationStatus", page.generation ? error.message + " Use Check video status to reconnect." : error.message, true);
+    message("previewStatus", page.generation ? "Waiting for a status update." : "No video is available to preview.");
   } finally {
+    $("generationProgress").hidden = true;
     page.generating = false;
     generationControls();
   }
@@ -300,16 +328,20 @@ async function watchGeneration(draft) {
 
 async function generate(example) {
   if (page.generating || page.uploading || !page.templates.length) return;
+  $("checkGeneration").hidden = true;
   page.generating = true;
   generationControls();
   message("generationStatus", "Starting your video…");
   try {
     const job = await request("/api/ai-videos", {
       prompt: $("prompt").value.trim(), template: page.selected?.id || "auto", voice: $("voice").value, example,
+      max_seconds: Number($("maxSeconds").value),
     });
     page.generation = job.id;
     $("video").pause();
     $("video").hidden = true;
+    $("previewLink").hidden = true;
+    showGenerationProgress(job);
     $("stylePreview").hidden = !page.selected;
     $("selectedStyle").textContent = page.selected ? page.selected.name + " · Template preview" : "Auto-selecting a template";
     $("exportTools").hidden = true;
@@ -318,6 +350,7 @@ async function generate(example) {
     save();
     await watchGeneration();
   } catch (error) {
+    $("checkGeneration").hidden = !page.generation || !$("video").hidden;
     message("generationStatus", error.message, true);
   } finally {
     page.generating = false;
@@ -378,6 +411,10 @@ async function watchUpload() {
 
 $("generator").addEventListener("submit", event => { event.preventDefault(); generate(false); });
 $("sample").addEventListener("click", () => generate(true));
+$("checkGeneration").addEventListener("click", () => watchGeneration());
+$("video").addEventListener("error", () => {
+  if (!$("video").hidden) message("previewStatus", "The preview could not load. Try Download MP4 or refresh the studio.", true);
+});
 $("autoTemplate").addEventListener("click", () => chooseTemplate(null));
 $("moreTemplates").addEventListener("click", () => { page.limit += 12; drawLibrary(); });
 for (const button of document.querySelectorAll("[data-topic]")) {
@@ -443,6 +480,7 @@ $("publishForm").addEventListener("submit", async event => {
 async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
+  if (["60", "90"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
   if (Array.from($("voice").options).some(option => option.value === saved.voice)) $("voice").value = saved.voice;
   page.generation = saved.generation;
   page.upload = saved.upload;

@@ -21,7 +21,7 @@
   <main class="wrap">
     <div class="intro">
       <h1>AI Video Studio</h1>
-      <p>Turn a prompt into a 50–60 second narrated explainer with animated diagrams.</p>
+      <p>Turn a prompt into a narrated explainer up to 1 minute 30 seconds long.</p>
     </div>
     <div class="workbench">
       <div class="composer">
@@ -42,11 +42,21 @@
               <option value="documentary">Documentary</option>
             </select>
           </div>
+          <div class="voice-setting">
+            <label for="maxSeconds">Maximum video length</label>
+            <select id="maxSeconds">
+              <option value="90">1 minute 30 seconds</option>
+              <option value="60">1 minute</option>
+            </select>
+          </div>
           <div class="generate-actions">
             <button id="generate" class="primary" type="submit" disabled>Generate video</button>
             <button id="sample" class="secondary" type="button" disabled>Render sample</button>
           </div>
           <p id="generationStatus" class="status" role="status">Loading the template library…</p>
+          <progress id="generationProgress" max="100" aria-label="Animation rendering progress" hidden></progress>
+          <button id="checkGeneration" class="secondary" type="button" hidden>Check video status</button>
+          <a id="previewLink" class="secondary" href="#previewHeading" hidden>Watch preview</a>
         </form>
         <section class="library" aria-labelledby="libraryHeading">
           <div class="library-heading">
@@ -60,12 +70,13 @@
         </section>
       </div>
       <aside class="output" aria-labelledby="previewHeading">
-        <h2 id="previewHeading">Preview</h2>
+        <h2 id="previewHeading">Video preview</h2>
         <div class="preview-shell">
           <canvas id="stylePreview" width="360" height="640" aria-label="Selected template preview" role="img"></canvas>
           <video id="video" controls playsinline preload="metadata" hidden aria-label="Generated explainer"></video>
         </div>
         <p id="selectedStyle" class="selected-style"></p>
+        <p id="previewStatus" class="status" role="status"></p>
         <div id="exportTools" hidden>
           <a id="downloadVideo" class="secondary download">Download MP4</a>
           <section class="publish" aria-labelledby="publishHeading">

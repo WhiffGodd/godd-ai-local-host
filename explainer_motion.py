@@ -98,7 +98,7 @@ class ScenePainter:
                     break
             spacing = size + 9
             for row, line in enumerate(lines):
-                draw.text((353, 965 + (row - (len(lines) - 1) / 2) * spacing), line,
+                draw.text((353, 895 + (row - (len(lines) - 1) / 2) * spacing), line,
                           anchor="mm", fill=self.ink, font=font)
             return
         draw.rounded_rectangle((43, 356, 663, 870), radius=radius, fill=self.panel, outline=self.line, width=2)
@@ -112,10 +112,10 @@ class ScenePainter:
                 break
         for row, line in enumerate(heading[:3]):
             draw.text((53, 154 + row * (size + 4)), line, fill=self.ink, font=heading_font)
-        draw.rounded_rectangle((43, 927, 663, 1116), radius=24, fill=self.panel, outline=self.line, width=2)
+        draw.rounded_rectangle((43, 888, 663, 1077), radius=24, fill=self.panel, outline=self.line, width=2)
         caption_font = _font(30, True)
         for row, line in enumerate(_lines(draw, scene["caption"], caption_font, 532)[:4]):
-            draw.text((74, 957 + row * 36), line, fill=self.ink, font=caption_font)
+            draw.text((74, 918 + row * 36), line, fill=self.ink, font=caption_font)
 
     def frame(self, t):
         if self.full_frame:
@@ -173,7 +173,7 @@ class ScenePainter:
         draw = ImageDraw.Draw(image)
         spacing = self.full_font.size + 10
         for i, line in enumerate(self.full_lines):
-            y = 987 + (i - (len(self.full_lines) - 1) / 2) * spacing
+            y = 917 + (i - (len(self.full_lines) - 1) / 2) * spacing
             draw.text((WIDTH // 2, y), line, anchor="mm", font=self.full_font, fill="white",
                       stroke_width=3, stroke_fill="#111827")
         return image

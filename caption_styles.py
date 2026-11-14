@@ -1,6 +1,8 @@
 """Styled ASS captions with explicit 1080p sizing and spoken-word emphasis."""
 import re
 
+CAPTION_BOTTOM_MARGIN = 315
+
 PRESETS = {
     "source": dict(font="Arial", size=48, accent="FFFFFF", outline=2, shadow=1),
     "clean": dict(font="Arial", size=48, accent="FFFFFF", outline=2, shadow=1),
@@ -45,7 +47,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,{style['font']},{style['size']},&H00{primary},&H00{style['accent']},&H00{border},&H90000000,-1,{ -1 if style.get('italic') else 0},0,0,100,100,0,0,{3 if style.get('box') else 1},{style['outline']},{style['shadow']},2,80,80,220,1
+Style: Caption,{style['font']},{style['size']},&H00{primary},&H00{style['accent']},&H00{border},&H90000000,-1,{ -1 if style.get('italic') else 0},0,0,100,100,0,0,{3 if style.get('box') else 1},{style['outline']},{style['shadow']},2,80,80,{CAPTION_BOTTOM_MARGIN},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -62,7 +64,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Their explicit pixel coordinates keep preview/export sizes predictable.
         width = min(920, max(220, len(text) * style['size'] * 0.57 + 64))
         height = 92 if width < 920 else 154
-        x, y = (1080 - width) / 2, 1920 - 210 - height
+        x, y = (1080 - width) / 2, 1920 - (CAPTION_BOTTOM_MARGIN - 10) - height
         def decoration(drawing, color, outline_color, outline=1.5, alpha='28', dx=0, dy=0):
             tags = (f"{{\\an7\\pos({x+dx:.1f},{y+dy:.1f})\\p1\\bord{outline}\\shad0"
                     f"\\1c&H{color}&\\3c&H{outline_color}&\\1a&H{alpha}&\\3a&H30&}}")

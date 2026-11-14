@@ -28,7 +28,8 @@ GEMINI_MODEL = os.environ.get("AI_VIDEO_GEMINI_MODEL", "gemini-3.1-flash-lite")
 MAX_PROMPT = 1200
 TARGET_SECONDS = 55
 MIN_SECONDS = 50
-MAX_SECONDS = 60
+DEFAULT_MAX_SECONDS = 60
+MAX_SECONDS = 90
 BICYCLE_PEDALS_PROMPT = "Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog."
 VOICE_STYLES = {
     "expressive": ("en_US-amy-medium", 0.91, 0.96, 0.97),
@@ -88,6 +89,15 @@ _EXAMPLE = {
          "diagram": "bicycle", "labels": ["Pedals", "Rear wheel"]},
     ],
 }
+
+_LONG_EXAMPLE_SCENES = [
+    {"heading": "Why a longer crank helps", "caption": "A longer lever gives your foot more turning force.",
+     "narration": "Think of pushing a door near its hinge, then pushing it near the handle. The same push turns it more easily at the handle. A crank works on that same principle. The pedal is out at the end of the lever, away from the axle.",
+     "diagram": "bicycle_drive", "labels": ["Pedal", "Crank"]},
+    {"heading": "What happens when you coast?", "caption": "A freewheel lets the rear wheel turn without moving the pedals.",
+     "narration": "On most bicycles, you can stop moving your feet while the bike keeps rolling. The freewheel lets the hub turn faster than the cog, so the rear wheel doesn't drag the chain around. Start pedaling again and the freewheel engages, sending power back to the wheel.",
+     "diagram": "bicycle", "labels": ["Rear wheel", "Pedals"]},
+]
 
 
 def _ollama_models(timeout=2):
@@ -168,10 +178,14 @@ def validate_generation(payload):
     voice = payload.get("voice", "expressive")
     if not isinstance(voice, str) or voice not in VOICE_STYLES:
         raise ValueError("Choose a narration style.")
-    return {"prompt": prompt.strip(), "template": template, "example": example, "voice": voice}
+    max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
+    if type(max_seconds) is not int or max_seconds not in (DEFAULT_MAX_SECONDS, MAX_SECONDS):
+        raise ValueError("Choose a 60- or 90-second maximum.")
+    return {"prompt": prompt.strip(), "template": template, "example": example, "voice": voice,
+            "max_seconds": max_seconds}
 
 
-def _validate_plan(plan):
+def _validate_plan(plan, max_scenes=6):
     def text(value, limit):
         if not isinstance(value, str):
             raise ValueError("Expected text")
@@ -192,8 +206,8 @@ def _validate_plan(plan):
     if "#Shorts" not in tags:
         tags.append("#Shorts")
     scenes = plan["scenes"]
-    if not isinstance(scenes, list) or not 5 <= len(scenes) <= 6:
-        raise ValueError("Expected 5–6 scenes")
+    if not isinstance(scenes, list) or not 5 <= len(scenes) <= max_scenes:
+        raise ValueError("Unexpected scene count")
     clean = []
     for scene in scenes:
         diagram, labels = scene["diagram"], scene["labels"]
@@ -209,10 +223,15 @@ def _validate_plan(plan):
     return title, f"{description}\n\n{' '.join(tags)}", [opening, *clean]
 
 
-def plan_video(prompt, template, voice_style="expressive", target_words=150):
-    schema = _SCHEMA
+def plan_video(prompt, template, voice_style="expressive", target_words=150, max_seconds=DEFAULT_MAX_SECONDS):
+    long_video = max_seconds == MAX_SECONDS
+    target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
+    max_scenes = 8 if long_video else 6
+    properties = {**_SCHEMA["properties"],
+                  "scenes": {**_SCHEMA["properties"]["scenes"], "maxItems": max_scenes}}
+    schema = _object(**properties)
     if template is None:
-        schema = _object(template={"type": "string", "enum": list(TEMPLATES)}, **_SCHEMA["properties"])
+        schema = _object(template={"type": "string", "enum": list(TEMPLATES)}, **properties)
         choices = ", ".join(f"{t.id} ({t.category}, {t.diagram})" for t in TEMPLATES.values())
         visual_style = ("Choose one template ID that matches the main subject and tone. Favor people-led "
                         "illustrations for human stories, engineering styles for machines, science styles for "
@@ -229,10 +248,10 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
         "Write a 4 to 10 word hook, maximum 80 characters. Open immediately with a specific puzzle, "
         "surprising truth or relatable 'what if' that the video actually answers. Use no greeting, "
         "intro filler, clickbait or invented claim. The hook is spoken and shown before the scenes. "
-        "Use 5 to 6 consecutive scenes. Pick up directly from the hook without repeating it, "
+        f"Use {'7 to 8' if long_video else '5 to 6'} consecutive scenes. Pick up from the hook without repeating it, "
         "explain cause and effect, and end with the payoff and a complete answer. "
-        f"Write about {target_words} spoken words in total, including the hook, for a {TARGET_SECONDS}-second video. "
-        f"Write roughly {round((target_words - 8) / 5)} words of narration in each of five scenes. "
+        f"Write about {target_words} spoken words, including the hook, for a {target_seconds}-second video. "
+        f"Write roughly {round((target_words - 8) / (7 if long_video else 5))} words per scene. "
         "Use two or three complete sentences per scene and develop the answer with a concrete example or useful detail. "
         f"{delivery} "
         "Write the narration as one spoken story that happens to span several visuals. Let each scene pick up "
@@ -269,14 +288,15 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
         else:
             response = requests.post(f"{OLLAMA_URL}/api/chat", json={
                 "model": OLLAMA_MODEL, "stream": False, "think": False, "format": schema, "keep_alive": "1m",
-                "options": {"temperature": 0.3, "num_predict": 2400, "num_ctx": 4096},
+                "options": {"temperature": 0.3, "num_predict": 3200 if long_video else 2400,
+                            "num_ctx": 6144 if long_video else 4096},
                 "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
             }, timeout=(4, 180))
             response.raise_for_status()
             result = response.json()["message"]["content"]
         plan = json.loads(result)
         selected_template = template if template is not None else TEMPLATES[plan["template"]]
-        title, description, scenes = _validate_plan(plan)
+        title, description, scenes = _validate_plan(plan, max_scenes)
         topic = prompt
         bicycle = re.search(r"\b(?:bicycles?|bikes?|cyclists?)\b", topic, re.I)
         human_scenes = ("presenter", "walking", "handoff")
@@ -446,35 +466,53 @@ def _speak(text, script, target, pace, opening, voice):
         raise ExplainerError("Could not create the voiceover. Check the server's speech engine.") from None
 
 
-def render_explainer(payload):
+def render_explainer(payload, report_progress=None):
+    def report(stage, percent=None):
+        if report_progress:
+            report_progress(stage, percent)
+
     template = TEMPLATES.get(payload["template"])
     style = payload.get("voice", "expressive")
+    max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
+    long_video = max_seconds == MAX_SECONDS
+    target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
+    minimum = MIN_SECONDS if not long_video else 75
+    report("storyboard")
     example = payload["example"] or payload.get("prompt", "").strip().casefold() == BICYCLE_PEDALS_PROMPT.casefold()
-    target_words = {"expressive": 160, "energetic": 175, "documentary": 150}[style]
+    target_words = round({"expressive": 160, "energetic": 175, "documentary": 150}[style] * target_seconds / TARGET_SECONDS)
     if example:
         template = template or TEMPLATES["industrial-cutaway"]
-        title, description, scenes = _validate_plan(_EXAMPLE)
+        plan = _EXAMPLE
+        if long_video:
+            original = plan["scenes"]
+            plan = {**plan, "scenes": [*original[:1], _LONG_EXAMPLE_SCENES[0], *original[1:-1],
+                                       _LONG_EXAMPLE_SCENES[1], original[-1]]}
+        title, description, scenes = _validate_plan(plan, 8 if long_video else 6)
     else:
-        template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words)
+        template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
         for attempt in range(3):
+            report("narration")
             frame_counts = _continuous_narration(scenes, style, audio_path)
             if frame_counts is None:
                 frame_counts = _scene_narration(scenes, style, work, audio_path)
             duration = sum(frame_counts) / FPS
-            if 44 <= duration <= 67 or example or attempt == 2:
+            if minimum * .88 <= duration <= max_seconds * 1.12 or example or attempt == 2:
                 break
             spoken_words = sum(len(scene["narration"].split()) for scene in scenes)
-            estimated = round(spoken_words * TARGET_SECONDS / duration)
-            if duration < 44:
+            estimated = round(spoken_words * target_seconds / duration)
+            if duration < minimum * .88:
                 estimated = max(target_words + 25, estimated + 15)
             else:
                 estimated = min(target_words - 20, estimated)
-            target_words = min(230, max(90, estimated))
-            _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words)
-        frame_counts, tempo = _fit_runtime(frame_counts)
+            target_words = min(340 if long_video else 230, max(90, estimated))
+            report("revising")
+            _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
+        # A shorter complete explanation is valid when the user selects a 90-second maximum.
+        frame_counts, tempo = _fit_runtime(frame_counts, max_seconds)
+        total_frames = sum(frame_counts)
         audio_filter = "highpass=f=75,alimiter=limit=0.89:latency=1"
         if tempo != 1.0:
             seconds = sum(frame_counts) / FPS
@@ -489,20 +527,30 @@ def render_explainer(payload):
                    "-c:a", "aac", "-b:a", "96k",
                    "-movflags", "+faststart", output]
         try:
+            report("rendering", 0)
             with (work / "ffmpeg.log").open("wb") as log:
                 with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=log) as encoder:
                     try:
+                        rendered_frames = 0
+                        last_percent = 0
                         for index, (scene, count) in enumerate(zip(scenes, frame_counts)):
                             painter = ScenePainter(template, scene, index, len(scenes))
                             for frame in range(count):
                                 encoder.stdin.write(painter.frame(frame / count).tobytes())
+                                rendered_frames += 1
+                                percent = rendered_frames * 100 // total_frames
+                                if percent >= last_percent + 5 and percent < 100:
+                                    report("rendering", percent)
+                                    last_percent = percent
                         encoder.stdin.close()
+                        report("finalizing")
                         if encoder.wait(timeout=25):
                             raise ExplainerError("The animation could not be encoded. Try generating again.")
                     finally:
                         if encoder.poll() is None:
                             encoder.kill()
-            return output, {"title": title, "description": description, "template": template.name}
+            return output, {"title": title, "description": description, "template": template.name,
+                            "duration": total_frames / FPS}
         except BaseException as error:
             Path(output).unlink(missing_ok=True)
             if isinstance(error, (OSError, subprocess.SubprocessError)):
@@ -510,15 +558,16 @@ def render_explainer(payload):
             raise
 
 
-def _fit_runtime(frame_counts):
+def _fit_runtime(frame_counts, max_seconds=DEFAULT_MAX_SECONDS):
     total = sum(frame_counts)
-    if MIN_SECONDS * FPS <= total <= MAX_SECONDS * FPS:
+    min_seconds = MIN_SECONDS if max_seconds == DEFAULT_MAX_SECONDS else 0
+    if min_seconds * FPS <= total <= max_seconds * FPS:
         return frame_counts, 1.0
     # Use the closest limit so the voice changes speed only as much as needed.
-    target = (MIN_SECONDS if total < MIN_SECONDS * FPS else MAX_SECONDS) * FPS
+    target = (min_seconds if total < min_seconds * FPS else max_seconds) * FPS
     tempo = total / target
     if not 0.76 <= tempo <= 1.25:
-        raise ExplainerError("The narration missed 50–60 seconds. Generate again with a prompt that gives enough detail for a one-minute explanation.")
+        raise ExplainerError(f"The narration could not fit the {max_seconds}-second length. Try a more focused prompt.")
     boundaries = [0]
     elapsed = 0
     for count in frame_counts:

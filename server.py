@@ -49,7 +49,7 @@ SOURCE_UPLOADS = SourceUploads()
 YOUTUBE = YouTubeConnections()
 YOUTUBE_COOKIE = "godd_youtube"
 THUMBNAIL_SLOTS = BoundedSemaphore(2)
-AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=3600)
+AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=3600, report_progress=True)
 
 
 def download_filename(title, start):

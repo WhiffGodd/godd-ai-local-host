@@ -196,7 +196,8 @@ Open **AI Videos** from the main navigation. Describe what to explain and click
 **Generate video**. The AI picks from 62 motion-graphics templates, or you can
 select one yourself. The generated video shows the template name. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
-renders a 50–60 second narrated 720 × 1280 MP4. Pick Friendly, Energetic, or Documentary
+renders a narrated 720 × 1280 MP4 with a 60- or 90-second maximum. Follow the
+preparation stages and watch the finished video in the preview. Pick Friendly, Energetic, or Documentary
 to change the delivery. **Render sample** works without a storyboard model. Generated
 videos are temporary, so download a copy before closing the studio.
 
