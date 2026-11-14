@@ -29,7 +29,7 @@ function message(id, text, error = false) {
 
 function save() {
   sessionStorage.setItem(storeKey, JSON.stringify({
-    generation: page.generation, upload: page.upload, template: page.selected?.id,
+    generation: page.generation, upload: page.upload, template: page.selected?.id || "auto",
     prompt: $("prompt").value, voice: $("voice").value,
     draft: Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
   }));
@@ -91,7 +91,34 @@ function paint(canvas, template, t, cover = false) {
   const beat = t * Math.PI * 2;
   ctx.lineWidth = 2;
   ctx.strokeStyle = a;
-  if (["orbit", "cycle", "network"].includes(diagram)) {
+  if (["presenter", "walking", "handoff"].includes(diagram)) {
+    if (diagram === "presenter") {
+      ctx.fillStyle = b + "50";
+      ctx.fillRect(0, -36, 75, 62);
+      for (let row = 0; row < 3; row++) ctx.fillRect(10, -22 + row * 16, 42 + row * 5, 3);
+    }
+    const people = diagram === "handoff" ? [[-42, 1, a], [42, -1, b]] :
+      [[diagram === "walking" ? 34 * Math.sin(beat) : -44, 1, a]];
+    for (const [x, facing, color] of people) {
+      const step = diagram === "walking" ? Math.sin(beat * 2) * 13 : 0;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 8;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x - 8, 12);
+      ctx.lineTo(x - 12 - step, 37);
+      ctx.moveTo(x + 8, 12);
+      ctx.lineTo(x + 12 + step, 37);
+      ctx.moveTo(x, -9);
+      ctx.lineTo(x + facing * 33, -8 + 9 * Math.sin(beat));
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(x - 14, -20, 28, 37, 8);
+      ctx.fill();
+      disc(x, -33, 11, "#efbc93");
+    }
+  } else if (["orbit", "cycle", "network"].includes(diagram)) {
     disc(0, 0, 15, b);
     for (let i = 0; i < 3; i++) {
       const radius = 32 + i * 20;
@@ -169,9 +196,13 @@ requestAnimationFrame(animate);
 
 function chooseTemplate(template) {
   page.selected = template;
-  $("selectedStyle").textContent = $("video").hidden ? template.name + " · Template preview" : "";
+  $("autoTemplate").setAttribute("aria-pressed", String(!template));
+  if ($("video").hidden) {
+    $("selectedStyle").textContent = template ? template.name + " · Template preview" : "Template will be chosen from your prompt";
+    $("stylePreview").hidden = !template;
+  }
   for (const button of $("templateGrid").querySelectorAll("button")) {
-    button.setAttribute("aria-pressed", String(button.dataset.template === template.id));
+    button.setAttribute("aria-pressed", String(button.dataset.template === template?.id));
   }
   save();
 }
@@ -204,7 +235,7 @@ function drawLibrary() {
 
 function generationControls() {
   $("generate").disabled = page.generating || page.uploading || !page.provider?.available;
-  $("sample").disabled = page.generating || page.uploading || !page.selected;
+  $("sample").disabled = page.generating || page.uploading || !page.templates.length;
   $("generate").textContent = page.generating ? "Generating…" : "Generate video";
 }
 
@@ -224,7 +255,7 @@ function showVideo(job, draft = null) {
   $("video").src = source;
   $("video").hidden = false;
   $("stylePreview").hidden = true;
-  $("selectedStyle").textContent = "";
+  $("selectedStyle").textContent = job.metadata.template || "";
   $("downloadVideo").href = source + "?download=1";
   $("exportTools").hidden = false;
   document.querySelector(".workbench").dataset.generated = "true";
@@ -268,19 +299,19 @@ async function watchGeneration(draft) {
 }
 
 async function generate(example) {
-  if (page.generating || page.uploading || !page.selected) return;
+  if (page.generating || page.uploading || !page.templates.length) return;
   page.generating = true;
   generationControls();
   message("generationStatus", "Starting your video…");
   try {
     const job = await request("/api/ai-videos", {
-      prompt: $("prompt").value.trim(), template: page.selected.id, voice: $("voice").value, example,
+      prompt: $("prompt").value.trim(), template: page.selected?.id || "auto", voice: $("voice").value, example,
     });
     page.generation = job.id;
     $("video").pause();
     $("video").hidden = true;
-    $("stylePreview").hidden = false;
-    $("selectedStyle").textContent = page.selected.name + " · Template preview";
+    $("stylePreview").hidden = !page.selected;
+    $("selectedStyle").textContent = page.selected ? page.selected.name + " · Template preview" : "Auto-selecting a template";
     $("exportTools").hidden = true;
     message("publishStatus", "");
     delete document.querySelector(".workbench").dataset.generated;
@@ -347,6 +378,7 @@ async function watchUpload() {
 
 $("generator").addEventListener("submit", event => { event.preventDefault(); generate(false); });
 $("sample").addEventListener("click", () => generate(true));
+$("autoTemplate").addEventListener("click", () => chooseTemplate(null));
 $("moreTemplates").addEventListener("click", () => { page.limit += 12; drawLibrary(); });
 for (const button of document.querySelectorAll("[data-topic]")) {
   button.addEventListener("click", () => { $("prompt").value = button.dataset.topic; $("prompt").focus(); save(); });
@@ -424,7 +456,7 @@ async function initialize() {
     const data = await request("/api/ai-videos/templates");
     page.templates = data.templates;
     page.provider = data;
-    page.selected = page.templates.find(template => template.id === saved.template) || page.templates[0];
+    page.selected = page.templates.find(template => template.id === saved.template) || null;
     for (const category of ["All", ...new Set(page.templates.map(template => template.category))]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -433,7 +465,9 @@ async function initialize() {
       $("categories").append(button);
     }
     drawLibrary();
-    $("selectedStyle").textContent = page.selected.name + " · Template preview";
+    $("autoTemplate").setAttribute("aria-pressed", String(!page.selected));
+    $("stylePreview").hidden = !page.selected;
+    $("selectedStyle").textContent = page.selected ? page.selected.name + " · Template preview" : "Template will be chosen from your prompt";
     message("generationStatus", data.setup || "");
     generationControls();
     if (page.generation) {

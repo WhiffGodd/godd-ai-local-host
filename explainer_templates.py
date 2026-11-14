@@ -51,15 +51,15 @@ Data|Metrics Panel|bars|cards|101f36|edf5ff|6ef0f1|7995ff
 Data|Scale Lineup|bars|paper|f5efd9|3a2c21|a05021|5f733a
 Data|Formula Desk|wave|paper|e6ecf8|243454|375ba8|875786
 Data|Connection Map|network|glass|14202b|ebfff9|7be4ba|7b9df2
-Illustrated|Pencil Classroom|parts|paper|f6edd9|272929|65419c|9c5f31
-Illustrated|Marker Room|flow|paper|f2f1e9|272f32|176c8b|b65c42
+Illustrated|Pencil Classroom|presenter|paper|f6edd9|272929|65419c|9c5f31
+Illustrated|Marker Room|presenter|paper|f2f1e9|272f32|176c8b|b65c42
 Illustrated|Paper Stacks|sequence|cards|472e48|fff1e7|ffbaaa|dbc4ff
 Illustrated|Color Blocks|compare|cards|282046|fff1f9|ffa8db|f8d572
-Illustrated|Comic Science|motion|cards|212657|eff3ff|ffe26b|ff8589
+Illustrated|Comic Science|walking|cards|212657|eff3ff|ffe26b|ff8589
 Illustrated|Botanical Notebook|cycle|paper|eef0df|273520|527842|a16648
 Illustrated|Field Guide|cutaway|paper|eee5c9|352c22|92652b|3b766b
 Illustrated|Ink & Lilac|network|paper|ede6f3|32233f|7950a7|b35a75
-Illustrated|Story Panels|sequence|cards|2f2440|fff3e4|fbc687|b49bf4
+Illustrated|Story Panels|handoff|cards|2f2440|fff3e4|fbc687|b49bf4
 Illustrated|Atlas Sketch|network|paper|e7ecdb|31392c|487753|a36738
 Retro|Terminal Signal|flow|grid|0a1c15|e4ffe7|84f192|488977
 Retro|Arcade Physics|motion|grid|221642|f7edff|ff8ed5|70dbff
@@ -74,7 +74,7 @@ Retro|Night Frequency|wave|stars|11192d|edf7ff|70cfff|ff9a71
 Shorts|Quick Breakdown|parts|cards|171933|f4efff|bfa7ff|75e4f2
 Shorts|Myth Check|compare|cards|2e1833|fff0fc|ffa0c0|b6a0ff
 Shorts|This vs That|compare|glass|15283a|eff7ff|63e5dd|ffad8d
-Shorts|Steps in Motion|sequence|cards|29233e|fff3fe|f7ac8f|bcb2ff
+Shorts|Steps in Motion|walking|cards|29233e|fff3fe|f7ac8f|bcb2ff
 Shorts|Question Timer|cycle|grid|182634|f1f8ff|f8d773|7bcfe7
 Shorts|Fact Stack|bars|cards|182832|ecfffc|8ae7ce|a3a9ff
 Shorts|Focus Mode|motion|glass|1e2036|f5efff|c4acff|ffb27c

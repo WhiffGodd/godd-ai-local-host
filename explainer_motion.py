@@ -61,7 +61,9 @@ class ScenePainter:
         self.panel = _mix(self.bg, self.ink, 0.07)
         self.diagram = getattr(self, "_" + scene["diagram"])
         self.labels = scene["labels"]
-        self.full_frame = scene["diagram"] in ("bicycle", "bicycle_drive", "piston", "gears", "moon")
+        self.full_frame = scene["diagram"] in (
+            "bicycle", "bicycle_drive", "piston", "gears", "moon", "presenter", "walking", "handoff",
+        )
         if self.full_frame:
             self._prepare_full_frame()
             return
@@ -158,11 +160,11 @@ class ScenePainter:
 
     def _full_frame(self, t):
         image = self.base.copy()
-        # Existing mechanism coordinates sit between y=420 and y=740.
         # The viewport moves independently of the captions.
         stage = Image.new("RGBA", (WIDTH, 800))
         self.diagram(ImageDraw.Draw(stage), t)
-        art = stage.crop((0, 345, WIDTH, 800))
+        top = 265 if self.scene["diagram"] == "bicycle" else 345
+        art = stage.crop((0, top, WIDTH, 800))
         detail = self.scene["diagram"] == "bicycle_drive"
         zoom = (1.14 if detail else 1.07) + .13 * t
         art = art.resize((round(art.width * zoom), round(art.height * zoom)), Image.Resampling.BILINEAR)
@@ -181,6 +183,62 @@ class ScenePainter:
         draw.circle((x, y), size, fill=fill)
         ink = (17, 19, 24) if sum(fill) > 365 else (255, 255, 255)
         draw.text((x, y), str(index + 1), anchor="mm", fill=ink, font=_font(23, True))
+
+    def _person(self, draw, x, ground, color, stride, gesture, facing=1, skin=(222, 157, 111)):
+        bob = abs(stride) * 7
+        draw.ellipse((x - 68, ground - 8, x + 68, ground + 12), fill=self.line)
+        trousers = _mix(self.bg, self.ink, .44)
+        shoe = (30, 34, 47)
+        for side in (-1, 1):
+            hip = (x + side * 14, ground - 112 - bob)
+            knee = (x + side * (14 + stride * 31), ground - 62)
+            foot = (x + side * (17 + stride * 55), ground - 13 - max(0, side * stride) * 23)
+            draw.line((hip, knee, foot), fill=trousers, width=24, joint="curve")
+            draw.rounded_rectangle((foot[0] - 13, foot[1] - 4, foot[0] + 20, foot[1] + 8),
+                                   radius=6, fill=shoe)
+        shoulder_y = ground - 201 - bob
+        draw.rounded_rectangle((x - 38, shoulder_y, x + 38, ground - 105 - bob), radius=23, fill=color)
+        draw.line((x - facing * 31, shoulder_y + 19, x - facing * (39 + stride * 13), shoulder_y + 82),
+                  fill=skin, width=17)
+        elbow = (x + facing * 48, shoulder_y + 46 + gesture * 7)
+        hand = (x + facing * (62 + 36 * gesture), shoulder_y + 91 - 99 * gesture)
+        draw.line(((x + facing * 33, shoulder_y + 16), elbow, hand), fill=skin, width=17, joint="curve")
+        draw.circle(hand, 10, fill=skin)
+        head_y = shoulder_y - 39
+        draw.rounded_rectangle((x - 10, head_y + 19, x + 10, shoulder_y + 13), radius=8, fill=skin)
+        draw.circle((x, head_y), 28, fill=skin)
+        draw.pieslice((x - 29, head_y - 30, x + 29, head_y + 18), 175, 350, fill=shoe)
+        draw.circle((x + facing * 10, head_y + 3), 2.5, fill=shoe)
+        draw.arc((x + facing * 8 - 8, head_y + 7, x + facing * 8 + 8, head_y + 20), 18, 150,
+                 fill=shoe, width=2)
+        return hand
+
+    def _presenter(self, draw, t):
+        draw.rounded_rectangle((278, 418, 628, 652), radius=22, fill=self.panel, outline=self.line, width=3)
+        for i, label in enumerate(self.labels):
+            y = 457 + i * 49
+            draw.circle((315, y), 6, fill=self.a if i <= int(t * len(self.labels)) else self.line)
+            draw.text((337, y), label, anchor="lm", fill=self.ink, font=_font(23, True))
+        self._person(draw, 190, 739, self.a, 0, .66 + .28 * sin(t * 4 * pi))
+
+    def _walking(self, draw, t):
+        ground = 724
+        draw.line((88, ground + 10, 632, ground + 10), fill=self.line, width=3)
+        for i in range(7):
+            x = 95 + i * 80
+            draw.line((x, ground + 25, x + 28, ground + 25), fill=self.line, width=3)
+        stride = sin(t * 10 * pi)
+        self._person(draw, 170 + 365 * t, ground, self.a, stride, .4 + .36 * stride)
+
+    def _handoff(self, draw, t):
+        reach = min(1, t * 3, (1 - t) * 3)
+        stride = (1 - reach * .6) * sin(t * 10 * pi)
+        left = self._person(draw, 247 - 74 * (1 - reach), 733, self.a, stride, reach)
+        right = self._person(draw, 456 + 74 * (1 - reach), 733, self.b, -stride, reach,
+                             facing=-1, skin=(150, 93, 62))
+        x, y = left if t < .5 else right
+        draw.rounded_rectangle((x - 24, y - 9, x + 24, y + 2), radius=5,
+                               fill=self.ink, outline=self.line, width=2)
 
     def _bicycle(self, draw, t):
         rear, front, crank = (184, 623), (523, 623), (325, 638)
@@ -209,7 +267,28 @@ class ScenePainter:
         draw.rounded_rectangle((249, 426, 304, 440), radius=7, fill=tire)
         draw.line((446, 470, 436, 429, 480, 429), fill=metal, width=9, joint="curve")
         draw.arc((469, 420, 504, 472), 270, 435, fill=tire, width=10)
+        self._rider(draw, crank, angle)
         self._bike_drive(draw, rear, crank, angle, 1)
+
+    def _rider(self, draw, crank, angle):
+        hip, shoulder = (282, 420), (369, 348)
+        pants = _mix(self.bg, self.ink, .57)
+        shoe = (26, 29, 38)
+        skin = (224, 162, 119)
+        for phase, shade in ((pi, _mix(self.bg, pants, .73)), (0, pants)):
+            foot = (crank[0] + 56 * cos(angle + phase), crank[1] + 56 * sin(angle + phase) - 7)
+            knee = ((hip[0] + foot[0]) / 2 + 61, (hip[1] + foot[1]) / 2 - 12)
+            draw.line((hip, knee, foot), fill=shade, width=23, joint="curve")
+            draw.rounded_rectangle((foot[0] - 9, foot[1] - 7, foot[0] + 16, foot[1] + 5), radius=5, fill=shoe)
+        draw.line((hip, shoulder), fill=self.a, width=48)
+        draw.circle(hip, 22, fill=self.a)
+        draw.circle(shoulder, 21, fill=self.a)
+        draw.line((shoulder, (406, 390), (464, 427)), fill=skin, width=17, joint="curve")
+        draw.circle((464, 427), 10, fill=skin)
+        draw.circle((394, 324), 25, fill=skin)
+        draw.pieslice((367, 286, 423, 338), 180, 360, fill=self.ink)
+        draw.line((383, 312, 395, 342, 410, 315), fill=shoe, width=3)
+        draw.circle((407, 323), 2.5, fill=shoe)
 
     def _bicycle_drive(self, draw, t):
         rear, crank = (172, 591), (478, 614)

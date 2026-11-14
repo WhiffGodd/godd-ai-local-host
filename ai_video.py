@@ -41,7 +41,8 @@ KOKORO_STYLES = {
     "documentary": ("am_michael", 0.96, 0.25),
 }
 DIAGRAMS = ("parts", "cutaway", "flow", "sequence", "cycle", "network", "orbit", "wave",
-            "motion", "bars", "compare", "gears", "piston", "moon", "bicycle", "bicycle_drive")
+            "motion", "bars", "compare", "gears", "piston", "moon", "bicycle", "bicycle_drive",
+            "presenter", "walking", "handoff")
 
 
 class ExplainerError(RuntimeError):
@@ -158,8 +159,8 @@ def validate_generation(payload):
     prompt = payload.get("prompt", "")
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT:
         raise ValueError(f"Keep the prompt under {MAX_PROMPT} characters.")
-    template = payload.get("template")
-    if not isinstance(template, str) or template not in TEMPLATES:
+    template = payload.get("template", "auto")
+    if not isinstance(template, str) or (template != "auto" and template not in TEMPLATES):
         raise ValueError("Choose a template from the library.")
     example = payload.get("example", False)
     if type(example) is not bool or (not example and len(prompt.strip()) < 8):
@@ -209,6 +210,15 @@ def _validate_plan(plan):
 
 
 def plan_video(prompt, template, voice_style="expressive", target_words=150):
+    schema = _SCHEMA
+    if template is None:
+        schema = _object(template={"type": "string", "enum": list(TEMPLATES)}, **_SCHEMA["properties"])
+        choices = ", ".join(f"{t.id} ({t.category}, {t.diagram})" for t in TEMPLATES.values())
+        visual_style = ("Choose one template ID that matches the main subject and tone. Favor people-led "
+                        "illustrations for human stories, engineering styles for machines, science styles for "
+                        "natural processes, and data styles for quantitative topics. Options: " + choices)
+    else:
+        visual_style = f"Selected visual style: {template.name}. Use {template.diagram} when it fits."
     delivery = {
         "expressive": "Sound like a friend explaining something cool. Use contractions, everyday words, and short sentences that feel natural aloud.",
         "energetic": "Sound like an excited friend showing a quick discovery. Use short, lively sentences and skip hype and filler.",
@@ -229,7 +239,10 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
         "the thought from the previous one. Vary sentence length. Avoid repeated setup phrases, spoken headings "
         "and canned lines like 'Let's dive in' or 'Here's the kicker'. "
         "Headings and diagram labels must be short. Caption is one short sentence summarizing the narration. "
-        "Choose diagrams to illustrate the actual concept. parts/cutaway show components; flow/sequence show steps; "
+        "Show the actual subject in motion when a matching scene exists. Use presenter for a person gesturing "
+        "toward a labeled board, walking for human steps or locomotion, and handoff for two people passing an "
+        "object, such as in a communication or teamwork story. Keep human action relevant to the narration. "
+        "Use a bar chart only when comparing quantities. parts/cutaway show components; flow/sequence show steps; "
         "cycle shows recurrence; network shows relationships; orbit shows rotation; wave shows a signal; "
         "motion shows movement; bars/compare show contrasts. Use gears for meshing gears, piston for a crank "
         "driving a piston, moon for lunar phases, bicycle for a full side view of a bicycle, and bicycle_drive "
@@ -238,7 +251,7 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
         "that order. Treat shapes as schematic and avoid invented measurements. "
         "Follow provider safety rules. Do not give actionable instructions for harming people, "
         "building weapons, engineering dangerous pathogens, or exploiting computer systems. "
-        f"Selected visual style: {template.name}. Use {template.diagram} when it fits, and vary other scenes."
+        f"Vary the scenes to follow the narration. {visual_style}"
     )
     key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
     try:
@@ -247,7 +260,7 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
             response = requests.post(endpoint, headers={"x-goog-api-key": key}, json={
                 "systemInstruction": {"parts": [{"text": instructions}]},
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": _SCHEMA,
+                "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
                                      "maxOutputTokens": 3000},
             }, timeout=(5, 90))
             response.raise_for_status()
@@ -255,17 +268,32 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
                              if not part.get("thought"))
         else:
             response = requests.post(f"{OLLAMA_URL}/api/chat", json={
-                "model": OLLAMA_MODEL, "stream": False, "think": False, "format": _SCHEMA, "keep_alive": "1m",
+                "model": OLLAMA_MODEL, "stream": False, "think": False, "format": schema, "keep_alive": "1m",
                 "options": {"temperature": 0.3, "num_predict": 2400, "num_ctx": 4096},
                 "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
             }, timeout=(4, 180))
             response.raise_for_status()
             result = response.json()["message"]["content"]
-        title, description, scenes = _validate_plan(json.loads(result))
+        plan = json.loads(result)
+        selected_template = template if template is not None else TEMPLATES[plan["template"]]
+        title, description, scenes = _validate_plan(plan)
+        topic = prompt
+        bicycle = re.search(r"\b(?:bicycles?|bikes?|cyclists?)\b", topic, re.I)
+        human_scenes = ("presenter", "walking", "handoff")
+        relay = re.search(r"\brelay\b", topic, re.I) and re.search(r"\b(?:race|runners?|baton)\b", topic, re.I)
+        for scene in scenes:
+            if scene["diagram"] in ("bicycle", "bicycle_drive") and not bicycle:
+                scene["diagram"] = selected_template.diagram
+        if relay:
+            scenes[0]["diagram"] = "handoff"
+            scenes[1]["diagram"] = "walking"
+            scenes[2]["diagram"] = "handoff"
+        elif (selected_template.diagram in human_scenes
+              and not any(scene["diagram"] in human_scenes for scene in scenes)):
+            scenes[0]["diagram"] = selected_template.diagram
         # Keep the full bicycle visible at the hook and introduce the close-up
         # even when the model chooses an abstract scene for a drivetrain prompt.
-        topic = f"{prompt} {title}"
-        if re.search(r"\b(?:bicycles?|bikes?|cycles?)\b", topic, re.I) and re.search(
+        if bicycle and re.search(
             r"\b(?:pedal\w*|drivetrain|chain\w*|sprockets?|crank\w*)\b", topic, re.I
         ):
             hook = "How does one pedal stroke turn the rear wheel?"
@@ -276,7 +304,7 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150):
                                if re.search(r"\b(?:chain\w*|sprockets?|cogs?)\b", scene["narration"], re.I)),
                               scenes[2])
                 detail.update(diagram="bicycle_drive")
-        return title, description, scenes
+        return selected_template, title, description, scenes
     except requests.HTTPError as error:
         status = error.response.status_code
         if status == 429:
@@ -419,12 +447,15 @@ def _speak(text, script, target, pace, opening, voice):
 
 
 def render_explainer(payload):
-    template = TEMPLATES[payload["template"]]
+    template = TEMPLATES.get(payload["template"])
     style = payload.get("voice", "expressive")
     example = payload["example"] or payload.get("prompt", "").strip().casefold() == BICYCLE_PEDALS_PROMPT.casefold()
     target_words = {"expressive": 160, "energetic": 175, "documentary": 150}[style]
-    title, description, scenes = (_validate_plan(_EXAMPLE) if example else
-                                  plan_video(payload["prompt"], template, style, target_words))
+    if example:
+        template = template or TEMPLATES["industrial-cutaway"]
+        title, description, scenes = _validate_plan(_EXAMPLE)
+    else:
+        template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words)
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
@@ -442,7 +473,7 @@ def render_explainer(payload):
             else:
                 estimated = min(target_words - 20, estimated)
             target_words = min(230, max(90, estimated))
-            title, description, scenes = plan_video(payload["prompt"], template, style, target_words)
+            _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words)
         frame_counts, tempo = _fit_runtime(frame_counts)
         audio_filter = "highpass=f=75,alimiter=limit=0.89:latency=1"
         if tempo != 1.0:
@@ -471,7 +502,7 @@ def render_explainer(payload):
                     finally:
                         if encoder.poll() is None:
                             encoder.kill()
-            return output, {"title": title, "description": description}
+            return output, {"title": title, "description": description, "template": template.name}
         except BaseException as error:
             Path(output).unlink(missing_ok=True)
             if isinstance(error, (OSError, subprocess.SubprocessError)):

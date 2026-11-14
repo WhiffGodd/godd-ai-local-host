@@ -8,7 +8,8 @@ import urllib.error
 from unittest.mock import patch
 from server import ThreadedHTTPServer, GoddAIRequestHandler, validate_render_payload
 from render_jobs import RenderJobs
-from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _validate_plan, validate_generation
+from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _validate_plan, plan_video, validate_generation
+from explainer_templates import TEMPLATES
 
 
 class PublicHostingTests(unittest.TestCase):
@@ -86,6 +87,22 @@ class PublicHostingTests(unittest.TestCase):
         for seconds in (25, 90):
             with self.assertRaises(ExplainerError):
                 _fit_runtime([seconds * FPS])
+
+    def test_explainer_auto_selects_template_and_keeps_manual_override(self):
+        template_id = "marker-room"
+        prompt = "Show a person explaining why leaves change color."
+        self.assertEqual(validate_generation({"prompt": prompt})["template"], "auto")
+        board = {**_EXAMPLE, "title": "Why Leaves Change Color", "template": template_id,
+                 "scenes": [{**scene, "diagram": "presenter"} for scene in _EXAMPLE["scenes"]]}
+        with patch.dict(os.environ, {"AI_VIDEO_GEMINI_API_KEY": ""}), patch("ai_video.requests.post") as post:
+            post.return_value.json.return_value = {"message": {"content": json.dumps(board)}}
+            template, _, _, scenes = plan_video(prompt, None)
+            self.assertEqual(template.id, template_id)
+            self.assertEqual(scenes[0]["diagram"], "presenter")
+            self.assertIn(template_id, post.call_args.kwargs["json"]["format"]["properties"]["template"]["enum"])
+            template, *_ = plan_video(prompt, TEMPLATES["orbit-theater"])
+            self.assertEqual(template.id, "orbit-theater")
+            self.assertNotIn("template", post.call_args.kwargs["json"]["format"]["properties"])
 
     def test_thumbnail_endpoint_returns_a_jpeg_at_the_requested_time(self):
         data = json.dumps({"url": "https://youtu.be/abcdefghijk", "timestamp": 235.5}).encode()
