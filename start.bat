@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0" || exit /b 1
 title godd.ai - NVIDIA RTX GPU Accelerated Studio
 echo ========================================================
 echo  🚀 godd.ai Local GPU Server (RTX 3050 NVENC)

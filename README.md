@@ -199,8 +199,10 @@ renders a 50–60 second narrated 720 × 1280 MP4. Pick Friendly, Energetic, or 
 to change the delivery. **Render sample** works without a storyboard model. Generated
 videos are temporary, so download a copy before closing the studio.
 
-- **Local setup**: Install [Ollama](https://ollama.com/download), start it, and
-  run `ollama pull qwen3:4b`. Then start Godd AI with `python server.py`.
+- **Local setup**: Install [Ollama](https://ollama.com/download) and run
+  `ollama pull qwen3:4b` once. On Windows, starting Godd AI with `start.bat`,
+  `run_gpu.bat`, or `python server.py` starts Ollama when needed and connects
+  to `http://127.0.0.1:11434`. On macOS and Linux, start Ollama before Godd AI.
   For continuous narration, download `kokoro-v1.0.onnx` and `voices-v1.0.bin`
   from [Kokoro ONNX model files v1.1](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1).
   Save them as `timed-kokoro-v1.0.onnx` and `timed-voices-v1.0.bin` in

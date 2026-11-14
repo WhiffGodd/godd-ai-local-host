@@ -17,7 +17,7 @@ import queue
 import shutil
 import tempfile
 from threading import BoundedSemaphore
-from ai_video import ExplainerError, generation_settings, render_explainer, validate_generation
+from ai_video import ExplainerError, generation_settings, render_explainer, start_local_ollama, validate_generation
 from explainer_templates import template_catalog
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
@@ -929,6 +929,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def run():
     server_address = ('', PORT)
     httpd = ThreadedHTTPServer(server_address, GoddAIRequestHandler)
+    start_local_ollama()
     print("\n" + "=" * 55)
     print(f"[godd ai] Turn Videos into Viral Shorts & Reels")
     print(f"[godd ai] Server running at: http://localhost:{PORT}")

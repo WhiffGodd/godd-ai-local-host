@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+from urllib.parse import urlsplit
 import wave
 
 import requests
@@ -87,17 +89,68 @@ _EXAMPLE = {
 }
 
 
+def _ollama_models(timeout=2):
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=timeout)
+        response.raise_for_status()
+        models = response.json()["models"]
+        return {item["name"] for item in models} if isinstance(models, list) else None
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        return None
+
+
+def start_local_ollama():
+    """Start the Windows Ollama server if the configured local endpoint is down."""
+    if os.name != "nt" or os.environ.get("RENDER") or os.environ.get("AI_VIDEO_GEMINI_API_KEY"):
+        return
+    try:
+        url = urlsplit(OLLAMA_URL)
+        port = url.port
+    except ValueError:
+        return
+    if (url.scheme != "http" or url.hostname not in ("localhost", "127.0.0.1", "::1")
+            or url.username is not None or url.path or url.query or url.fragment or not port):
+        return
+    if _ollama_models(timeout=1) is not None:
+        return
+    executable = shutil.which("ollama")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not executable and local_app_data:
+        installed = Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe"
+        if installed.is_file():
+            executable = str(installed)
+    if not executable:
+        print("[Ollama] Ollama is not installed. Install it to enable AI Video Studio prompts.")
+        return
+
+    try:
+        log_path = Path(tempfile.gettempdir()) / "godd-ai-ollama.log"
+        with log_path.open("ab") as log:
+            process = subprocess.Popen(
+                [executable, "serve"], env={**os.environ, "OLLAMA_HOST": url.netloc},
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            )
+    except OSError as error:
+        print(f"[Ollama] Could not start: {error}")
+        return
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        if _ollama_models(timeout=1) is not None:
+            print(f"[Ollama] Ready at {OLLAMA_URL}")
+            return
+        if process.poll() is not None:
+            break
+        time.sleep(0.25)
+    print(f"[Ollama] Still unavailable at {OLLAMA_URL}. See {log_path} for startup details.")
+
+
 def generation_settings():
     if os.environ.get("AI_VIDEO_GEMINI_API_KEY"):
         return {"available": True, "provider": "Gemini"}
-    try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
-        response.raise_for_status()
-        installed = {item.get("name") for item in response.json().get("models", [])}
-        if OLLAMA_MODEL in installed or OLLAMA_MODEL + ":latest" in installed:
-            return {"available": True, "provider": "Ollama"}
-    except (requests.RequestException, ValueError):
-        pass
+    installed = _ollama_models()
+    if installed is not None and (OLLAMA_MODEL in installed or OLLAMA_MODEL + ":latest" in installed):
+        return {"available": True, "provider": "Ollama"}
     return {"available": False, "setup": f"Start Ollama and run ollama pull {OLLAMA_MODEL} to enable custom prompts."}
 
 
