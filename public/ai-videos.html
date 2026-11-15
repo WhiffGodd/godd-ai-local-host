@@ -27,12 +27,16 @@
       <div class="composer">
         <form id="generator">
           <label for="prompt">What should the video explain?</label>
-          <textarea id="prompt" rows="4" minlength="8" maxlength="1200" required placeholder="Explain how a bicycle stays upright when it moves. Show how steering corrects a lean."></textarea>
+          <textarea id="prompt" rows="4" maxlength="1200" required placeholder="Explain why a snowman is built with the biggest snowball at the bottom."></textarea>
           <div class="examples" aria-label="Example prompts">
             <button type="button" data-topic="Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog.">Bicycle pedals</button>
             <button type="button" data-topic="Explain why the Moon has phases and how the Sun, Earth and Moon line up.">Moon phases</button>
-            <button type="button" data-topic="Explain how race relay teams pass a baton while moving. Show runners and a close handoff.">Relay handoff</button>
-            <button type="button" data-topic="Explain how a heat pump moves heat from outdoors into a home, step by step.">Heat pumps</button>
+            <button type="button" data-topic="Explain how a fixed pulley lets you lift a weight by pulling down.">Fixed pulley</button>
+            <button type="button" data-topic="Explain how meshing gears change the speed and direction of rotation.">Gear ratios</button>
+            <button type="button" data-topic="Explain how a small input piston in a hydraulic lift raises a heavy load. Focus on the trade-off between force and distance.">Hydraulic lift</button>
+            <button type="button" data-topic="Explain how a disc brake slows a spinning rotor. Show the pads clamping the rotor and explain where the energy goes.">Disc brakes</button>
+            <button type="button" data-topic="Explain how a bicycle freewheel uses pawls and a ratchet ring to drive the wheel while pedaling and let it spin when coasting. Show the inside in cutaway.">Freewheel cutaway</button>
+            <button type="button" data-topic="Explain why a snowman uses the biggest snowball as its base. Show three stacked snowballs and a carrot nose.">Snowman stability</button>
           </div>
           <div class="voice-setting">
             <label for="voice">Narration style</label>
@@ -51,33 +55,38 @@
           </div>
           <div class="generate-actions">
             <button id="generate" class="primary" type="submit" disabled>Generate video</button>
-            <button id="sample" class="secondary" type="button" disabled>Render sample</button>
           </div>
           <p id="generationStatus" class="status" role="status">Loading the template library…</p>
+          <button id="checkModel" class="secondary" type="button" hidden>Check AI connection</button>
           <progress id="generationProgress" max="100" aria-label="Animation rendering progress" hidden></progress>
           <button id="checkGeneration" class="secondary" type="button" hidden>Check video status</button>
           <a id="previewLink" class="secondary" href="#previewHeading" hidden>Watch preview</a>
         </form>
         <section class="library" aria-labelledby="libraryHeading">
           <div class="library-heading">
-            <h2 id="libraryHeading">Templates</h2>
-            <span id="templateCount"></span>
+            <h2 id="libraryHeading">3D scene library</h2>
           </div>
-          <button id="autoTemplate" class="secondary auto-template" type="button" aria-pressed="true">Auto-select from prompt</button>
-          <div id="categories" class="filters" aria-label="Filter templates"></div>
-          <div id="templateGrid" class="template-grid" aria-label="Choose a video template"></div>
-          <button id="moreTemplates" class="secondary more" type="button" hidden>Show more templates</button>
+          <p class="status">The studio builds a new 3D illustration when your topic is outside the library.</p>
+          <div class="scene-actions">
+            <button id="autoTemplate" class="secondary auto-template" type="button" aria-pressed="true">Auto-select from prompt</button>
+            <button id="buildScene" class="secondary" type="button" aria-pressed="false">Build a new scene</button>
+            <button id="useScene" class="secondary" type="button" hidden aria-pressed="false">Use previewed scene</button>
+          </div>
+          <p id="sceneSelection" class="status" role="status"></p>
+          <div id="templateGrid" class="template-grid" aria-label="Preview a 3D scene"></div>
         </section>
       </div>
       <aside class="output" aria-labelledby="previewHeading">
         <h2 id="previewHeading">Video preview</h2>
         <div class="preview-shell">
-          <canvas id="stylePreview" width="360" height="640" aria-label="Selected template preview" role="img"></canvas>
           <video id="video" controls playsinline preload="metadata" hidden aria-label="Generated explainer"></video>
+          <video id="stylePreview" controls playsinline muted loop preload="metadata" hidden aria-label="3D scene preview"></video>
         </div>
         <p id="selectedStyle" class="selected-style"></p>
         <p id="previewStatus" class="status" role="status"></p>
         <div id="exportTools" hidden>
+          <label for="title">YouTube video title</label>
+          <input id="title" name="title" form="publishForm" maxlength="100" required>
           <a id="downloadVideo" class="secondary download">Download MP4</a>
           <section class="publish" aria-labelledby="publishHeading">
             <h2 id="publishHeading">Upload to YouTube</h2>
@@ -85,8 +94,6 @@
             <button id="connect" class="secondary" type="button" hidden>Connect YouTube</button>
             <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>
             <form id="publishForm" hidden>
-              <label for="title">Title</label>
-              <input id="title" maxlength="100" required>
               <label for="description">Description and hashtags</label>
               <textarea id="description" rows="4" maxlength="5000"></textarea>
               <label for="visibility">Visibility</label>

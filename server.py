@@ -18,7 +18,7 @@ import shutil
 import tempfile
 from threading import BoundedSemaphore
 from ai_video import ExplainerError, generation_settings, render_explainer, start_local_ollama, validate_generation
-from explainer_templates import template_catalog
+from explainer_templates import TEMPLATES, template_catalog
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
 from api.youtube_access import download_error_response
@@ -541,12 +541,20 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                          "/ai-videos": "public/ai-videos.html", "/ai-videos.html": "public/ai-videos.html",
                          "/ai-videos.js": "public/ai-videos.js", "/ai-videos.css": "public/ai-videos.css"}
         asset = static_assets.get(path)
+        if asset is None and path.startswith("/cinematic/"):
+            name, extension = os.path.splitext(path.removeprefix("/cinematic/"))
+            if name in TEMPLATES and extension in (".webp", ".webm"):
+                asset = f"public/cinematic/{name}{extension}"
         if asset is None:
             self.send_error(404, "File not found")
             return
         file_path = os.path.join(BASE_DIR, asset)
+        if not os.path.isfile(file_path):
+            self.send_error(404, "File not found")
+            return
         self.send_response(200)
         self.send_header("Content-Type", mimetypes.guess_type(file_path)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(os.path.getsize(file_path)))
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         with open(file_path, "rb") as f:

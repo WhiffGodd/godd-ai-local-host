@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     espeak-ng \
     fonts-dejavu-core \
     fonts-noto-core \
+    libegl1 libegl-mesa0 libgl1-mesa-dri \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 \
     ca-certificates \
     curl \

@@ -193,18 +193,29 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
 ## AI Video Studio
 
 Open **AI Videos** from the main navigation. Describe what to explain and click
-**Generate video**. The AI picks from 62 motion-graphics templates, or you can
-select one yourself. The generated video shows the template name. The studio
+**Generate video**. The AI picks a matching 3D subject and chooses the shot for
+each part of your explanation. Topics outside the library get a new 3D illustration
+built locally from modeled shapes, lighting, and motion. Complex scenes may use a
+labeled schematic. Click a library card to preview it, then click **Use** and the
+scene name to use a matching model. **Build a new scene** forces a custom build
+even when the library has a match. The library includes mechanisms, lunar phases,
+prism refraction, sound and octaves, and the water cycle. Mechanism scenes can
+expose internal parts in cutaway. Custom scenes can move parts in sequence and
+carry attached objects with them. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
 renders a narrated 720 × 1280 MP4 with a 60- or 90-second maximum. Follow the
 preparation stages and watch the finished video in the preview. Pick Friendly, Energetic, or Documentary
-to change the delivery. **Render sample** works without a storyboard model. Generated
+to change the delivery. Generated
 videos are temporary, so download a copy before closing the studio.
+
+The reusable 3D scene modules and renderer are available under the [MIT license](LICENSE-3D).
 
 - **Local setup**: Install [Ollama](https://ollama.com/download) and run
   `ollama pull qwen3:4b` once. On Windows, starting Godd AI with `start.bat`,
   `run_gpu.bat`, or `python server.py` starts Ollama when needed and connects
   to `http://127.0.0.1:11434`. On macOS and Linux, start Ollama before Godd AI.
+  Install the packages in `requirements.txt`. The renderer requires OpenGL 3.3
+  or newer. On headless Linux, install Mesa EGL and its DRI drivers.
   For continuous narration, download `kokoro-v1.0.onnx` and `voices-v1.0.bin`
   from [Kokoro ONNX model files v1.1](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.1).
   Save them as `timed-kokoro-v1.0.onnx` and `timed-voices-v1.0.bin` in
@@ -214,7 +225,7 @@ videos are temporary, so download a copy before closing the studio.
 - **Hosted setup**: Set `AI_VIDEO_GEMINI_API_KEY` in the server environment to
   use Gemini for the storyboard. The default is `gemini-3.1-flash-lite`.
   Keep this key server-side. Prompts go to Gemini when this option is enabled.
-  The Docker image includes the narration engine. The static Vercel version
+  The Docker image includes Mesa EGL and the narration engine. The static Vercel version
   needs the Python rendering server for this feature.
 - **Publishing**: Preview the video, review its suggested title, description
   and hashtags, then use **Upload to YouTube**. The AI studio and clip studio

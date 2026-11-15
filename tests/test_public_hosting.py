@@ -5,11 +5,15 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
+import requests
 from unittest.mock import patch
 from server import ThreadedHTTPServer, GoddAIRequestHandler, validate_render_payload
 from render_jobs import RenderJobs
-from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _validate_plan, plan_video, validate_generation
-from explainer_templates import TEMPLATES
+from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _part_schedule, _plan_stage, _validate_plan, plan_video, render_explainer, validate_generation
+from cinematic_render import Shot
+from explainer_parts import part_mentions
+from explainer_templates import GENERATED_TEMPLATE, TEMPLATES, matching_subjects
+from procedural_scene import StageShot
 
 
 class PublicHostingTests(unittest.TestCase):
@@ -37,7 +41,13 @@ class PublicHostingTests(unittest.TestCase):
         with patch("server.generation_settings", return_value={"available": False}):
             with urllib.request.urlopen(self.url + "/api/ai-videos/templates") as response:
                 catalog = json.load(response)
-        self.assertEqual(len({template["id"] for template in catalog["templates"]}), 62)
+        self.assertEqual({template["id"] for template in catalog["templates"]}, set(TEMPLATES))
+        for template in catalog["templates"]:
+            with urllib.request.urlopen(self.url + template["poster"]) as response:
+                self.assertEqual(response.read(4), b"RIFF")
+            with urllib.request.urlopen(self.url + template["preview"]) as response:
+                self.assertEqual(response.headers.get_content_type(), "video/webm")
+                self.assertEqual(response.read(4), b"\x1a\x45\xdf\xa3")
 
         with tempfile.TemporaryDirectory() as tmp:
             output = os.path.join(tmp, "preview.mp4")
@@ -57,7 +67,7 @@ class PublicHostingTests(unittest.TestCase):
             manager = RenderJobs(render, report_progress=True)
             with patch("server.AI_VIDEO_JOBS", manager):
                 request = urllib.request.Request(
-                    self.url + "/api/ai-videos", data=b'{"template":"blueprint-lab","example":true,"max_seconds":90}',
+                    self.url + "/api/ai-videos", data=b'{"template":"bicycle-drivetrain","example":true,"max_seconds":90}',
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(request) as response:
                     self.assertEqual(response.status, 202)
@@ -87,19 +97,55 @@ class PublicHostingTests(unittest.TestCase):
                     self.assertEqual(response.read(), b"MP4")
 
     def test_explainer_hook_precedes_the_complete_story_and_voice_is_validated(self):
-        _, _, scenes = _validate_plan(_EXAMPLE)
+        _, _, scenes = _validate_plan(_EXAMPLE, "bicycle")
         self.assertEqual(scenes[0]["heading"], _EXAMPLE["hook"])
         self.assertEqual(scenes[0]["narration"], _EXAMPLE["hook"])
         self.assertTrue(scenes[0]["opening"])
         self.assertEqual([scene["narration"] for scene in scenes[1:]],
                          [scene["narration"] for scene in _EXAMPLE["scenes"]])
         with self.assertRaises(ValueError):
-            _validate_plan({**_EXAMPLE, "hook": "Hello"})
-        sample = {"template": "blueprint-lab", "example": True}
+            _validate_plan({**_EXAMPLE, "hook": "Hello"}, "bicycle")
+        longer_hook = "You stop moving the pedals, but the wheel keeps turning. What lets it roll without pulling the chain?"
+        _, _, longer_scenes = _validate_plan({**_EXAMPLE, "hook": longer_hook}, "bicycle")
+        self.assertEqual(longer_scenes[0]["narration"], "You stop moving the pedals, but the wheel keeps turning.")
+        with self.assertRaises(ValueError):
+            _validate_plan({**_EXAMPLE, "hook_view": "spinning-rotor"}, "bicycle")
+        sample = {"template": "bicycle-drivetrain", "example": True}
         self.assertEqual(validate_generation(sample)["voice"], "expressive")
         self.assertEqual(validate_generation({**sample, "voice": "energetic"})["voice"], "energetic")
         with self.assertRaises(ValueError):
             validate_generation({**sample, "voice": "unknown"})
+        with self.assertRaises(ValueError):
+            validate_generation({**sample, "prompt": "Explain how the Moon goes around Earth."})
+
+    def test_bicycle_topic_uses_the_typed_prompt_even_when_it_matches_the_example(self):
+        prompt = "Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog."
+        with patch("ai_video.plan_video", side_effect=ExplainerError("Prompt reached the planner")) as planner:
+            with self.assertRaisesRegex(ExplainerError, "Prompt reached the planner"):
+                render_explainer(validate_generation({"prompt": prompt}))
+            self.assertEqual(planner.call_args.args[0], prompt)
+
+    def test_explainer_skips_rephrased_hook_but_keeps_first_new_fact(self):
+        hook = "How can the rear wheel keep spinning while the pedals stand still?"
+        fresh = "Inside the rear hub, the freewheel disengages and lets the wheel turn on its own."
+        opening = {**_EXAMPLE["scenes"][0], "caption": hook,
+                   "narration": "How does the rear wheel keep spinning while the pedals stand still? " + fresh}
+        doubled_hook = hook + " What keeps that same wheel moving?"
+        _, _, scenes = _validate_plan({**_EXAMPLE, "hook": doubled_hook,
+                                     "scenes": [opening, *_EXAMPLE["scenes"][1:]]}, "bicycle")
+        self.assertEqual([scene["narration"] for scene in scenes[:2]], [hook, fresh])
+        self.assertEqual(scenes[1]["caption"], fresh)
+
+    def test_component_callouts_follow_the_parts_named_in_the_narration(self):
+        narration = "The caliper moves first. Its brake pads close around the rotor."
+        mentions = part_mentions("disc_brake", narration)
+        subjects = matching_subjects("How bicycle disc brakes stop the wheel.")
+        self.assertEqual([template.id for template in subjects], ["disc-brake"])
+        self.assertEqual([part.label for _, part in mentions], ["Caliper", "Brake pads", "Rotor"])
+        self.assertEqual(part_mentions("bicycle", narration), [])
+        schedule = _part_schedule([(0.1, mentions[0][1]), (0.4, mentions[1][1]), (0.8, mentions[2][1])],
+                                  8 * FPS, "caliper-and-pads")
+        self.assertEqual([part.label for _, part in schedule], ["Caliper", "Brake pads", "Rotor"])
 
     def test_explainer_runtime_fits_narration_and_scene_boundaries_together(self):
         for seconds, expected in ((44, 50), (50, 50), (55, 55), (60, 60), (66, 60)):
@@ -119,20 +165,93 @@ class PublicHostingTests(unittest.TestCase):
             validate_generation({"example": True, "max_seconds": 91})
 
     def test_explainer_auto_selects_template_and_keeps_manual_override(self):
-        template_id = "marker-room"
-        prompt = "Show a person explaining why leaves change color."
+        template_id = "gear-train"
+        prompt = "Explain why touching gears turn in opposite directions."
         self.assertEqual(validate_generation({"prompt": prompt})["template"], "auto")
-        board = {**_EXAMPLE, "title": "Why Leaves Change Color", "template": template_id,
-                 "scenes": [{**scene, "diagram": "presenter"} for scene in _EXAMPLE["scenes"]]}
+        board = {**_EXAMPLE, "title": "Why Gears Turn In Opposite Directions", "template": template_id,
+                 "hook_view": "drive-mesh",
+                 "scenes": [{**scene, "view": "output-mesh"} for scene in _EXAMPLE["scenes"]]}
         with patch.dict(os.environ, {"AI_VIDEO_GEMINI_API_KEY": ""}), patch("ai_video.requests.post") as post:
             post.return_value.json.return_value = {"message": {"content": json.dumps(board)}}
             template, _, _, scenes = plan_video(prompt, None)
             self.assertEqual(template.id, template_id)
-            self.assertEqual(scenes[0]["diagram"], "presenter")
-            self.assertIn(template_id, post.call_args.kwargs["json"]["format"]["properties"]["template"]["enum"])
-            template, *_ = plan_video(prompt, TEMPLATES["orbit-theater"])
-            self.assertEqual(template.id, "orbit-theater")
-            self.assertNotIn("template", post.call_args.kwargs["json"]["format"]["properties"])
+            self.assertEqual(scenes[0]["view"], "drive-mesh")
+            self.assertEqual(scenes[1]["view"], "output-mesh")
+            format = post.call_args.kwargs["json"]["format"]["properties"]
+            self.assertIn(template_id, format["template"]["enum"])
+            self.assertNotIn("coasting", format["hook_view"]["enum"])
+            template, *_ = plan_video(prompt, TEMPLATES[template_id])
+            self.assertEqual(template.id, template_id)
+            self.assertEqual(post.call_args.kwargs["json"]["format"]["properties"]["template"]["enum"],
+                             [template_id])
+            with patch("ai_video._request_storyboard", side_effect=['{"template":"gear-train"}', json.dumps(board)]) as retry:
+                self.assertEqual(plan_video(prompt, None)[0].id, template_id)
+                self.assertEqual(retry.call_count, 2)
+
+    def test_unmatched_prompt_plans_a_new_scene_even_with_an_unrelated_template_selected(self):
+        board = {**_EXAMPLE, "title": "How Bread Toasts", "template": "generated", "hook_view": "wide",
+                 "scenes": [{**scene, "view": "detail"} for scene in _EXAMPLE["scenes"]]}
+        prompt = "Explain how bread browns in a toaster."
+        with patch("ai_video._request_storyboard", return_value=json.dumps(board)) as request:
+            template, title, _, _ = plan_video(prompt, TEMPLATES["ball-bearing"])
+        self.assertEqual(template, GENERATED_TEMPLATE)
+        self.assertEqual(title, "How Bread Toasts")
+        self.assertEqual(request.call_args.args[0], prompt)
+        self.assertEqual(validate_generation({"prompt": "Toast"})["prompt"], "Toast")
+
+    def test_generated_stage_accepts_objects_and_recovers_from_an_invalid_object_plan(self):
+        scene = {"label":"Heating coil", "shape":"ring", "color":"red", "pose":"front", "motion":"pulse",
+                 "position":[0., .5, 0.], "size":[.4, .4, .3]}
+        _, _, scenes = _validate_plan(_EXAMPLE, "bicycle")
+        storyboard = {"objects":[scene, {**scene, "label":"Bread", "shape":"box", "motion":"still",
+                                       "relation":"on-top", "anchor":"Heating coil"}],
+                      "actions":[{"beat":1,"part":"Heating coil","direction":"up","distance":1,
+                                  "turn":0,"start":.2,"end":.8}]}
+        with patch("ai_video._request_storyboard", return_value=json.dumps(storyboard)):
+            stage, source, actions = _plan_stage("How does a toaster work?", scenes)
+            self.assertEqual((source, [item.label for item in stage]), ("procedural", ["Heating coil", "Bread"]))
+            self.assertGreater(stage[1].position[1], stage[0].position[1])
+            shot = StageShot(stage,"wide",None,actions=actions,beat=1,duration=10.)
+            start, _, _ = shot.at(1.)
+            end, _, _ = shot.at(9.)
+            following, _, _ = StageShot(stage,"wide",None,actions=actions,beat=2).at(0.)
+            for first, moved, retained in zip(start,end,following):
+                self.assertAlmostEqual(moved[2][1,3] - first[2][1,3], 1.)
+                self.assertAlmostEqual(moved[2][1,3], retained[2][1,3])
+        with patch("ai_video._request_storyboard", return_value=json.dumps({"objects":[{**scene,"shape":"unknown"}]})):
+            stage, source, actions = _plan_stage("How does a toaster work?", scenes)
+            self.assertEqual(source, "schematic")
+            self.assertEqual(stage[0].label, scenes[1]["heading"])
+            self.assertEqual(actions, ())
+
+    def test_freewheel_keeps_the_ratchet_moving_after_the_sprocket_stops(self):
+        selected = matching_subjects("Explain how a bicycle freewheel coasts.")
+        self.assertEqual([template.id for template in selected], ["freewheel-cutaway"])
+        for view in ("engagement", "coasting"):
+            shot = Shot("freewheel",view,(360,640),offset=2.)
+            first, _, _ = shot.at(.2)
+            last, _, _ = shot.at(.8)
+            matrices = lambda rows: {group: matrix.tolist() for _, _, matrix, group in rows}
+            before, after = matrices(first), matrices(last)
+            self.assertNotEqual(before["ratchet"], after["ratchet"])
+            self.assertEqual(before["sprocket"] == after["sprocket"], view == "coasting")
+
+    def test_ollama_reconnects_after_connection_error_but_does_not_retry_timeout(self):
+        reply = requests.Response()
+        reply.status_code = 200
+        board = {**_EXAMPLE, "template": "bicycle-drivetrain"}
+        reply._content = json.dumps({"message": {"content": json.dumps(board)}}).encode()
+        with patch.dict(os.environ, {"AI_VIDEO_GEMINI_API_KEY": ""}), patch(
+            "ai_video.start_local_ollama"
+        ) as start, patch("ai_video.requests.post", side_effect=[requests.ConnectionError(), reply]) as post:
+            plan_video("Explain bicycle pedals", TEMPLATES["bicycle-drivetrain"])
+            start.assert_called_once()
+            self.assertEqual(post.call_count, 2)
+            post.reset_mock(side_effect=True)
+            post.side_effect = requests.ReadTimeout()
+            with self.assertRaisesRegex(ExplainerError, "Ollama took too long"):
+                plan_video("Explain bicycle pedals", TEMPLATES["bicycle-drivetrain"])
+            post.assert_called_once()
 
     def test_thumbnail_endpoint_returns_a_jpeg_at_the_requested_time(self):
         data = json.dumps({"url": "https://youtu.be/abcdefghijk", "timestamp": 235.5}).encode()

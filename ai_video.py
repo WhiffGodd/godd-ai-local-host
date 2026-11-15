@@ -1,6 +1,7 @@
-"""Plan narrated motion graphics with a language model and render an MP4."""
+"""Plan narrated 3D explainers with a language model and render an MP4."""
 
 import base64
+from difflib import SequenceMatcher
 from functools import lru_cache
 import json
 import math
@@ -17,8 +18,10 @@ import wave
 import requests
 import numpy as np
 
-from explainer_motion import FPS, HEIGHT, WIDTH, ScenePainter
-from explainer_templates import TEMPLATES
+from cinematic_render import FPS, HEIGHT, WIDTH, CinematicRenderer, RendererUnavailable, Shot, caption_layer
+from explainer_parts import part_mentions
+from explainer_templates import GENERATED_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
+from procedural_scene import COLORS, CURATED_STAGES, DIRECTIONS, MAX_OBJECTS, MOTIONS, POSES, RELATIONS, SHAPES, StageShot, read_actions, read_stage, stage_parts, storyboard_stage
 from video_engine import FFMPEG_PATH
 
 
@@ -30,7 +33,6 @@ TARGET_SECONDS = 55
 MIN_SECONDS = 50
 DEFAULT_MAX_SECONDS = 60
 MAX_SECONDS = 90
-BICYCLE_PEDALS_PROMPT = "Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog."
 VOICE_STYLES = {
     "expressive": ("en_US-amy-medium", 0.91, 0.96, 0.97),
     "energetic": ("en_US-amy-medium", 0.84, 0.91, 0.87),
@@ -41,9 +43,6 @@ KOKORO_STYLES = {
     "energetic": ("af_bella", 1.10, 0.15),
     "documentary": ("am_michael", 0.96, 0.25),
 }
-DIAGRAMS = ("parts", "cutaway", "flow", "sequence", "cycle", "network", "orbit", "wave",
-            "motion", "bars", "compare", "gears", "piston", "moon", "bicycle", "bicycle_drive",
-            "presenter", "walking", "handoff")
 
 
 class ExplainerError(RuntimeError):
@@ -59,44 +58,44 @@ def _strings(minimum, maximum):
 
 
 _TEXT = {"type": "string"}
-_SCHEMA = _object(title=_TEXT, hook=_TEXT, description=_TEXT, hashtags=_strings(2, 5), scenes={
+_SCHEMA = _object(title=_TEXT, hook=_TEXT, hook_view=_TEXT, description=_TEXT, hashtags=_strings(2, 5), scenes={
     "type": "array", "minItems": 5, "maxItems": 6, "items": _object(
-        heading=_TEXT, caption=_TEXT, narration=_TEXT, labels=_strings(2, 4),
-        diagram={"type": "string", "enum": list(DIAGRAMS)},
+        heading=_TEXT, caption=_TEXT, narration=_TEXT, view=_TEXT,
     ),
 })
 
 _EXAMPLE = {
     "title": "How Bicycle Pedals Turn the Rear Wheel",
     "hook": "How does one pedal stroke turn the rear wheel?",
+    "hook_view": "wide",
     "description": "Follow the motion from the pedals through the crank, chainring, chain, and rear cog to the rear wheel.",
     "hashtags": ["#Bicycle", "#Physics", "#Engineering"],
     "scenes": [
         {"heading": "Start at the pedal", "caption": "Your foot turns the crank.",
          "narration": "Press down on a pedal and watch the short arm it's attached to. That's the crank. Your foot pushes the end of that arm, and the arm turns around the axle in the middle.",
-         "diagram": "bicycle", "labels": ["Pedal", "Crank"]},
+         "view": "pedal-crank"},
         {"heading": "The chain starts moving", "caption": "The front chainring pulls the chain.",
          "narration": "The big toothed ring is attached to the crank, so they turn together. Its teeth catch the chain links one by one, and that pulls the upper run of the chain forward.",
-         "diagram": "bicycle_drive", "labels": ["Chainring", "Chain"]},
+         "view": "chain-drive"},
         {"heading": "Power reaches the back", "caption": "The moving chain turns the rear cog.",
          "narration": "That same chain wraps around the smaller cog at the back. As the chain moves, it turns the cog. While you're pedaling, the cog drives the rear hub and the wheel turns with it.",
-         "diagram": "bicycle_drive", "labels": ["Rear cog", "Rear hub"]},
+         "view": "rear-hub"},
         {"heading": "Why gear size matters", "caption": "A smaller rear cog turns more times per pedal revolution.",
          "narration": "A smaller rear cog needs less chain to go around once. So the same turn of the pedals spins it more times. That's why a higher gear can feel harder to push.",
-         "diagram": "bicycle_drive", "labels": ["Chainring", "Rear cog"]},
+         "view": "chain-drive"},
         {"heading": "The whole motion", "caption": "Pedal, crank, chain, rear wheel.",
          "narration": "Next time you start from a stop, follow that first push. Your foot turns the crank, the crank pulls the chain, and the chain spins the rear wheel. That's how one pedal stroke gets you rolling.",
-         "diagram": "bicycle", "labels": ["Pedals", "Rear wheel"]},
+         "view": "wide"},
     ],
 }
 
 _LONG_EXAMPLE_SCENES = [
     {"heading": "Why a longer crank helps", "caption": "A longer lever gives your foot more turning force.",
      "narration": "Think of pushing a door near its hinge, then pushing it near the handle. The same push turns it more easily at the handle. A crank works on that same principle. The pedal is out at the end of the lever, away from the axle.",
-     "diagram": "bicycle_drive", "labels": ["Pedal", "Crank"]},
+     "view": "pedal-crank"},
     {"heading": "What happens when you coast?", "caption": "A freewheel lets the rear wheel turn without moving the pedals.",
      "narration": "On most bicycles, you can stop moving your feet while the bike keeps rolling. The freewheel lets the hub turn faster than the cog, so the rear wheel doesn't drag the chain around. Start pedaling again and the freewheel engages, sending power back to the wheel.",
-     "diagram": "bicycle", "labels": ["Rear wheel", "Pedals"]},
+     "view": "coasting"},
 ]
 
 
@@ -170,11 +169,13 @@ def validate_generation(payload):
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT:
         raise ValueError(f"Keep the prompt under {MAX_PROMPT} characters.")
     template = payload.get("template", "auto")
-    if not isinstance(template, str) or (template != "auto" and template not in TEMPLATES):
+    if not isinstance(template, str) or (template not in ("auto", GENERATED_TEMPLATE.id) and template not in TEMPLATES):
         raise ValueError("Choose a template from the library.")
     example = payload.get("example", False)
-    if type(example) is not bool or (not example and len(prompt.strip()) < 8):
+    if type(example) is not bool or (not example and not prompt.strip()):
         raise ValueError("Describe the topic you want the video to explain.")
+    if example and prompt.strip():
+        raise ValueError("Generate the video from your prompt or run the bicycle demo with an empty prompt.")
     voice = payload.get("voice", "expressive")
     if not isinstance(voice, str) or voice not in VOICE_STYLES:
         raise ValueError("Choose a narration style.")
@@ -185,7 +186,36 @@ def validate_generation(payload):
             "max_seconds": max_seconds}
 
 
-def _validate_plan(plan, max_scenes=6):
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_COMMON_WORDS = frozenset("a an the to of you your that this what why how it does do is are can when with in and then".split())
+
+
+def _distinct_opening(hook, narration):
+    def words(sentence):
+        return re.findall(r"[\w']+", sentence.casefold().replace("’", "'"))
+
+    hook_words = [(line, words(line)) for line in _SENTENCE_END.split(hook)]
+    lines = _SENTENCE_END.split(narration)
+    for index, line in enumerate(lines):
+        tokens = words(line)
+        content = set(tokens) - _COMMON_WORDS
+        repeated = False
+        for hook_line, original in hook_words:
+            original_content = set(original) - _COMMON_WORDS
+            # A question can share vocabulary with the actual answer.
+            same_delivery = line.endswith("?") == hook_line.endswith("?")
+            similarity = SequenceMatcher(None, original, tokens, autojunk=False).ratio()
+            shared = len(content & original_content)
+            repeated = (tokens == original or (same_delivery and shared >= 3 and
+                        (similarity >= .83 or shared / len(content | original_content) >= .78)))
+            if repeated:
+                break
+        if not repeated and not (hook.endswith("?") and line.endswith("?")):
+            return " ".join(lines[index:])
+    return ""
+
+
+def _validate_plan(plan, subject, max_scenes=6):
     def text(value, limit):
         if not isinstance(value, str):
             raise ValueError("Expected text")
@@ -195,9 +225,10 @@ def _validate_plan(plan, max_scenes=6):
         return value[:limit].strip()
 
     title = text(plan["title"], 95)
-    hook = text(plan["hook"], 1000)
-    if not 4 <= len(hook.split()) <= 11 or len(hook) > 82:
-        raise ValueError("Expected a short opening hook")
+    hook_lines = _SENTENCE_END.split(text(plan["hook"], 1000))
+    hook = next((line for line in hook_lines if 4 <= len(line.split()) <= 25 and len(line) <= 160), "")
+    if not hook:
+        raise ValueError("Expected an opening hook under 160 characters")
     description = text(plan["description"], 900)
     hashtags = plan["hashtags"]
     if not isinstance(hashtags, list):
@@ -210,17 +241,59 @@ def _validate_plan(plan, max_scenes=6):
         raise ValueError("Unexpected scene count")
     clean = []
     for scene in scenes:
-        diagram, labels = scene["diagram"], scene["labels"]
-        if diagram not in DIAGRAMS or not isinstance(labels, list) or not 2 <= len(labels) <= 4:
-            raise ValueError("Invalid diagram")
+        view = scene["view"]
+        if view not in VIEWS[subject]:
+            raise ValueError("The view does not belong to the selected 3D subject")
         narration = text(scene["narration"], 360)
         if len(narration.split()) < 5:
             raise ValueError("Missing narration")
-        clean.append({"heading": text(scene["heading"], 44), "caption": text(scene["caption"], 96),
-                      "narration": narration, "diagram": diagram,
-                      "labels": [text(label, 18) for label in labels]})
-    opening = {**clean[0], "heading": hook, "narration": hook, "opening": True}
+        caption = text(scene["caption"], 96)
+        if not clean:
+            distinct = _distinct_opening(hook, narration)
+            if not distinct:
+                continue
+            if distinct != narration or not _distinct_opening(hook, caption):
+                caption = _SENTENCE_END.split(distinct, maxsplit=1)[0][:96].rstrip()
+            narration = distinct
+        clean.append({"heading": text(scene["heading"], 44), "caption": caption, "narration": narration, "view": view})
+    if not clean:
+        raise ValueError("The storyboard repeats the hook without explaining it")
+    hook_view = plan["hook_view"]
+    if hook_view not in VIEWS[subject]:
+        raise ValueError("The opening view does not belong to the selected 3D subject")
+    opening = {"heading": hook, "narration": hook, "view": hook_view, "opening": True}
     return title, f"{description}\n\n{' '.join(tags)}", [opening, *clean]
+
+
+def _request_storyboard(prompt, instructions, schema, key, long_video, single_match):
+    if key:
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        response = requests.post(endpoint, headers={"x-goog-api-key": key}, json={
+            "systemInstruction": {"parts": [{"text": instructions}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
+                                 "maxOutputTokens": 3000},
+        }, timeout=(5, 90))
+        response.raise_for_status()
+        result = "".join(part.get("text", "") for part in response.json()["candidates"][0]["content"]["parts"]
+                         if not part.get("thought"))
+    else:
+        request_body = {
+            "model": OLLAMA_MODEL, "stream": False, "think": False, "format": schema, "keep_alive": "5m",
+            "options": {"temperature": 0.3, "num_predict": 3200 if long_video else 2400,
+                        "num_ctx": 6144 if long_video or not single_match else 4096},
+            "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
+        }
+        try:
+            response = requests.post(f"{OLLAMA_URL}/api/chat", json=request_body, timeout=(4, 300))
+        except requests.ConnectTimeout:
+            raise
+        except requests.ConnectionError:
+            start_local_ollama()
+            response = requests.post(f"{OLLAMA_URL}/api/chat", json=request_body, timeout=(4, 300))
+        response.raise_for_status()
+        result = response.json()["message"]["content"]
+    return result
 
 
 def plan_video(prompt, template, voice_style="expressive", target_words=150, max_seconds=DEFAULT_MAX_SECONDS):
@@ -229,15 +302,37 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     max_scenes = 8 if long_video else 6
     properties = {**_SCHEMA["properties"],
                   "scenes": {**_SCHEMA["properties"]["scenes"], "maxItems": max_scenes}}
-    schema = _object(**properties)
-    if template is None:
-        schema = _object(template={"type": "string", "enum": list(TEMPLATES)}, **properties)
-        choices = ", ".join(f"{t.id} ({t.category}, {t.diagram})" for t in TEMPLATES.values())
-        visual_style = ("Choose one template ID that matches the main subject and tone. Favor people-led "
-                        "illustrations for human stories, engineering styles for machines, science styles for "
-                        "natural processes, and data styles for quantitative topics. Options: " + choices)
-    else:
-        visual_style = f"Selected visual style: {template.name}. Use {template.diagram} when it fits."
+    candidates = matching_subjects(prompt)
+    choices = [template] if template == GENERATED_TEMPLATE or template in candidates else candidates or [GENERATED_TEMPLATE]
+    single_match = len(choices) == 1
+    choices_by_id = {item.id:item for item in choices}
+    ids = list(choices_by_id)
+    views = list(dict.fromkeys(view for item in choices for view in VIEWS[item.diagram]))
+    view_schema = {"type": "string", "enum": views}
+    key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
+    words_per_scene = round((target_words - 8) / (7 if long_video else 5))
+    narration_schema = {**_TEXT, "description": f"About {words_per_scene} spoken words with concrete detail."}
+    if not key:
+        narration_schema.update(minLength=min(260, round(words_per_scene * 5.3)), maxLength=360)
+    scene_properties = properties["scenes"]["items"]["properties"]
+    properties["scenes"]["items"] = _object(**{**scene_properties, "view": view_schema, "narration": narration_schema})
+    properties["hook_view"] = view_schema
+    schema = _object(template={"type": "string", "enum": ids}, **properties)
+    coverage = " | ".join(f"{item.id} ({item.coverage}): {', '.join(VIEWS[item.diagram])}" for item in choices)
+    visual_style = (
+        ("A separate step will build new 3D objects for this topic. Treat the views as camera directions: use "
+         "wide for the whole scene, detail for a named object, and overhead for objects seen from above. "
+         if choices == [GENERATED_TEMPLATE] else
+         "Use the selected subject and only its available camera views. ") +
+        "Set hook_view to the shot that makes the opening question visible. "
+        "For each scene, set view to the exact part or action being narrated. Show how the details requested "
+        "by the user work, in the order they asked for. Use the wide view when it establishes the whole object. "
+        f"Subjects and their views: {coverage}"
+    )
+    if single_match and choices[0].diagram == "freewheel":
+        visual_style += (" Establish with a wide shot, use cutaway to expose the pawls and ratchet ring, then "
+                         "use engagement while describing how pedaling locks them together. Use coasting when "
+                         "describing the pawls clicking past the teeth while the sprocket stands still.")
     delivery = {
         "expressive": "Sound like a friend explaining something cool. Use contractions, everyday words, and short sentences that feel natural aloud.",
         "energetic": "Sound like an excited friend showing a quick discovery. Use short, lively sentences and skip hype and filler.",
@@ -245,97 +340,113 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     }[voice_style]
     instructions = (
         "Plan a factually accurate educational vertical video in English. Return only the requested JSON. "
-        "Write a 4 to 10 word hook, maximum 80 characters. Open immediately with a specific puzzle, "
-        "surprising truth or relatable 'what if' that the video actually answers. Use no greeting, "
-        "intro filler, clickbait or invented claim. The hook is spoken and shown before the scenes. "
-        f"Use {'7 to 8' if long_video else '5 to 6'} consecutive scenes. Pick up from the hook without repeating it, "
-        "explain cause and effect, and end with the payoff and a complete answer. "
+        "Write a short, natural YouTube title that names the subject and gives viewers a reason to watch. "
+        "Keep the title, narration and description faithful to the prompt and the mechanism. "
+        "Use established causes for physical mechanisms. Keep the description focused on the topic and call the visuals 3D animation when describing them. "
+        "Write a single, standalone hook sentence of 4 to 10 words, maximum 80 characters. "
+        "Start with one concrete surprise or a short curiosity question. Name a visible outcome and leave its cause open. "
+        "Avoid claims about what the viewer has seen, extra setup sentences, and a second question. "
+        "The hook is spoken and shown by itself before the scenes. "
+        f"Use {'7 to 8' if long_video else '5 to 6'} consecutive scenes. Start scene one with the first new fact or visible action that answers the hook. "
+        "Move directly to the first physical action or cause. Say the names of the physical parts as you explain what they do. "
+        "Keep the question and setup out of the explanation. "
+        "Explain cause and effect, then end with the payoff and a complete answer. "
         f"Write about {target_words} spoken words, including the hook, for a {target_seconds}-second video. "
-        f"Write roughly {round((target_words - 8) / (7 if long_video else 5))} words per scene. "
-        "Use two or three complete sentences per scene and develop the answer with a concrete example or useful detail. "
+        f"Aim for {words_per_scene} spoken words per scene. Develop each beat with a visible cause-and-effect "
+        "detail or a concrete example that directly answers the prompt. Finish every sentence. "
         f"{delivery} "
         "Write the narration as one spoken story that happens to span several visuals. Let each scene pick up "
         "the thought from the previous one. Vary sentence length. Avoid repeated setup phrases, spoken headings "
         "and canned lines like 'Let's dive in' or 'Here's the kicker'. "
-        "Headings and diagram labels must be short. Caption is one short sentence summarizing the narration. "
-        "Show the actual subject in motion when a matching scene exists. Use presenter for a person gesturing "
-        "toward a labeled board, walking for human steps or locomotion, and handoff for two people passing an "
-        "object, such as in a communication or teamwork story. Keep human action relevant to the narration. "
-        "Use a bar chart only when comparing quantities. parts/cutaway show components; flow/sequence show steps; "
-        "cycle shows recurrence; network shows relationships; orbit shows rotation; wave shows a signal; "
-        "motion shows movement; bars/compare show contrasts. Use gears for meshing gears, piston for a crank "
-        "driving a piston, moon for lunar phases, bicycle for a full side view of a bicycle, and bicycle_drive "
-        "for a close-up of pedals driving a chain and rear cog. For bicycle drivetrain explanations start with "
-        "bicycle and use bicycle_drive while explaining the moving parts. For moon, label Sun, Earth and Moon in "
-        "that order. Treat shapes as schematic and avoid invented measurements. "
+        "Use the requested subject, question, level of detail and emphasis. If the prompt asks why something "
+        "happens, answer that question directly in the title, hook and narration. Do not substitute a generic overview. "
+        "Headings must be short. Each caption is one short sentence summarizing the corresponding narration. "
         "Follow provider safety rules. Do not give actionable instructions for harming people, "
         "building weapons, engineering dangerous pathogens, or exploiting computer systems. "
         f"Vary the scenes to follow the narration. {visual_style}"
     )
-    key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
     try:
-        if key:
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-            response = requests.post(endpoint, headers={"x-goog-api-key": key}, json={
-                "systemInstruction": {"parts": [{"text": instructions}]},
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
-                                     "maxOutputTokens": 3000},
-            }, timeout=(5, 90))
-            response.raise_for_status()
-            result = "".join(part.get("text", "") for part in response.json()["candidates"][0]["content"]["parts"]
-                             if not part.get("thought"))
-        else:
-            response = requests.post(f"{OLLAMA_URL}/api/chat", json={
-                "model": OLLAMA_MODEL, "stream": False, "think": False, "format": schema, "keep_alive": "1m",
-                "options": {"temperature": 0.3, "num_predict": 3200 if long_video else 2400,
-                            "num_ctx": 6144 if long_video else 4096},
-                "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
-            }, timeout=(4, 180))
-            response.raise_for_status()
-            result = response.json()["message"]["content"]
-        plan = json.loads(result)
-        selected_template = template if template is not None else TEMPLATES[plan["template"]]
-        title, description, scenes = _validate_plan(plan, max_scenes)
-        topic = prompt
-        bicycle = re.search(r"\b(?:bicycles?|bikes?|cyclists?)\b", topic, re.I)
-        human_scenes = ("presenter", "walking", "handoff")
-        relay = re.search(r"\brelay\b", topic, re.I) and re.search(r"\b(?:race|runners?|baton)\b", topic, re.I)
-        for scene in scenes:
-            if scene["diagram"] in ("bicycle", "bicycle_drive") and not bicycle:
-                scene["diagram"] = selected_template.diagram
-        if relay:
-            scenes[0]["diagram"] = "handoff"
-            scenes[1]["diagram"] = "walking"
-            scenes[2]["diagram"] = "handoff"
-        elif (selected_template.diagram in human_scenes
-              and not any(scene["diagram"] in human_scenes for scene in scenes)):
-            scenes[0]["diagram"] = selected_template.diagram
-        # Keep the full bicycle visible at the hook and introduce the close-up
-        # even when the model chooses an abstract scene for a drivetrain prompt.
-        if bicycle and re.search(
-            r"\b(?:pedal\w*|drivetrain|chain\w*|sprockets?|crank\w*)\b", topic, re.I
-        ):
-            hook = "How does one pedal stroke turn the rear wheel?"
-            scenes[0].update(diagram="bicycle", heading=hook, narration=hook)
-            scenes[1].update(diagram="bicycle")
-            if not any(scene["diagram"] == "bicycle_drive" for scene in scenes[2:]):
-                detail = next((scene for scene in scenes[2:]
-                               if re.search(r"\b(?:chain\w*|sprockets?|cogs?)\b", scene["narration"], re.I)),
-                              scenes[2])
-                detail.update(diagram="bicycle_drive")
-        return selected_template, title, description, scenes
+        for attempt in range(2):
+            try:
+                result = _request_storyboard(prompt, instructions, schema, key, long_video, single_match)
+                plan = json.loads(result)
+                selected_template = choices_by_id[plan["template"]]
+                title, description, scenes = _validate_plan(plan, selected_template.diagram, max_scenes)
+                return selected_template, title, description, scenes
+            except (ValueError, KeyError, TypeError, IndexError):
+                if attempt:
+                    raise
+                instructions += (" Return a complete storyboard using the specified fields and supplied view IDs."
+                                 " Use one standalone hook sentence followed by at least five explanatory scenes.")
     except requests.HTTPError as error:
         status = error.response.status_code
         if status == 429:
             raise ExplainerError("The AI provider reached its usage limit. Try again later.") from None
         if not key and status == 404:
             raise ExplainerError(f"Install the AI model first with ollama pull {OLLAMA_MODEL}.") from None
+        if not key and status >= 500:
+            print(f"[Ollama] Storyboard request returned HTTP {status}.")
+            raise ExplainerError("Ollama is reachable, but its model could not finish. Try again with the 1-minute option.") from None
         raise ExplainerError("The AI provider could not generate a storyboard. Check its setup or try again.") from None
+    except requests.ReadTimeout:
+        provider = "Gemini" if key else "Ollama"
+        raise ExplainerError(f"{provider} took too long to write the storyboard. Try the 1-minute option.") from None
     except requests.RequestException:
-        raise ExplainerError("Could not reach the AI model. Check that the configured provider is running.") from None
+        message = ("Could not reach Gemini. Check your internet connection and provider settings." if key else
+                   f"Could not connect to Ollama. Open Ollama and check that {OLLAMA_MODEL} is installed, then try again.")
+        raise ExplainerError(message) from None
     except (ValueError, KeyError, TypeError, IndexError):
         raise ExplainerError("The AI returned an incomplete storyboard. Try a shorter, more specific prompt.") from None
+
+
+def _plan_stage(prompt, scenes):
+    def options(values):
+        return {"type":"string", "enum":list(values)}
+
+    def vector(low, high):
+        return {"type":"array", "minItems":3, "maxItems":3,
+                "items":{"type":"number", "minimum":low, "maximum":high}}
+
+    schema = _object(objects={"type":"array", "minItems":2, "maxItems":MAX_OBJECTS, "items":_object(
+        label=_TEXT, shape=options(SHAPES), color=options(COLORS), pose=options(POSES), motion=options(MOTIONS),
+        position=vector(-2.5, 2.5), size=vector(.035, 2.65), relation=options(RELATIONS), anchor=_TEXT,
+    )}, actions={"type":"array", "minItems":0, "maxItems":24, "items":_object(
+        beat={"type":"integer", "minimum":0, "maximum":len(scenes)-1}, part=_TEXT,
+        direction=options(DIRECTIONS), distance={"type":"number", "minimum":0, "maximum":1.8},
+        turn={"type":"number", "minimum":-720, "maximum":720},
+        start={"type":"number", "minimum":0, "maximum":1}, end={"type":"number", "minimum":0, "maximum":1},
+    )})
+    instructions = (
+        "Build one coherent miniature 3D stage for this educational video. Return JSON objects only. "
+        "Choose 4 to 9 recognizable parts or props that make the requested cause and effect visible. "
+        "Compose the topic itself with meshes. A named, animated schematic is appropriate for an abstract topic. "
+        "Use the exact names of important parts spoken in the narration as short labels. Give each object a distinct label. "
+        "Coordinates are [x, y, z]: right, up, toward the camera. Keep most objects between x=-1.4 and 1.4, "
+        "y=-0.8 and 1.4. Size is [x, y, z] before pose. For a cylinder the third size is its length; "
+        "upright points that length up, across points right, and front points toward the camera. "
+        "Use small thicknesses for lines and legs. Let small shapes form detailed objects. Use waves for periodic motion. "
+        "Join pieces that belong together. For a piece stacked on or attached to another piece, use on-top, in-front, "
+        "on-left, or on-right as its relation and the other object's exact label as anchor. Independent pieces use free and an empty anchor. "
+        "Place internal parts in front of or beside the housing so they are visible in a cutaway. "
+        "Arrange an opening wide view and leave room around the main objects. Color moving parts distinctly. "
+        "The beats are numbered from zero. Use actions to CHOREOGRAPH each mechanism across the beats. "
+        "Name the exact part and beat, then give its direction and distance from its current location, degrees of rotation around its center, "
+        "and fractions start/end within the beat. For example within the same beat the input moves from 0.1 to 0.4, "
+        "then the driven part moves from 0.4 to 0.85. Move covers away to reveal interiors; show contact then response. "
+        "Actions persist into later beats. Attached children automatically follow their parent. Use still for keyed parts. "
+        "Keep fixed parts still; for a static topic show the described change when appropriate, such as tilting one stack to demonstrate balance. "
+        "Use only the given meshes and parameters. Return no code, paths, external assets, or actionable harmful details."
+    )
+    context = json.dumps({"topic":prompt, "beats":[{"beat":i, "narration":scene["narration"]}
+                         for i, scene in enumerate(scenes)]}, ensure_ascii=False)
+    key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
+    try:
+        result = _request_storyboard(context, instructions, schema, key, False, True)
+        data = json.loads(result)
+        stage = read_stage(data)
+        return stage, "procedural", read_actions(data, stage, scenes)
+    except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
+        return storyboard_stage(scenes), "schematic", ()
 
 
 @lru_cache(maxsize=1)
@@ -362,7 +473,12 @@ def _kokoro(model, voices):
     return Kokoro.from_session(session, str(voices))
 
 
-def _continuous_narration(scenes, style, output):
+def _estimated_cue_ratios(narration, mentions):
+    words = len(narration.split())
+    return [(len(narration[:position].split()) / words, part) for position, part in mentions]
+
+
+def _continuous_narration(scenes, style, output, mentions):
     voice_dir = _voice_dir()
     model = voice_dir / "timed-kokoro-v1.0.onnx"
     voices = voice_dir / "timed-voices-v1.0.bin"
@@ -391,21 +507,39 @@ def _continuous_narration(scenes, style, output):
         # Cut visuals at the next line's first phoneme. The audio stays in one take.
         separator_length = len(engine.tokenizer.known(" "))
         boundaries = [0]
-        offset = 0
+        starts = [0]
         for phrase in phrases[:-1]:
-            offset += len(phrase) + separator_length
-            boundaries.append(round(timings[offset].start * FPS))
+            starts.append(starts[-1] + len(phrase) + separator_length)
+            boundaries.append(round(timings[starts[-1]].start * FPS))
         boundaries.append(math.ceil((len(samples) / rate + 0.25) * FPS))
         counts = [end - start for start, end in zip(boundaries, boundaries[1:])]
         if min(counts) < 1:
             raise ValueError("Invalid narration timing")
+
+        cue_ratios = []
+        for scene, row, phrase, start, boundary, count in zip(scenes, mentions, phrases, starts, boundaries, counts):
+            narration = scene["narration"]
+            cues = []
+            for (position, part), (estimate, _) in zip(row, _estimated_cue_ratios(narration, row)):
+                prefix = narration[:position].rstrip()
+                if not prefix:
+                    cues.append((0., part))
+                    continue
+                phonemes = engine.tokenizer.phonemize(prefix, lang="en-us")
+                known = engine.tokenizer.known(" ".join(phonemes.split()))
+                index = len(known) + separator_length
+                if phrase.startswith(known) and index < len(phrase):
+                    frames = timings[start + index].start * FPS - boundary
+                    estimate = max(0., min(1., frames / count))
+                cues.append((estimate, part))
+            cue_ratios.append(cues)
 
         pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
         tail = round(boundaries[-1] * rate / FPS) - len(samples)
         with wave.open(str(output), "wb") as audio:
             audio.setparams((1, 2, rate, 0, "NONE", "not compressed"))
             audio.writeframes(pcm + bytes(tail * 2))
-        return counts
+        return counts, cue_ratios
     except (ImportError, OSError, ValueError, RuntimeError, KeyError, IndexError, wave.Error) as error:
         raise ExplainerError("Could not generate continuous narration. Check the Kokoro voice files or try again.") from error
 
@@ -466,40 +600,72 @@ def _speak(text, script, target, pace, opening, voice):
         raise ExplainerError("Could not create the voiceover. Check the server's speech engine.") from None
 
 
+def _part_schedule(cues, count, view):
+    minimum = round(FPS * 1.3)
+    scheduled = []
+    for ratio, part in sorted(cues, key=lambda cue: cue[0]):
+        frame = min(round(ratio * count), max(0, count - minimum))
+        if not scheduled:
+            scheduled.append((0 if frame < FPS else frame, part))
+            continue
+        last_frame, previous = scheduled[-1]
+        if part == previous:
+            continue
+        if frame - last_frame >= minimum:
+            scheduled.append((frame, part))
+        elif part.view == view and previous.view != view:
+            scheduled[-1] = (last_frame, part)
+    return scheduled
+
+
 def render_explainer(payload, report_progress=None):
     def report(stage, percent=None):
         if report_progress:
             report_progress(stage, percent)
 
-    template = TEMPLATES.get(payload["template"])
+    template = GENERATED_TEMPLATE if payload["template"] == GENERATED_TEMPLATE.id else TEMPLATES.get(payload["template"])
     style = payload.get("voice", "expressive")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
     long_video = max_seconds == MAX_SECONDS
     target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
     minimum = MIN_SECONDS if not long_video else 75
     report("storyboard")
-    example = payload["example"] or payload.get("prompt", "").strip().casefold() == BICYCLE_PEDALS_PROMPT.casefold()
+    example = payload["example"]
     target_words = round({"expressive": 160, "energetic": 175, "documentary": 150}[style] * target_seconds / TARGET_SECONDS)
     if example:
-        template = template or TEMPLATES["industrial-cutaway"]
+        template = TEMPLATES["bicycle-drivetrain"]
         plan = _EXAMPLE
         if long_video:
             original = plan["scenes"]
             plan = {**plan, "scenes": [*original[:1], _LONG_EXAMPLE_SCENES[0], *original[1:-1],
                                        _LONG_EXAMPLE_SCENES[1], original[-1]]}
-        title, description, scenes = _validate_plan(plan, 8 if long_video else 6)
+        title, description, scenes = _validate_plan(plan, template.diagram, 8 if long_video else 6)
     else:
         template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
+    stage, scene_source = CURATED_STAGES.get(template.diagram), "library"
+    actions = ()
+    if template == GENERATED_TEMPLATE:
+        report("scene")
+        stage, scene_source, actions = _plan_stage(payload["prompt"], scenes)
+    custom_parts = stage_parts(stage) if stage else ()
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
         for attempt in range(3):
             report("narration")
-            frame_counts = _continuous_narration(scenes, style, audio_path)
-            if frame_counts is None:
+            mentions = [part_mentions(template.diagram, scene["narration"], custom_parts) for scene in scenes]
+            if scene_source == "schematic":
+                mentions = [row or [(0, custom_parts[min(max(0,index-1),len(custom_parts)-1)])]
+                            for index, row in enumerate(mentions)]
+            timing = _continuous_narration(scenes, style, audio_path, mentions)
+            if timing is None:
                 frame_counts = _scene_narration(scenes, style, work, audio_path)
+                cue_ratios = [_estimated_cue_ratios(scene["narration"], cues) for scene, cues in zip(scenes, mentions)]
+            else:
+                frame_counts, cue_ratios = timing
             duration = sum(frame_counts) / FPS
-            if minimum * .88 <= duration <= max_seconds * 1.12 or example or attempt == 2:
+            if (minimum * .88 <= duration <= max_seconds * 1.12 or example or attempt == 2
+                    or (long_video and attempt == 1 and duration <= max_seconds)):
                 break
             spoken_words = sum(len(scene["narration"].split()) for scene in scenes)
             estimated = round(spoken_words * target_seconds / duration)
@@ -509,7 +675,20 @@ def render_explainer(payload, report_progress=None):
                 estimated = min(target_words - 20, estimated)
             target_words = min(340 if long_video else 230, max(90, estimated))
             report("revising")
-            _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
+            try:
+                _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
+                if scene_source == "schematic":
+                    stage = storyboard_stage(scenes)
+                    custom_parts = stage_parts(stage)
+                elif actions:
+                    report("scene")
+                    stage, scene_source, actions = _plan_stage(payload["prompt"], scenes)
+                    custom_parts = stage_parts(stage)
+            except ExplainerError:
+                # The current take is already complete. Keep it if it can be
+                # exported within the requested limit without truncating speech.
+                _fit_runtime(frame_counts, max_seconds)
+                break
         # A shorter complete explanation is valid when the user selects a 90-second maximum.
         frame_counts, tempo = _fit_runtime(frame_counts, max_seconds)
         total_frames = sum(frame_counts)
@@ -528,15 +707,34 @@ def render_explainer(payload, report_progress=None):
                    "-movflags", "+faststart", output]
         try:
             report("rendering", 0)
-            with (work / "ffmpeg.log").open("wb") as log:
+            with CinematicRenderer() as renderer, (work / "ffmpeg.log").open("wb") as log:
                 with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=log) as encoder:
                     try:
                         rendered_frames = 0
                         last_percent = 0
-                        for index, (scene, count) in enumerate(zip(scenes, frame_counts)):
-                            painter = ScenePainter(template, scene, index, len(scenes))
+                        previous_view = None
+                        for beat, (scene, count, cues) in enumerate(zip(scenes, frame_counts, cue_ratios)):
+                            view = scene["view"]
+                            if view != previous_view:
+                                action_start = rendered_frames / FPS
+                                previous_view = view
+                            opening = scene.get("opening", False)
+                            caption = scene["heading"] if opening else scene["caption"]
+                            offset = rendered_frames / FPS
+                            if stage:
+                                shot = StageShot(stage, view, caption_layer(caption,renderer.size,opening), offset,
+                                                 actions=actions, beat=beat, duration=count/FPS)
+                            else:
+                                shot = Shot(template.diagram, view, renderer.size, caption, opening,
+                                            offset=offset, action_start=action_start)
+                            schedule = iter(_part_schedule(cues, count, view))
+                            pending = next(schedule, None)
+                            focused_part = None
                             for frame in range(count):
-                                encoder.stdin.write(painter.frame(frame / count).tobytes())
+                                if pending and pending[0] == frame:
+                                    focused_part = pending[1]
+                                    pending = next(schedule, None)
+                                encoder.stdin.write(renderer.frame(shot, frame/FPS, focused_part).tobytes())
                                 rendered_frames += 1
                                 percent = rendered_frames * 100 // total_frames
                                 if percent >= last_percent + 5 and percent < 100:
@@ -550,9 +748,12 @@ def render_explainer(payload, report_progress=None):
                         if encoder.poll() is None:
                             encoder.kill()
             return output, {"title": title, "description": description, "template": template.name,
-                            "duration": total_frames / FPS}
+                            "duration": total_frames / FPS, "scene_source": scene_source,
+                            "views": [scene["view"] for scene in scenes]}
         except BaseException as error:
             Path(output).unlink(missing_ok=True)
+            if isinstance(error, RendererUnavailable):
+                raise ExplainerError(str(error)) from None
             if isinstance(error, (OSError, subprocess.SubprocessError)):
                 raise ExplainerError("The animation could not be encoded. Try generating again.") from None
             raise
