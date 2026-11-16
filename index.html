@@ -28,6 +28,13 @@
   </div>
 </nav>
 
+<section class="youtube-account youtube-box" aria-label="Clip Studio YouTube">
+  <p id="youtubeStatus" role="status">Checking YouTube connection…</p>
+  <button class="layout-btn" type="button" id="youtubeConnect" disabled>Connect YouTube</button>
+  <button class="layout-btn" type="button" id="youtubeDisconnect" hidden>Disconnect</button>
+  <a id="youtubeSetup" href="https://github.com/WhiffGodd/godd-ai-local-host#upload-clips-to-youtube" target="_blank" rel="noopener noreferrer" hidden>Google sign-in setup instructions</a>
+</section>
+
 <!-- ═══════════════════ HERO ═══════════════════ -->
 <section id="heroSection">
   <div class="hero-wrap">
@@ -252,10 +259,7 @@
 
       <div class="ctrl-box youtube-box">
         <div class="ctrl-box-title">Upload to YouTube</div>
-        <p id="youtubeStatus" role="status">Checking YouTube connection…</p>
-        <button class="layout-btn" type="button" id="youtubeConnect" disabled>Connect YouTube</button>
-        <a id="youtubeSetup" href="https://github.com/WhiffGodd/godd-ai-local-host#upload-clips-to-youtube" target="_blank" rel="noopener noreferrer" hidden>Google sign-in setup instructions</a>
-        <button class="layout-btn" type="button" id="youtubeDisconnect" hidden>Disconnect</button>
+        <p id="clipUploadChannel"></p>
         <form id="youtubeForm" hidden>
           <label>Title <input id="youtubeTitle" maxlength="100" required></label>
           <label>Visibility

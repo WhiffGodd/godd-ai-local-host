@@ -124,9 +124,9 @@ class YouTubeUploadTests(unittest.TestCase):
 
         with patch.object(server, "YOUTUBE", auth), patch.object(
             youtube.requests, "post", return_value=response(200, {"access_token": "token", "refresh_token": "refresh"})
-        ), patch.object(youtube.requests, "get", return_value=response(200, {
+        ) as google_token, patch.object(youtube.requests, "get", return_value=response(200, {
             "items": [{"id": "test-channel", "snippet": {"title": "My channel"}}]
-        })), patch.object(server, "upload_video", return_value={"video_id": "abcdefghijk", "privacy": "private"}) as publish:
+        })) as google_channel, patch.object(server, "upload_video", return_value={"video_id": "abcdefghijk", "privacy": "private"}) as publish:
             jobs = RenderJobs(render, publisher=server.publish_to_youtube)
             with patch.object(server, "EXPORT_JOBS", jobs):
                 self.assertEqual(request("POST", "/api/youtube/connect", {}, request_origin="https://elsewhere.test")[0], 403)
@@ -163,12 +163,24 @@ class YouTubeUploadTests(unittest.TestCase):
                 self.assertEqual(result["video_id"], "abcdefghijk")
                 self.assertEqual(result["privacy"], "private")
                 publish.assert_called_once()
-                status, link, _ = request("POST", "/api/youtube/connect", {"studio": "ai-videos"}, cookie)
+                ai_route = "/api/youtube/ai-videos/"
+                self.assertIsNone(request("GET", ai_route + "status", cookie=cookie)[1]["channel"])
+                status, link, ai_cookie_header = request("POST", ai_route + "connect", {}, cookie)
                 self.assertEqual(status, 200)
+                ai_cookie = ai_cookie_header.split(";", 1)[0]
+                self.assertNotEqual(ai_cookie.split("=", 1)[0], cookie.split("=", 1)[0])
+                both_cookies = cookie + "; " + ai_cookie
                 state = parse_qs(urlsplit(link["url"]).query)["state"][0]
                 callback = youtube.CALLBACK_PATH + f"?code=fake&state={state}"
-                self.assertEqual(request("GET", callback, cookie=cookie),
+                self.assertEqual(request("GET", callback, cookie=cookie)[0], 400)
+                google_channel.return_value = response(200, {"items": [{"id": "ai-channel", "snippet": {"title": "AI channel"}}]})
+                google_token.return_value = response(200, {"access_token": "ai-token", "refresh_token": "ai-refresh"})
+                self.assertEqual(request("GET", callback, cookie=both_cookies),
                                  (303, b"", "/ai-videos.html?youtube=connected"))
+                self.assertEqual(request("GET", "/api/youtube/status", cookie=both_cookies)[1]["channel"]["id"], "test-channel")
+                self.assertEqual(request("GET", ai_route + "status", cookie=both_cookies)[1]["channel"]["id"], "ai-channel")
+                clip_job_id = job["id"]
+                self.assertEqual(request("GET", ai_route + "uploads/" + clip_job_id, cookie=both_cookies)[0], 404)
                 with tempfile.TemporaryDirectory() as directory:
                     source = Path(directory, "generated.mp4")
                     source.write_bytes(b"generated-video")
@@ -180,6 +192,7 @@ class YouTubeUploadTests(unittest.TestCase):
                         self.assertEqual(Path(path).read_bytes(), b"generated-video")
                         self.assertNotEqual(Path(path), source)
                         self.assertEqual(metadata["snippet"]["title"], "AI explainer")
+                        self.assertEqual(token, "ai-token")
                         Path(path).unlink()
                         return {"video_id": "abcdefghijk", "privacy": "private"}
 
@@ -187,11 +200,20 @@ class YouTubeUploadTests(unittest.TestCase):
                     with patch.object(server, "AI_VIDEO_JOBS", generated), patch.object(
                         server, "EXPORT_JOBS", uploads
                     ), patch.object(server, "upload_video", side_effect=upload_generated):
-                        ai_payload = {"request_id": "ai-video-request-id", "channel_id": "test-channel",
+                        ai_payload = {"request_id": "ai-video-request-id", "channel_id": "ai-channel",
                                       "generated_video_id": generated_id, "title": "AI explainer", "made_for_kids": False}
-                        status, job, _ = request("POST", "/api/youtube/uploads", ai_payload, cookie)
+                        self.assertEqual(request("POST", ai_route + "uploads", ai_payload, cookie)[0], 401)
+                        self.assertEqual(request("POST", ai_route + "uploads", {**ai_payload, "channel_id": "test-channel"}, both_cookies)[0], 409)
+                        self.assertEqual(request("POST", "/api/youtube/uploads", {**ai_payload, "channel_id": "test-channel"}, both_cookies)[0], 400)
+                        status, job, _ = request("POST", ai_route + "uploads", ai_payload, both_cookies)
                         self.assertEqual(status, 202)
                         uploads.pending.join()
-                        self.assertEqual(uploads.snapshot(job["id"], cookie.split("=", 1)[1])["state"], "complete")
+                        self.assertEqual(request("GET", ai_route + "uploads/" + job["id"], cookie=both_cookies)[1]["state"], "complete")
+                        self.assertEqual(request("GET", "/api/youtube/uploads/" + job["id"], cookie=both_cookies)[0], 404)
+                google_token.reset_mock()
+                self.assertEqual(request("POST", ai_route + "disconnect", {}, both_cookies)[0], 200)
+                self.assertIsNone(request("GET", ai_route + "status", cookie=both_cookies)[1]["channel"])
+                self.assertEqual(request("GET", "/api/youtube/status", cookie=both_cookies)[1]["channel"]["id"], "test-channel")
+                google_token.assert_not_called()
                 self.assertEqual(request("POST", "/api/youtube/disconnect", {}, cookie)[0], 200)
                 self.assertEqual(request("GET", "/api/youtube/status", cookie=cookie)[1]["channel"], None)

@@ -228,8 +228,9 @@ The reusable 3D scene modules and renderer are available under the [MIT license]
   The Docker image includes Mesa EGL and the narration engine. The static Vercel version
   needs the Python rendering server for this feature.
 - **Publishing**: Preview the video, review its suggested title, description
-  and hashtags, then use **Upload to YouTube**. The AI studio and clip studio
-  share the same connected channel. Uploads default to Private.
+  and hashtags, then use **Upload to YouTube**. Connect a channel separately in
+  each studio. The same Google OAuth client and callback can handle both sign-ins.
+  Disconnecting from either studio removes that studio's session. Uploads default to Private.
 
 ## Upload clips to YouTube
 

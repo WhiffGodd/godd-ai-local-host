@@ -84,15 +84,15 @@
         </div>
         <p id="selectedStyle" class="selected-style"></p>
         <p id="previewStatus" class="status" role="status"></p>
-        <div id="exportTools" hidden>
-          <label for="title">YouTube video title</label>
-          <input id="title" name="title" form="publishForm" maxlength="100" required>
-          <a id="downloadVideo" class="secondary download">Download MP4</a>
-          <section class="publish" aria-labelledby="publishHeading">
-            <h2 id="publishHeading">Upload to YouTube</h2>
-            <p id="connectionStatus" class="status" role="status"></p>
-            <button id="connect" class="secondary" type="button" hidden>Connect YouTube</button>
-            <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>
+        <section class="publish" aria-labelledby="publishHeading">
+          <h2 id="publishHeading">AI Studio YouTube</h2>
+          <p id="connectionStatus" class="status" role="status"></p>
+          <button id="connect" class="secondary" type="button" hidden>Connect YouTube</button>
+          <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>
+          <div id="exportTools" hidden>
+            <label for="title">YouTube video title</label>
+            <input id="title" name="title" form="publishForm" maxlength="100" required>
+            <a id="downloadVideo" class="secondary download">Download MP4</a>
             <form id="publishForm" hidden>
               <label for="description">Description and hashtags</label>
               <textarea id="description" rows="4" maxlength="5000"></textarea>
@@ -103,8 +103,8 @@
               <button id="upload" class="primary" type="submit">Upload to YouTube</button>
             </form>
             <p id="publishStatus" class="status" role="status"></p>
-          </section>
-        </div>
+          </div>
+        </section>
       </aside>
     </div>
   </main>

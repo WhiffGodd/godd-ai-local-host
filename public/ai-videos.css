@@ -70,6 +70,7 @@ textarea::placeholder { color: #9b98b5; }
 .download { width: 100%; margin-top: 12px; }
 .publish { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
 .publish h2 { font-size: 1.05rem; }
+.publish #exportTools { margin-top: 16px; }
 .publish form, .publish button { margin-top: 10px; }
 .publish form label:not(:first-child) { margin-top: 10px; }
 @media (max-width: 850px) {

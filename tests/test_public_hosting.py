@@ -10,7 +10,8 @@ from unittest.mock import patch
 from server import ThreadedHTTPServer, GoddAIRequestHandler, validate_render_payload
 from render_jobs import RenderJobs
 from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _part_schedule, _plan_stage, _validate_plan, plan_video, render_explainer, validate_generation
-from cinematic_render import Shot
+from ai_video import _subtitle_phrases, _subtitle_schedule
+from cinematic_render import Shot, _part_badge
 from explainer_parts import part_mentions
 from explainer_templates import GENERATED_TEMPLATE, TEMPLATES, matching_subjects
 from procedural_scene import StageShot
@@ -146,6 +147,21 @@ class PublicHostingTests(unittest.TestCase):
         schedule = _part_schedule([(0.1, mentions[0][1]), (0.4, mentions[1][1]), (0.8, mentions[2][1])],
                                   8 * FPS, "caliper-and-pads")
         self.assertEqual([part.label for _, part in schedule], ["Caliper", "Brake pads", "Rotor"])
+
+    def test_narration_subtitles_keep_spoken_words_and_leave_silent_gaps(self):
+        narration = "The caliper grips the rotor. The wheel slows as friction turns motion into heat."
+        phrases = _subtitle_phrases(narration)
+        self.assertEqual(" ".join(text for _, text in phrases), narration)
+        self.assertTrue(all(narration[start:].startswith(text) for start, text in phrases))
+        captions = [(0.1, 0.3, phrases[0][1]), (0.5, 0.9, phrases[1][1])]
+        self.assertEqual(list(_subtitle_schedule(captions,100)), [(10,30,phrases[0][1]), (50,90,phrases[1][1])])
+        self.assertEqual(list(_subtitle_schedule(captions,80))[1], (40,72,phrases[1][1]))
+
+    def test_part_labels_stay_in_a_fixed_screen_position(self):
+        first, first_position = _part_badge("Rotor", (720,1280))
+        second, second_position = _part_badge("Brake pads", (720,1280))
+        self.assertEqual(first_position, second_position)
+        self.assertNotEqual(first.tobytes(), second.tobytes())
 
     def test_explainer_runtime_fits_narration_and_scene_boundaries_together(self):
         for seconds, expected in ((44, 50), (50, 50), (55, 55), (60, 60), (66, 60)):

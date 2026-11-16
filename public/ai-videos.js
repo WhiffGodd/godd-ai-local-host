@@ -245,11 +245,11 @@ async function generate() {
 
 async function refreshConnection() {
   try {
-    const data = await request("/api/youtube/status");
+    const data = await request("/api/youtube/ai-videos/status");
     page.youtubeEnabled = data.enabled;
     page.channel = data.channel;
-    message("connectionStatus", data.channel ? "Connected to " + data.channel.title :
-      data.enabled ? "Connect your channel to publish this video." : "YouTube sign-in is unavailable at this address.");
+    message("connectionStatus", data.channel ? "AI Studio channel · " + data.channel.title :
+      data.enabled ? "Choose a YouTube channel for AI Studio." : "YouTube sign-in is unavailable at this address.");
   } catch (error) {
     message("connectionStatus", error.message, true);
   }
@@ -262,7 +262,7 @@ async function watchUpload() {
   try {
     const end = Date.now() + 360000;
     while (Date.now() < end) {
-      const job = await request("/api/youtube/uploads/" + encodeURIComponent(page.upload));
+      const job = await request("/api/youtube/ai-videos/uploads/" + encodeURIComponent(page.upload));
       if (job.state === "failed") throw Object.assign(new Error(job.error), {finished: true});
       if (job.state === "complete") {
         const link = document.createElement("a");
@@ -318,7 +318,7 @@ $("connect").addEventListener("click", async () => {
   $("connect").disabled = true;
   try {
     save();
-    const {url} = await request("/api/youtube/connect", {studio: "ai-videos"});
+    const {url} = await request("/api/youtube/ai-videos/connect", {});
     window.location.assign(url);
   } catch (error) {
     message("connectionStatus", error.message, true);
@@ -329,7 +329,10 @@ $("connect").addEventListener("click", async () => {
 $("disconnect").addEventListener("click", async () => {
   $("disconnect").disabled = true;
   try {
-    await request("/api/youtube/disconnect", {});
+    await request("/api/youtube/ai-videos/disconnect", {});
+    page.upload = null;
+    message("publishStatus", "");
+    save();
     await refreshConnection();
   } catch (error) {
     message("connectionStatus", error.message, true);
@@ -351,10 +354,10 @@ $("publishForm").addEventListener("submit", async event => {
   };
   try {
     let job;
-    try { job = await request("/api/youtube/uploads", payload); }
+    try { job = await request("/api/youtube/ai-videos/uploads", payload); }
     catch (error) {
       if (error.status) throw error;
-      job = await request("/api/youtube/uploads", payload);
+      job = await request("/api/youtube/ai-videos/uploads", payload);
     }
     page.upload = job.id;
     save();

@@ -50,6 +50,53 @@ def _surface(point, rings, sides):
 
 
 def mesh(name):
+    if name == "drilled-rotor":
+        vertices = []
+        holes = 18
+        for i in range(holes):
+            angle = tau * (i+.5)/holes
+            center = np.array((.86*cos(angle), .86*sin(angle)))
+
+            def perimeter(u):
+                edge = min(int(u*4),3)
+                p = u*4-edge
+                left, right = angle-pi/holes, angle+pi/holes
+                a, radius = ((left+(right-left)*p,1.),(right,1.-.28*p),
+                             (right-(right-left)*p,.72),(left,.72+.28*p))[edge]
+                return np.array((radius*cos(a),radius*sin(a)))
+
+            def section(u, v, side):
+                outer = perimeter(u)
+                radial = outer-center
+                radial /= np.linalg.norm(radial)
+                inner = center+.043*radial
+                x,y = inner+(outer-inner)*v
+                return (x,y,side*.5,0.,0.,side)
+
+            def bore(u, v, side):
+                radial=perimeter(u)-center
+                radial /= np.linalg.norm(radial)
+                x,y=center+(.034+.009*v)*radial
+                return (x,y,side*(.24+.26*v),-radial[0],-radial[1],side*.38)
+
+            def wall(u, v, radius, normal):
+                a = tau*(i+u)/holes
+                x,y=cos(a),sin(a)
+                return (radius*x,radius*y,v-.5,normal*x,normal*y,0.)
+
+            def tunnel(u, v):
+                radial=perimeter(u)-center
+                radial /= np.linalg.norm(radial)
+                x,y=center+.034*radial
+                return (x,y,.48*v-.24,-radial[0],-radial[1],0.)
+
+            for side in (-1., 1.):
+                vertices.extend(_surface(lambda u,v:section(u,v,side),32,1))
+                vertices.extend(_surface(lambda u,v:bore(u,v,side),32,1))
+            vertices.extend(_surface(tunnel,32,1))
+            vertices.extend(_surface(lambda u,v:wall(u,v,1.,1.),8,1))
+            vertices.extend(_surface(lambda u,v:wall(u,v,.72,-1.),8,1))
+        return vertices
     if name == "ratchet":
         # Internal saw teeth leave the pawls visible through the front of the ring.
         def edge(u):
@@ -166,8 +213,8 @@ def mesh(name):
         return _surface(blade, 32, 18)
 
     teeth = int(name.removeprefix("gear")) if name.startswith("gear") else 0
-    hexagonal = name == "bolt"
-    inner = .25 if teeth else (.72 if name == "ring" else 0.)
+    hexagonal = name in ("bolt", "recessed-bolt")
+    inner = .25 if teeth else {"ring": .72, "recessed-bolt": .46}.get(name,0.)
     sides = teeth * 4 if teeth else (6 if hexagonal else 48)
     # The layered profile forms the bore, flat faces and beveled edges.
     profile = [(inner, -.5, (0,-1)), (.84 if teeth else .90,-.5,(0,-1)),
@@ -361,13 +408,14 @@ def disc_brake():
     s = Subject()
     s.place("beveled-box", STEEL, (0,-.95,-.21), (2.44,.24,1.51))
     for z in (-.055,.055):
-        s.place("ring", CHROME, (-.1,.28,z), (1.01,1.01,.059), "rotor")
+        s.place("drilled-rotor", CHROME, (-.1,.28,z), (1.01,1.01,.059), "rotor")
     s.place("cylinder", STEEL, (-.1,.28,0), (.32,.32,.24), "rotor")
     for index in range(8):
         a = tau*index/8
         center = (-.1+.54*cos(a),.28+.54*sin(a),0)
         s.place("beveled-box", STEEL, center, (.46,.14,.11), "rotor", angle=a+.22)
-        s.place("bolt", GOLD, (-.1+.23*cos(a),.28+.23*sin(a),.15), (.045,.045,.10), "rotor")
+        s.place("recessed-bolt", STEEL, (-.1+.23*cos(a),.28+.23*sin(a),.15), (.050,.050,.10), "rotor")
+        s.place("beveled-box", STEEL, (-.1+.875*cos(a),.28+.875*sin(a),0.), (.21,.048,.071), "rotor", angle=a+.26)
     s.place("beveled-box", RED, (1.03,.60,0), (.36,.76,.71), "caliper")
     s.place("beveled-box", RED, (.79,.60,-.30), (.63,.73,.20), "caliper")
     # The near half of the caliper is cut away to expose the moving pad.
@@ -391,15 +439,18 @@ def freewheel():
     s.place("rim", blue, (0,0,.21), (1.06,1.06,.60), "hub")
     s.place("cylinder", blue, (0,0,.05), (.69,.69,.22), "driver")
     s.place("ring", STEEL, (0,0,.18), (.54,.54,.11), "driver")
+    s.place("ring", CHROME, (0,0,.245), (.375,.375,.058), "driver")
+    s.place("ring", (.11,.13,.16,.4), (0,0,.27), (.263,.263,.047), "driver")
     s.place("ring", blue, (0,0,.45), (1.05,1.05,.10), "cover")
     s.place("cylinder", blue, (0,0,.45), (.81,.81,.10), "cover")
     for i in range(12):
         a = tau*i/12
-        s.place("bolt", STEEL, (.96*cos(a),.96*sin(a),.254), (.041,.041,.069), "hub")
+        s.place("recessed-bolt", STEEL, (.96*cos(a),.96*sin(a),.254), (.046,.046,.079), "hub")
+        s.place("beveled-box", blue, (1.057*cos(a),1.057*sin(a),-.033), (.10,.060,.26), "hub", a)
     for i in range(3):
         a = tau*i/3
         s.place("beveled-box", GOLD, (.768*cos(a),.768*sin(a),.23), (.245,.13,.13), f"pawl{i}", a+.24)
-        s.place("bolt", CHROME, (.665*cos(a),.665*sin(a),.31), (.052,.052,.08), "driver")
+        s.place("recessed-bolt", CHROME, (.665*cos(a),.665*sin(a),.31), (.059,.059,.096), "driver")
     return s
 
 

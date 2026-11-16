@@ -1,6 +1,7 @@
 // YouTube authorization and publishing stay on the same origin as the studio.
 const youtubeUI = {
   status: document.getElementById('youtubeStatus'),
+  destination: document.getElementById('clipUploadChannel'),
   connect: document.getElementById('youtubeConnect'),
   setup: document.getElementById('youtubeSetup'),
   disconnect: document.getElementById('youtubeDisconnect'),
@@ -61,9 +62,11 @@ async function refreshYoutubeConnection() {
     youtubeChannel = state.channel;
     youtubeConfigured = state.enabled === true;
     youtubeUI.connect.disabled = !youtubeConfigured;
-    youtubeUI.status.textContent = youtubeChannel ? `Connected to ${youtubeChannel.title}` :
-      youtubeConfigured ? 'Connect your channel to upload this clip.' :
+    youtubeUI.status.textContent = youtubeChannel ? `Clip Studio channel · ${youtubeChannel.title}` :
+      youtubeConfigured ? 'Choose a YouTube channel for Clip Studio.' :
         'This server needs Google OAuth credentials before you can connect a YouTube channel.';
+    youtubeUI.destination.textContent = youtubeChannel ? `Destination · ${youtubeChannel.title}` :
+      'Connect your Clip Studio channel above to publish.';
     youtubeControls();
     if (youtubeChannel && youtubeJob && !youtubeBusy) await monitorYoutubeUpload();
   } catch (_) {
@@ -246,7 +249,7 @@ youtubeUI.disconnect.addEventListener('click', async () => {
     youtubeUI.result.replaceChildren();
     await refreshYoutubeConnection();
   } catch (error) {
-    youtubeUI.result.textContent = error.message;
+    youtubeUI.status.textContent = error.message;
   }
 });
 

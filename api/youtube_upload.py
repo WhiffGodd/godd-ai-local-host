@@ -66,19 +66,19 @@ class YouTubeConnections:
             for key, session in list(self.sessions.items()):
                 if now >= session["expires"]:
                     del self.sessions[key]
-            if session_id not in self.sessions:
+            if (ai_studio, session_id) not in self.sessions:
                 if len(self.sessions) >= 128:
                     raise YouTubeUploadError("Too many YouTube connections. Please try again later.")
                 session_id = secrets.token_urlsafe(32)
             state = ("ai." if ai_studio else "") + secrets.token_urlsafe(32)
-            self.sessions[session_id] = {"expires": now + SESSION_AGE, "state": state, "state_expires": now + 600}
+            self.sessions[ai_studio, session_id] = {"expires": now + SESSION_AGE, "state": state, "state_expires": now + 600}
         params = {"client_id": self.client_id, "redirect_uri": self.redirect_uri,
                   "response_type": "code", "scope": " ".join(SCOPES), "state": state,
                   "access_type": "offline", "prompt": "consent select_account"}
         return session_id, "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
 
-    def _session(self, session_id):
-        session = self.sessions.get(session_id)
+    def _session(self, session_id, ai_studio):
+        session = self.sessions.get((ai_studio, session_id))
         if session and time.monotonic() < session["expires"]:
             return session
         return None
@@ -94,9 +94,9 @@ class YouTubeConnections:
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             raise YouTubeUploadError("YouTube authorization expired or failed. Connect your channel again.") from error
 
-    def complete(self, session_id, state, code):
+    def complete(self, session_id, state, code, *, ai_studio=False):
         with self.lock:
-            session = self._session(session_id)
+            session = self._session(session_id, ai_studio)
             if not session or time.monotonic() >= session["state_expires"] or not hmac.compare_digest(
                     session.get("state", "").encode(), state.encode()) or not state:
                 raise YouTubeUploadError("This sign-in link expired. Return to the studio and connect again.")
@@ -117,27 +117,22 @@ class YouTubeConnections:
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             raise YouTubeUploadError("Could not find your YouTube channel. Check the account you selected.") from error
         with self.lock:
-            if self._session(session_id) is not session:
+            if self._session(session_id, ai_studio) is not session:
                 raise YouTubeUploadError("This sign-in session expired. Connect again from the studio.")
             session.update(token, channel=channel)
 
-    def channel(self, session_id):
+    def channel(self, session_id, *, ai_studio=False):
         with self.lock:
-            return (self._session(session_id) or {}).get("channel")
+            return (self._session(session_id, ai_studio) or {}).get("channel")
 
-    def disconnect(self, session_id):
+    def disconnect(self, session_id, *, ai_studio=False):
         with self.lock:
-            session = self.sessions.pop(session_id, None)
-        if session and session.get("access"):
-            try:
-                requests.post("https://oauth2.googleapis.com/revoke",
-                              data={"token": session.get("refresh") or session["access"]}, timeout=8)
-            except requests.RequestException:
-                pass
+            # Revoking the shared Google project grant would also revoke the other studio.
+            self.sessions.pop((ai_studio, session_id), None)
 
-    def access_token(self, session_id, channel_id):
+    def access_token(self, session_id, channel_id, *, ai_studio=False):
         with self.lock:
-            session = self._session(session_id)
+            session = self._session(session_id, ai_studio)
             if not session or session.get("channel", {}).get("id") != channel_id:
                 raise YouTubeUploadError("Connect the original YouTube channel again before uploading.")
             if time.monotonic() + 60 < session["token_expires"]:
@@ -147,7 +142,7 @@ class YouTubeConnections:
             raise YouTubeUploadError("YouTube authorization expired. Disconnect and reconnect your channel.")
         token = self._token(grant_type="refresh_token", refresh_token=refresh)
         with self.lock:
-            if self._session(session_id) is not session:
+            if self._session(session_id, ai_studio) is not session:
                 raise YouTubeUploadError("The YouTube channel was disconnected.")
             token["refresh"] = token["refresh"] or refresh
             session.update(token)

@@ -2,7 +2,7 @@
 """Render lit 3D explainer shots to the same frames used by the studio export."""
 
 from functools import lru_cache
-from math import asin, cos, pi, sin, sqrt, tan, tau
+from math import asin, ceil, cos, pi, sin, sqrt, tan, tau
 import sys
 
 import numpy as np
@@ -39,12 +39,13 @@ uniform vec3 eye, source;
 uniform vec4 material;
 uniform float highlight;
 uniform float highlight_edge;
+uniform bool machined;
 uniform sampler2D shadow_map;
 out vec4 pixel;
 vec4 surface_pixel(vec3 color) {
     float selected = highlight * step(highlight_edge, length(local.xy));
     float brightness = .64 + .36 * max(color.r, max(color.g,color.b));
-    return vec4(mix(color, vec3(.12,.91,.98)*brightness, .62*selected), selected);
+    return vec4(mix(color, vec3(.12,.91,.98)*brightness, .44*selected), selected);
 }
 float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float noise(vec3 p) {
@@ -55,19 +56,32 @@ float noise(vec3 p) {
                mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),
                    mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);
 }
+vec3 finish_normal(vec3 normal, float height) {
+    vec3 dx = dFdx(world), dy = dFdy(world);
+    vec3 x = cross(dy, normal), y = cross(normal, dx);
+    float determinant = dot(dx, x);
+    return normalize(max(abs(determinant),1.e-9)*normal
+                     - sign(determinant)*(dFdx(height)*x+dFdy(height)*y));
+}
+vec3 display_color(vec3 c) {
+    c *= 1.28;
+    vec3 mapped = clamp((c*(2.51*c+.03))/(c*(2.43*c+.59)+.14),0.,1.);
+    return pow(mapped,vec3(1./2.2));
+}
 float occlusion(float bias) {
     vec3 p = shadow.xyz / shadow.w * .5 + .5;
     if (p.z > 1. || any(lessThan(p.xy,vec2(0))) || any(greaterThan(p.xy,vec2(1)))) return 1.;
     float visibility = 0.;
+    float blocker = texture(shadow_map,p.xy).r;
+    float radius = mix(.00085,.0030,smoothstep(.0009,.013,p.z-blocker));
     for (int x=-2; x<=2; ++x) for (int y=-2; y<=2; ++y)
-        visibility += step(p.z-bias, texture(shadow_map,p.xy + vec2(x,y)*.00135).r);
+        visibility += step(p.z-bias, texture(shadow_map,p.xy + vec2(x,y)*radius).r);
     return visibility / 25.;
 }
 void main() {
     vec3 N=normalize(n), V=normalize(eye-world), L=normalize(source-world);
     vec3 base=pow(material.rgb,vec3(2.2));
     float metal=material.a;
-    float detail=noise(local*320.);
     if (metal > 1.5 && metal < 3.5) {
         vec3 p=normalize(local);
         float land=noise(p*3.0)*.58 + noise(p*8.5)*.29 + noise(p*25.)*.13;
@@ -84,26 +98,48 @@ void main() {
         pixel=surface_pixel(pow(color/(.72+color),vec3(.4545)));
         return;
     }
-    float nl=max(dot(N,L),0.);
-    float visible=occlusion(mix(.0028,.0007,nl));
-    vec3 H=normalize(L+V);
-    float spec=pow(max(dot(N,H),0.),mix(18.,53.,metal));
-    float fresnel=pow(1.-max(dot(N,V),0.),4.);
-    vec3 fill=normalize(vec3(4.,2.,-4.));
-    vec3 R=reflect(-V,N);
-    float softbox=pow(max(dot(R,normalize(vec3(-.3,.78,.62))),0.),7.);
-    float strip=pow(max(dot(R,normalize(vec3(.86,.48,-.27))),0.),32.);
-    vec3 reflection=mix(vec3(.19),base*1.3+vec3(.12),metal);
-    float lathe=sin(length(local.xy)*622.+detail*1.6);
-    float brushed=mix(1.,.91+.085*lathe+.087*detail,clamp(metal,0.,1.));
-    vec3 color=base*(.13 + (detail-.5)*.08 + 1.55*nl*visible)*brushed;
-    color+=reflection*(spec*visible*2.25 + metal*(softbox*1.4+strip*1.45))*brushed;
-    color+=vec3(.17,.49,.92)*max(dot(N,fill),0.)*(.07+fresnel*.30);
     if (material.a == 4.) {
-        float pool=exp(-dot(world.xz,world.xz)*.093);
-        color=(vec3(.002,.004,.009)+vec3(.018,.035,.056)*pool*(.30+.70*visible))*(.9+detail*.20);
+        float pool=exp(-dot(world.xz,world.xz)*.062);
+        float lit=occlusion(.0011);
+        float stone=noise(world*15.)*.62 + noise(world*55.)*.38;
+        vec3 color=(vec3(.006,.009,.017)+vec3(.018,.027,.044)*pool*(.23+.77*lit))*(.86+stone*.28);
+        pixel=surface_pixel(display_color(color));
+        return;
     }
-    pixel=surface_pixel(pow(color/(.81+color),vec3(.4545)));
+    float usable = 1.-smoothstep(.010,.036,length(fwidth(local)));
+    float grain = noise(local*(metal>.55 ? vec3(28,28,94) : vec3(38)));
+    float stride = length(local.xy)*174.;
+    float tooling = machined ? sin(stride+.42*grain)*(1.-smoothstep(1.1,3.,fwidth(stride))) : 0.;
+    float patina=noise(local*5.)*.64 + noise(local*21.)*.36;
+    float finish = usable*(.0008*grain+.00016*tooling);
+    N=finish_normal(N,finish);
+    base*=.85+.20*patina+.045*tooling;
+    float roughness=clamp(mix(.59,.29,metal)+.15*(patina-.5)+.035*tooling,.23,.75);
+    float alpha=roughness*roughness, a2=alpha*alpha;
+    vec3 H=normalize(V+L);
+    float nv=max(dot(N,V),.002), nl=max(dot(N,L),.001), nh=max(dot(N,H),0.);
+    float visible=occlusion(mix(.0019,.00055,nl));
+    float denom=nh*nh*(a2-1.)+1.;
+    float D=a2/(3.141593*denom*denom);
+    float k=pow(roughness+1.,2.)/8.;
+    float G=(nv/(nv*(1.-k)+k))*(nl/(nl*(1.-k)+k));
+    vec3 f0=mix(vec3(.041),max(base,vec3(.052)),metal);
+    vec3 F=f0+(1.-f0)*pow(1.-clamp(dot(H,V),0.,1.),5.);
+    vec3 diffuse=(1.-F)*(1.-metal)*base/3.141593;
+    vec3 color=(diffuse+F*D*G/(4.*nv*nl))*nl*visible*vec3(3.5,3.12,2.72);
+
+    vec3 R=reflect(-V,N);
+    float top=max(dot(R,normalize(vec3(-.45,.82,.36))),0.);
+    float card=max(dot(R,normalize(vec3(.89,.30,.34))),0.);
+    float rim=max(dot(R,normalize(vec3(.15,.53,-.86))),0.);
+    vec3 environment=vec3(.035,.053,.086)+vec3(.86,.72,.56)*pow(top,mix(24.,4.,roughness))
+                    +vec3(.25,.51,.82)*pow(card,mix(58.,13.,roughness))
+                    +vec3(.52,.72,.96)*pow(rim,mix(43.,9.,roughness));
+    vec3 reflection=f0+(max(vec3(1.-roughness),f0)-f0)*pow(1.-nv,5.);
+    color+=environment*reflection*(.60+.40*visible);
+    vec3 fill=normalize(vec3(3.8,1.3,-2.1));
+    color+=base*(vec3(.15,.19,.25)+vec3(.14,.22,.36)*max(dot(N,fill),0.))*(1.-.62*metal);
+    pixel=surface_pixel(display_color(color));
 }
 """
 
@@ -122,7 +158,7 @@ uniform int space;
 void main() {
     vec2 uv=gl_FragCoord.xy/size, p=uv-vec2(.45,.57);
     float glow=exp(-8.*(p.x*p.x+p.y*p.y));
-    vec3 color=mix(vec3(.026,.038,.058),vec3(.145,.195,.235),glow);
+    vec3 color=mix(vec3(.030,.044,.067),vec3(.174,.213,.268),glow);
     if (space==1) {
         vec2 cell=floor(gl_FragCoord.xy/4.);
         float star=fract(sin(dot(cell,vec2(12.9898,78.233)))*43758.5453);
@@ -198,39 +234,24 @@ def caption_layer(text, size, opening=False):
     return layer, (0, round(height * .64))
 
 
-def _draw_callout(frame, mask, label):
-    # The alpha channel marks only visible pixels of the selected 3D meshes.
-    visible = np.asarray(mask)[::3, ::3] >= 192
-    y, x = np.nonzero(visible)
-    if not len(x):
-        return
-    # Anchor inside the visible part, including thin rings and clipped geometry.
-    center_x = (x.min() + x.max()) / 2
-    upper_y = y.min() + .27 * (y.max() - y.min())
-    point = np.argmin((x - center_x)**2 + (y - upper_y)**2)
-    anchor = (int(x[point])*3, int(y[point])*3)
-
-    width, height = frame.size
-    draw = ImageDraw.Draw(frame)
+@lru_cache(maxsize=96)
+def _part_badge(label, size):
+    width, height = size
     font = _font(round(width * .051))
-    left, top = round(width * .072), round(height * .135)
     pad = round(width * .021)
-    right = left + round(draw.textlength(label, font=font)) + pad * 2
-    bottom = top + font.size + pad
-    wire = max(2, round(width * .0044))
+    dot = round(width * .012)
+    max_label_width = width*.82 - 3*pad - 2*dot
+    while font.getlength(label) > max_label_width and font.size > 10:
+        font = _font(font.size-1)
+    layer = Image.new("RGBA", (ceil(font.getlength(label)) + 3*pad + 2*dot, font.size + pad))
+    draw = ImageDraw.Draw(layer)
     accent, shadow = "#69efff", "#071319"
-    if anchor[1] < top:
-        edge = (left+pad, top)
-    else:
-        edge = (left+pad, bottom)
-    bend = (edge[0], round((edge[1] + anchor[1]) / 2))
-    draw.line((edge, bend, anchor), fill=shadow, width=wire+3, joint="curve")
-    draw.line((edge, bend, anchor), fill=accent, width=wire, joint="curve")
-    x, y = anchor
-    dot = wire * 2
-    draw.ellipse((x-dot,y-dot,x+dot,y+dot), fill=accent, outline=shadow, width=wire)
-    draw.rounded_rectangle((left,top,right,bottom),radius=pad,fill=shadow,outline=accent,width=wire)
-    draw.text((left+pad,(top+bottom)//2),label,font=font,anchor="lm",fill="#e7fbff")
+    draw.rounded_rectangle((0,0,layer.width-1,layer.height-1),radius=pad,
+                           fill=shadow,outline=accent,width=max(1,round(width*.003)))
+    middle = layer.height // 2
+    draw.ellipse((pad,middle-dot,pad+2*dot,middle+dot),fill=accent)
+    draw.text((2*pad+2*dot,middle),label,font=font,anchor="lm",fill="#e7fbff")
+    return layer, (round(width*.072),round(height*.135))
 
 
 def _between_pivots(x, y, a):
@@ -323,7 +344,7 @@ class CinematicRenderer:
             self.meshes[name] = buffer, color, depth
         return self.meshes[name]
 
-    def frame(self, shot, elapsed, part=None):
+    def frame(self, shot, elapsed, part=None, subtitle=None):
         objects, eye, focus = shot.at(elapsed, part)
         space = shot.subject == "moon"
         light = (-3.9,4.8,5.4) if not space else (-5.,1.7,2.0)
@@ -355,19 +376,19 @@ class CinematicRenderer:
         self.shader["highlight_edge"].value = edge
         for name, material, model, group in objects:
             self.shader["material"].value = material
+            self.shader["machined"].value = name.startswith(("gear", "ratchet", "drilled", "recessed")) or name in ("ring", "cylinder", "bolt")
             self.shader["highlight"].value = float(group in groups and (not edge or name.startswith("gear")))
             _matrix(self.shader["model"], model)
             self._arrays(name)[1].render()
         self.ctx.copy_framebuffer(self.framebuffer,self.multisample)
-        mode = "RGBA" if part else "RGB"
-        pixels = self.framebuffer.read(components=len(mode))
-        frame = Image.frombytes(mode,self.size,pixels,"raw",mode,0,-1)
+        pixels = self.framebuffer.read(components=3)
+        frame = Image.frombytes("RGB",self.size,pixels,"raw","RGB",0,-1)
         if part:
-            mask = frame.getchannel("A")
-            frame = frame.convert("RGB")
-            _draw_callout(frame, mask, part.label)
-        if shot.caption:
-            layer, xy = shot.caption
+            layer, xy = _part_badge(part.label,self.size)
+            frame.paste(layer,xy,layer)
+        caption = subtitle or shot.caption
+        if caption:
+            layer, xy = caption
             frame.paste(layer,xy,layer)
         return frame
 

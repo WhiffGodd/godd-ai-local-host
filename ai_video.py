@@ -478,6 +478,21 @@ def _estimated_cue_ratios(narration, mentions):
     return [(len(narration[:position].split()) / words, part) for position, part in mentions]
 
 
+def _subtitle_phrases(text):
+    words = list(re.finditer(r"\S+", text))
+    spans = []
+    start = 0
+    for index, word in enumerate(words):
+        count = index - start + 1
+        boundary = word.group().rstrip('”"').endswith((".", "!", "?", ",", ";", ":"))
+        if count >= 6 or (count >= 3 and boundary) or index == len(words)-1:
+            spans.append((words[start].start(), word.end()))
+            start = index + 1
+    if len(spans) > 1 and len(text[spans[-1][0]:].split()) == 1:
+        spans[-2:] = [(spans[-2][0], spans[-1][1])]
+    return [(start, text[start:end]) for start, end in spans]
+
+
 def _continuous_narration(scenes, style, output, mentions):
     voice_dir = _voice_dir()
     model = voice_dir / "timed-kokoro-v1.0.onnx"
@@ -488,49 +503,68 @@ def _continuous_narration(scenes, style, output, mentions):
     try:
         engine = _kokoro(model, voices)
         voice, speed, pause = KOKORO_STYLES[style]
+
+        def phonemize(text):
+            return engine.tokenizer.known(" ".join(engine.tokenizer.phonemize(text, lang="en-us").split()))
+
+        separator = len(engine.tokenizer.known(" "))
+        offset = 0
         phrases = []
+        scene_chunks = []
         for scene in scenes:
-            text = scene["narration"].rstrip()
-            if text[-1] not in ".!?":
-                text += "."
-            phonemes = engine.tokenizer.phonemize(text, lang="en-us")
-            phrases.append(engine.tokenizer.known(" ".join(phonemes.split())))
+            chunks = []
+            split = _subtitle_phrases(scene["narration"])
+            for index, (position, caption) in enumerate(split):
+                voiced = caption
+                if index == len(split)-1 and voiced[-1] not in ".!?":
+                    voiced += "."
+                phonemes = phonemize(voiced)
+                if not phonemes:
+                    raise ValueError("Missing pronunciation")
+                chunks.append((position, caption, phonemes, offset))
+                phrases.append(phonemes)
+                offset += len(phonemes) + separator
+            scene_chunks.append(chunks)
 
         transcript = " ".join(phrases)
         samples, rate, timings = engine.create_timed(
             transcript, voice, speed=speed, is_phonemes=True,
             continuous=True, sentence_pause=pause, clause_pause=0.07,
         )
-        if not all(phrases) or len(timings) != len(engine.tokenizer.known(transcript)) or not len(samples):
+        if len(timings) != len(engine.tokenizer.known(transcript)) or not len(samples):
             raise ValueError("Missing narration timings")
 
-        # Cut visuals at the next line's first phoneme. The audio stays in one take.
-        separator_length = len(engine.tokenizer.known(" "))
-        boundaries = [0]
-        starts = [0]
-        for phrase in phrases[:-1]:
-            starts.append(starts[-1] + len(phrase) + separator_length)
-            boundaries.append(round(timings[starts[-1]].start * FPS))
+        # Visual cuts share the same continuous take and subtitle timeline.
+        boundaries = [0, *(round(timings[chunks[0][3]].start * FPS) for chunks in scene_chunks[1:])]
         boundaries.append(math.ceil((len(samples) / rate + 0.25) * FPS))
         counts = [end - start for start, end in zip(boundaries, boundaries[1:])]
         if min(counts) < 1:
             raise ValueError("Invalid narration timing")
 
-        cue_ratios = []
-        for scene, row, phrase, start, boundary, count in zip(scenes, mentions, phrases, starts, boundaries, counts):
+        cue_ratios, captions = [], []
+        for scene, row, chunks, boundary, count in zip(scenes, mentions, scene_chunks, boundaries, counts):
+            def ratio(seconds):
+                return max(0., min(1., (seconds * FPS - boundary) / count))
+
+            block = []
+            for _, caption, phonemes, start in chunks:
+                spoken = phonemes.rstrip(" .,!?:;…")
+                last = start + max(0, len(spoken)-1)
+                block.append((ratio(timings[start].start), ratio(timings[last].end), caption))
+            captions.append(block)
+
             narration = scene["narration"]
             cues = []
             for (position, part), (estimate, _) in zip(row, _estimated_cue_ratios(narration, row)):
-                prefix = narration[:position].rstrip()
+                chunk_position, _, phonemes, start = next(chunk for chunk in reversed(chunks) if chunk[0] <= position)
+                prefix = narration[chunk_position:position].rstrip()
                 if not prefix:
-                    cues.append((0., part))
-                    continue
-                phonemes = engine.tokenizer.phonemize(prefix, lang="en-us")
-                known = engine.tokenizer.known(" ".join(phonemes.split()))
-                index = len(known) + separator_length
-                if phrase.startswith(known) and index < len(phrase):
-                    frames = timings[start + index].start * FPS - boundary
-                    estimate = max(0., min(1., frames / count))
+                    estimate = ratio(timings[start].start)
+                else:
+                    known = phonemize(prefix)
+                    index = len(known) + separator
+                    if phonemes.startswith(known) and index < len(phonemes):
+                        estimate = ratio(timings[start+index].start)
                 cues.append((estimate, part))
             cue_ratios.append(cues)
 
@@ -539,7 +573,7 @@ def _continuous_narration(scenes, style, output, mentions):
         with wave.open(str(output), "wb") as audio:
             audio.setparams((1, 2, rate, 0, "NONE", "not compressed"))
             audio.writeframes(pcm + bytes(tail * 2))
-        return counts, cue_ratios
+        return counts, cue_ratios, captions
     except (ImportError, OSError, ValueError, RuntimeError, KeyError, IndexError, wave.Error) as error:
         raise ExplainerError("Could not generate continuous narration. Check the Kokoro voice files or try again.") from error
 
@@ -618,6 +652,13 @@ def _part_schedule(cues, count, view):
     return scheduled
 
 
+def _subtitle_schedule(captions, count):
+    for start, end, text in captions:
+        first = min(count-1, max(0, round(start*count)))
+        last = min(count, max(first+1, math.ceil(end*count)))
+        yield first, last, text
+
+
 def render_explainer(payload, report_progress=None):
     def report(stage, percent=None):
         if report_progress:
@@ -659,10 +700,10 @@ def render_explainer(payload, report_progress=None):
                             for index, row in enumerate(mentions)]
             timing = _continuous_narration(scenes, style, audio_path, mentions)
             if timing is None:
-                frame_counts = _scene_narration(scenes, style, work, audio_path)
+                frame_counts, caption_ratios = _scene_narration(scenes, style, work, audio_path)
                 cue_ratios = [_estimated_cue_ratios(scene["narration"], cues) for scene, cues in zip(scenes, mentions)]
             else:
-                frame_counts, cue_ratios = timing
+                frame_counts, cue_ratios, caption_ratios = timing
             duration = sum(frame_counts) / FPS
             if (minimum * .88 <= duration <= max_seconds * 1.12 or example or attempt == 2
                     or (long_video and attempt == 1 and duration <= max_seconds)):
@@ -713,28 +754,34 @@ def render_explainer(payload, report_progress=None):
                         rendered_frames = 0
                         last_percent = 0
                         previous_view = None
-                        for beat, (scene, count, cues) in enumerate(zip(scenes, frame_counts, cue_ratios)):
+                        for beat, (scene, count, cues, captions) in enumerate(zip(scenes, frame_counts, cue_ratios, caption_ratios)):
                             view = scene["view"]
                             if view != previous_view:
                                 action_start = rendered_frames / FPS
                                 previous_view = view
                             opening = scene.get("opening", False)
-                            caption = scene["heading"] if opening else scene["caption"]
                             offset = rendered_frames / FPS
                             if stage:
-                                shot = StageShot(stage, view, caption_layer(caption,renderer.size,opening), offset,
+                                shot = StageShot(stage, view, None, offset,
                                                  actions=actions, beat=beat, duration=count/FPS)
                             else:
-                                shot = Shot(template.diagram, view, renderer.size, caption, opening,
-                                            offset=offset, action_start=action_start)
+                                shot = Shot(template.diagram, view, renderer.size, offset=offset, action_start=action_start)
                             schedule = iter(_part_schedule(cues, count, view))
                             pending = next(schedule, None)
                             focused_part = None
+                            subtitles = iter(_subtitle_schedule(captions,count))
+                            next_subtitle = next(subtitles,None)
+                            subtitle, subtitle_end = None, 0
                             for frame in range(count):
                                 if pending and pending[0] == frame:
                                     focused_part = pending[1]
                                     pending = next(schedule, None)
-                                encoder.stdin.write(renderer.frame(shot, frame/FPS, focused_part).tobytes())
+                                while next_subtitle and next_subtitle[0] <= frame:
+                                    _, subtitle_end, text = next_subtitle
+                                    subtitle = caption_layer(text,renderer.size,opening)
+                                    next_subtitle = next(subtitles,None)
+                                visible_subtitle = subtitle if frame < subtitle_end else None
+                                encoder.stdin.write(renderer.frame(shot, frame/FPS, focused_part,visible_subtitle).tobytes())
                                 rendered_frames += 1
                                 percent = rendered_frames * 100 // total_frames
                                 if percent >= last_percent + 5 and percent < 100:
@@ -777,23 +824,51 @@ def _fit_runtime(frame_counts, max_seconds=DEFAULT_MAX_SECONDS):
     return [end - start for start, end in zip(boundaries, boundaries[1:])], tempo
 
 
+def _speech_samples(params, samples):
+    if params.sampwidth == 2 and samples:
+        pcm = np.abs(np.frombuffer(samples,dtype="<i2").astype(np.int32))
+        voiced = np.flatnonzero(pcm >= max(40,pcm.max()*.02))
+        if len(voiced):
+            margin = round(params.framerate*.027)
+            first = max(0, int(voiced[0])//params.nchannels-margin)
+            last = min(params.nframes, int(voiced[-1])//params.nchannels+margin+1)
+            return first, last
+    return 0, params.nframes
+
+
 def _scene_narration(scenes, style, work, audio_path):
     voice_name, hook_pace, scene_pace, payoff_pace = VOICE_STYLES[style]
     voice = _voice_for_render(voice_name)
-    frame_counts = []
+    frame_counts, captions = [], []
     with wave.open(str(audio_path), "wb") as audio:
         for index, scene in enumerate(scenes):
             opening = scene.get("opening", False)
             pace = hook_pace if opening else payoff_pace if index == len(scenes) - 1 else scene_pace
-            params, samples = _speak(scene["narration"], work / "line.txt", work / "line.wav", pace, opening, voice)
-            if not frame_counts:
-                audio.setparams(params)
-            if (params.nchannels, params.sampwidth, params.framerate) != (
-                    audio.getnchannels(), audio.getsampwidth(), audio.getframerate()):
-                raise ExplainerError("Voiceover scenes used different audio formats.")
-            pause = 0.16 if opening else 0.32
-            frames = math.ceil((params.nframes / params.framerate + pause) * FPS)
-            padding = round(frames * params.framerate / FPS) - params.nframes
-            audio.writeframes(samples + bytes(padding * params.sampwidth * params.nchannels))
+            total = 0
+            chunks = _subtitle_phrases(scene["narration"])
+            ranges = []
+            for phrase_index, (_, text) in enumerate(chunks):
+                params, samples = _speak(text, work / "line.txt", work / "line.wav", pace,
+                                         opening and phrase_index == 0, voice)
+                if not index and not phrase_index:
+                    audio.setparams(params)
+                if (params.nchannels, params.sampwidth, params.framerate) != (
+                        audio.getnchannels(), audio.getsampwidth(), audio.getframerate()):
+                    raise ExplainerError("Voiceover scenes used different audio formats.")
+                width = params.sampwidth*params.nchannels
+                first, last = _speech_samples(params,samples)
+                ranges.append((total,total+last-first,text))
+                # Keep natural sentence pauses while joining short subtitle phrases.
+                if phrase_index == len(chunks)-1:
+                    pause = .16 if opening else .32
+                else:
+                    pause = .19 if text.endswith((".", "?", "!")) else .055
+                gap = round(params.framerate*pause)
+                audio.writeframes(samples[first*width:last*width] + bytes(gap*width))
+                total += last-first+gap
+            frames = math.ceil(total*FPS/params.framerate)
+            length = round(frames*params.framerate/FPS)
+            audio.writeframes(bytes((length-total)*width))
             frame_counts.append(frames)
-    return frame_counts
+            captions.append([(first/length,last/length,text) for first,last,text in ranges])
+    return frame_counts, captions

@@ -47,7 +47,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CAPTION_RESULTS = OrderedDict()
 SOURCE_UPLOADS = SourceUploads()
 YOUTUBE = YouTubeConnections()
-YOUTUBE_COOKIE = "godd_youtube"
+YOUTUBE_PREFIX = "/api/youtube/"
+AI_YOUTUBE_PREFIX = YOUTUBE_PREFIX + "ai-videos/"
+YOUTUBE_COOKIES = ("godd_youtube_clips", "godd_youtube_ai")
 THUMBNAIL_SLOTS = BoundedSemaphore(2)
 AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=3600, report_progress=True)
 
@@ -95,7 +97,8 @@ def run_export(payload):
 
 
 def publish_to_youtube(owner, payload, path):
-    access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+    ai_studio, session_id = owner
+    access = YOUTUBE.access_token(session_id, payload["youtube_channel"], ai_studio=ai_studio)
     return upload_video(path, access, payload["youtube_metadata"])
 
 
@@ -116,10 +119,11 @@ def thumbnail_time(value):
 
 
 def apply_youtube_thumbnail(owner, payload, path, video_id):
+    ai_studio, session_id = owner
     timestamp = payload["thumbnail_time"]
     if "generated_video_id" in payload:
         image = capture_thumbnail("", timestamp, path)
-        access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+        access = YOUTUBE.access_token(session_id, payload["youtube_channel"], ai_studio=ai_studio)
         return set_video_thumbnail(video_id, access, image)
     try:
         image = capture_thumbnail(payload["url"], timestamp, uploaded_source_path(payload))
@@ -128,7 +132,7 @@ def apply_youtube_thumbnail(owner, payload, path, video_id):
         if not 0 <= relative < payload["duration"]:
             return "Could not capture the selected thumbnail. The video is already uploaded."
         image = capture_thumbnail(payload["url"], relative, path)
-    access = YOUTUBE.access_token(owner, payload["youtube_channel"])
+    access = YOUTUBE.access_token(session_id, payload["youtube_channel"], ai_studio=ai_studio)
     return set_video_thumbnail(video_id, access, image)
 
 
@@ -299,17 +303,18 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         else:
             super().log_request(code, size)
 
-    def youtube_session(self):
+    def youtube_session(self, ai_studio):
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
         except CookieError:
             return None
-        return cookie[YOUTUBE_COOKIE].value if YOUTUBE_COOKIE in cookie else None
+        name = YOUTUBE_COOKIES[ai_studio]
+        return cookie[name].value if name in cookie else None
 
-    def youtube_cookie(self, session_id="", max_age=SESSION_AGE):
+    def youtube_cookie(self, ai_studio, session_id="", max_age=SESSION_AGE):
         secure = "; Secure" if YOUTUBE.origin.startswith("https:") else ""
-        return f"{YOUTUBE_COOKIE}={session_id}; Path=/api/youtube; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
+        return f"{YOUTUBE_COOKIES[ai_studio]}={session_id}; Path=/api/youtube; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
 
     def youtube_json(self, status, data, cookie=None):
         self.send_response(status)
@@ -329,7 +334,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         try:
             if not self.youtube_host_matches():
                 raise YouTubeUploadError("Open the studio at its configured address before connecting.")
-            YOUTUBE.complete(self.youtube_session(), query.get("state", [""])[0], query.get("code", [""])[0])
+            YOUTUBE.complete(self.youtube_session(ai_studio), query.get("state", [""])[0],
+                             query.get("code", [""])[0], ai_studio=ai_studio)
         except YouTubeUploadError as error:
             self.send_response(400)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -346,26 +352,26 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
 
-    def handle_youtube_post(self, path, payload):
+    def handle_youtube_post(self, endpoint, payload, ai_studio):
         if not self.youtube_host_matches():
             self.youtube_json(503, {"error": "YouTube connection is unavailable at this address."})
             return
         if self.headers.get("Origin") != YOUTUBE.origin:
             self.youtube_json(403, {"error": "Open the studio to make this request."})
             return
-        owner = self.youtube_session()
-        if path == "/api/youtube/connect":
+        session_id = self.youtube_session(ai_studio)
+        if endpoint == "connect":
             try:
-                owner, url = YOUTUBE.begin(owner, ai_studio=payload.get("studio") == "ai-videos")
-                self.youtube_json(200, {"url": url}, self.youtube_cookie(owner))
+                session_id, url = YOUTUBE.begin(session_id, ai_studio=ai_studio)
+                self.youtube_json(200, {"url": url}, self.youtube_cookie(ai_studio, session_id))
             except YouTubeUploadError as error:
                 self.youtube_json(429, {"error": str(error)})
             return
-        if path == "/api/youtube/disconnect":
-            YOUTUBE.disconnect(owner)
-            self.youtube_json(200, {"connected": False}, self.youtube_cookie(max_age=0))
+        if endpoint == "disconnect":
+            YOUTUBE.disconnect(session_id, ai_studio=ai_studio)
+            self.youtube_json(200, {"connected": False}, self.youtube_cookie(ai_studio, max_age=0))
             return
-        channel = YOUTUBE.channel(owner)
+        channel = YOUTUBE.channel(session_id, ai_studio=ai_studio)
         if not channel:
             self.youtube_json(401, {"error": "Connect your YouTube channel first."})
             return
@@ -377,18 +383,20 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(request_id, str) or not re.fullmatch(r"[\w-]{16,80}", request_id, flags=re.ASCII):
                 raise ValueError("Could not identify this upload request. Please try again.")
             generated = payload.get("generated_video_id")
-            if generated is not None:
+            if ai_studio:
                 if not isinstance(generated, str) or not AI_VIDEO_JOBS.completed_path(generated):
                     raise ValueError("This AI video expired. Generate it again before uploading.")
                 validated = {"generated_video_id": generated, "thumbnail_time": 0.8}
             else:
+                if generated is not None:
+                    raise ValueError("Open AI Video Studio to upload a generated video.")
                 validated = validate_render_payload(payload)
                 if payload.get("thumbnail_time") is not None:
                     validated["thumbnail_time"] = thumbnail_time(payload["thumbnail_time"])
                 if payload.get("upload_id"):
                     SOURCE_UPLOADS.completed_path(payload["upload_id"])
             validated.update(youtube_metadata=upload_metadata(payload), youtube_channel=channel["id"])
-            job = EXPORT_JOBS.submit(validated, owner=owner, request_id=request_id)
+            job = EXPORT_JOBS.submit(validated, owner=(ai_studio, session_id), request_id=request_id)
             self.youtube_json(202, job)
         except (TypeError, AttributeError):
             self.youtube_json(400, {"error": "Provide a valid clip and YouTube upload settings."})
@@ -413,17 +421,21 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        if path == "/api/youtube/status":
+        ai_studio = path.startswith(AI_YOUTUBE_PREFIX)
+        youtube_endpoint = path.removeprefix(AI_YOUTUBE_PREFIX if ai_studio else YOUTUBE_PREFIX)
+        if youtube_endpoint == "status":
             enabled = self.youtube_host_matches()
             self.youtube_json(200, {"enabled": enabled,
-                                    "channel": YOUTUBE.channel(self.youtube_session()) if enabled else None})
+                                    "channel": YOUTUBE.channel(self.youtube_session(ai_studio), ai_studio=ai_studio)
+                                    if enabled else None})
             return
         if path == CALLBACK_PATH:
             self.youtube_callback(urllib.parse.parse_qs(parsed.query))
             return
-        if path.startswith("/api/youtube/uploads/"):
-            owner = self.youtube_session()
-            job = EXPORT_JOBS.snapshot(path.rsplit("/", 1)[-1], owner) if owner and self.youtube_host_matches() else None
+        if youtube_endpoint.startswith("uploads/"):
+            session_id = self.youtube_session(ai_studio)
+            job = (EXPORT_JOBS.snapshot(youtube_endpoint.removeprefix("uploads/"), (ai_studio, session_id))
+                   if session_id and self.youtube_host_matches() else None)
             if job:
                 self.youtube_json(200, job)
             else:
@@ -598,8 +610,10 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             payload = {}
 
-        if path in ("/api/youtube/connect", "/api/youtube/disconnect", "/api/youtube/uploads"):
-            self.handle_youtube_post(path, payload)
+        ai_studio = path.startswith(AI_YOUTUBE_PREFIX)
+        youtube_endpoint = path.removeprefix(AI_YOUTUBE_PREFIX if ai_studio else YOUTUBE_PREFIX)
+        if youtube_endpoint in ("connect", "disconnect", "uploads"):
+            self.handle_youtube_post(youtube_endpoint, payload, ai_studio)
             return
 
         if path == "/api/ai-videos":
