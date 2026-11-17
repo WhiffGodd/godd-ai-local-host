@@ -9,6 +9,7 @@ __pycache__/
 .env.*
 client_secret*.json
 .venv/
+.visual-engine/
 .vercel
 
 # Local authentication files must never be committed

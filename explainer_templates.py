@@ -16,7 +16,8 @@ VIEWS = {
     "bearing": ("wide", "inner-race", "rolling-balls", "outer-race"),
     "disc_brake": ("wide", "spinning-rotor", "caliper-and-pads", "braking"),
     "freewheel": ("wide", "cutaway", "engagement", "coasting"),
-    **dict.fromkeys(("prism", "sound", "water", "generated"), ("wide", "detail", "overhead")),
+    "toaster": ("wide", "loading", "latch", "heating", "browning", "release", "pop-up"),
+    **dict.fromkeys(("prism", "sound", "water", "generated", "mechanism"), ("wide", "detail", "overhead")),
 }
 
 
@@ -50,6 +51,8 @@ TEMPLATES = {template.id: template for template in (
              "A disc brake with a spinning rotor and caliper pads that clamp it and slow it down"),
     Template("freewheel-cutaway", "Bicycle Freewheel Cutaway", "Mechanisms", "freewheel",
              "A hub cover moves aside to show pawls engaging the ratchet under pedaling and clicking past the moving ratchet when coasting"),
+    Template("pop-up-toaster", "Pop-up Toaster", "Mechanisms", "toaster",
+             "Two slices of bread, the lever and carriage, a compressed spring, glowing heating wires, and the toast popping up"),
     Template("light-prism", "Light Through a Prism", "Science", "prism",
              "An incoming beam and the colors that leave a glass prism at different angles"),
     Template("sound-octave", "Sound and Octaves", "Science", "sound",
@@ -58,8 +61,10 @@ TEMPLATES = {template.id: template for template in (
              "A lake, rising water vapor, clouds, falling rain, and land"),
 )}
 
-GENERATED_TEMPLATE = Template("generated", "Prompt-built 3D", "Custom", "generated",
-                              "Objects and motion composed for the requested topic")
+GENERATED_TEMPLATE = Template("generated", "AI-illustrated scenes", "Custom", "generated",
+                              "Detailed images generated for each shot in the storyboard")
+MECHANISM_TEMPLATE = Template("mechanism", "Animated cutaway", "Custom", "mechanism",
+                              "A step-by-step diagram of the parts and how they work together")
 
 
 def matching_subjects(prompt):
@@ -75,6 +80,7 @@ def matching_subjects(prompt):
         "hydraulic-lift": r"\b(?:hydraulic (?:lifts?|jacks?|press(?:es)?|pistons?)|pascal.s principle)\b",
         "ball-bearing": r"\b(?:ball bearings?|bearing races?)\b",
         "disc-brake": r"\b(?:dis[ck] brakes?|brake rotors?|brake calipers?)\b",
+        "pop-up-toaster": r"\btoasters?\b(?![ -]+(?:ovens?|industr(?:y|ies)))",
         "light-prism": r"\b(?:prisms?|prismatic dispersion)\b",
         "sound-octave": r"\b(?:octaves?|octave frequency)\b",
         "water-cycle": r"\b(?:water cycle|hydrologic(?:al)? cycle|evaporation.*condensation)\b",

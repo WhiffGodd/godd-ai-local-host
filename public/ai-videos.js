@@ -2,7 +2,7 @@
 
 const $ = id => document.getElementById(id);
 const storeKey = "godd_ai_video_studio";
-const promptScene = {id: "generated", name: "Prompt-built 3D"};
+const promptScene = {id: "generated", name: "AI illustrations"};
 const page = {
   templates: [], selected: null, preview: null, provider: null,
   generation: null, upload: null, channel: null, generating: false, uploading: false,
@@ -113,6 +113,7 @@ async function checkModel() {
   message("generationStatus", "Checking the AI connection…");
   try {
     page.provider = await request("/api/ai-videos/templates");
+    updateVisualMode(page.provider);
     message("generationStatus", page.provider.available ? page.provider.provider + " is ready." : page.provider.setup);
     $("checkModel").hidden = page.provider.available;
   } catch (error) {
@@ -162,7 +163,8 @@ function showGenerationProgress(job) {
   const percent = job.progress?.percent;
   const labels = {
     storyboard: "Writing the storyboard…",
-    scene: "Building the 3D scene for your topic…",
+    mechanism: "Designing moving parts and mapping the steps…",
+    visuals: "Generating detailed images for each shot…",
     revising: "Adjusting the script to fit your chosen length…",
     narration: "Generating the voice-over…",
     rendering: "Rendering the animation…",
@@ -371,6 +373,12 @@ $("publishForm").addEventListener("submit", async event => {
   }
 });
 
+function updateVisualMode(settings) {
+  $("visualMode").textContent = "Custom topics use animated cutaways.";
+  $("buildScene").disabled = settings.custom_visuals === false;
+  $("buildScene").title = settings.custom_visuals_setup || "";
+}
+
 async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
@@ -388,6 +396,7 @@ async function initialize() {
     const data = await request("/api/ai-videos/templates");
     page.templates = data.templates;
     page.provider = data;
+    updateVisualMode(data);
     drawLibrary();
     page.selected = saved.sceneOverride === promptScene.id ? promptScene :
       page.templates.find(template => template.id === saved.sceneOverride) || null;

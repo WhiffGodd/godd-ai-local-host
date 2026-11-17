@@ -5,16 +5,20 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
+from pathlib import Path
 import requests
+from PIL import Image
 from unittest.mock import patch
 from server import ThreadedHTTPServer, GoddAIRequestHandler, validate_render_payload
 from render_jobs import RenderJobs
-from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _part_schedule, _plan_stage, _validate_plan, plan_video, render_explainer, validate_generation
+from ai_video import FPS, ExplainerError, _EXAMPLE, _fit_runtime, _part_schedule, _plan_mechanism, _validate_plan, plan_video, render_explainer, validate_generation
 from ai_video import _subtitle_phrases, _subtitle_schedule
 from cinematic_render import Shot, _part_badge
 from explainer_parts import part_mentions
-from explainer_templates import GENERATED_TEMPLATE, TEMPLATES, matching_subjects
-from procedural_scene import StageShot
+from explainer_templates import GENERATED_TEMPLATE, MECHANISM_TEMPLATE, TEMPLATES, matching_subjects
+from procedural_scene import StageShot, read_actions, read_stage
+from explainer_visuals import IllustratedShot, LocalVisualEngine
+from mechanism_animation import MechanismShot, _transform
 
 
 class PublicHostingTests(unittest.TestCase):
@@ -204,18 +208,72 @@ class PublicHostingTests(unittest.TestCase):
                 self.assertEqual(plan_video(prompt, None)[0].id, template_id)
                 self.assertEqual(retry.call_count, 2)
 
-    def test_unmatched_prompt_plans_a_new_scene_even_with_an_unrelated_template_selected(self):
-        board = {**_EXAMPLE, "title": "How Bread Toasts", "template": "generated", "hook_view": "wide",
-                 "scenes": [{**scene, "view": "detail"} for scene in _EXAMPLE["scenes"]]}
-        prompt = "Explain how bread browns in a toaster."
+    def test_ai_illustrations_can_be_selected_explicitly(self):
+        board = {**_EXAMPLE, "title": "How a Stapler Works", "template": "generated", "hook_view": "wide",
+                 "visual_subject": "A brushed-steel desktop stapler", "hook_visual": "A stapler sits above a stack of paper",
+                 "scenes": [{**scene, "view": "detail", "visual": "Close-up of the anvil"} for scene in _EXAMPLE["scenes"]]}
+        prompt = "Explain how a stapler folds a staple."
         with patch("ai_video._request_storyboard", return_value=json.dumps(board)) as request:
-            template, title, _, _ = plan_video(prompt, TEMPLATES["ball-bearing"])
+            template, title, _, scenes = plan_video(prompt, GENERATED_TEMPLATE)
         self.assertEqual(template, GENERATED_TEMPLATE)
-        self.assertEqual(title, "How Bread Toasts")
+        self.assertEqual(title, "How a Stapler Works")
         self.assertEqual(request.call_args.args[0], prompt)
+        self.assertEqual(scenes[0]["visual_subject"], board["visual_subject"])
+        self.assertEqual(scenes[1]["visual"], "Close-up of the anvil")
         self.assertEqual(validate_generation({"prompt": "Toast"})["prompt"], "Toast")
+        with patch("ai_video.plan_video", return_value=(template, title, "", scenes)), patch.object(
+                LocalVisualEngine, "configured", return_value=None):
+            with self.assertRaisesRegex(ExplainerError, "need the local image model"):
+                render_explainer(validate_generation({"prompt": prompt}))
 
-    def test_generated_stage_accepts_objects_and_recovers_from_an_invalid_object_plan(self):
+    def test_unmatched_prompt_gets_a_continuous_cutaway(self):
+        prompt = "Explain how a desktop stapler folds a staple against the anvil."
+        board = {**_EXAMPLE, "title": "How a Stapler Works", "template": "mechanism", "hook_view": "wide",
+                 "scenes": [{**scene, "view": "detail"} for scene in _EXAMPLE["scenes"]]}
+        data = {
+            "parts": [
+                "Handle|contour|steel|22,40|20,40 75,34 79,38 24,46",
+                "Driver|plate|gold|72,47|69,45 75,50",
+                "Anvil|plate|dark|74,67|59,65 82,70",
+            ],
+            "actions": [
+                "1|Handle|turn|13,0|.1,.7",
+                "2|Driver|move|0,14|.1,.7",
+                "3|Driver|move|0,-14|.1,.7",
+            ],
+        }
+        with patch("ai_video._ollama_models", return_value=["qwen3:4b"]), patch(
+                "ai_video._request_storyboard", side_effect=[json.dumps(board), json.dumps(data)]) as request:
+            template, _, _, scenes = plan_video(prompt, TEMPLATES["ball-bearing"])
+            mechanism = _plan_mechanism(prompt, scenes)
+        self.assertEqual(template, MECHANISM_TEMPLATE)
+        self.assertIn(prompt, request.call_args.args[0])
+        parts, actions = mechanism
+        driver = tuple(action for action in actions if action.part == "Driver")
+        before = _transform(parts[1], driver, 2, 0)[0]
+        after = _transform(parts[1], driver, 2, 1)[0]
+        self.assertEqual(after, _transform(parts[1], driver, 3, 0)[0])
+        self.assertEqual(after[0][1] - before[0][1], 14)
+        shot = MechanismShot(mechanism, (180,320), 2)
+        self.assertNotEqual(shot.frame(.2,None).tobytes(), shot.frame(.6,None).tobytes())
+
+    def test_illustrated_shot_moves_camera_and_burns_subtitles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def render(arguments, **_):
+                picture = Image.new("RGB", (90, 160), "black")
+                picture.paste("red", (8,12,28,65))
+                picture.save(arguments[arguments.index("-o")+1])
+                self.assertIn("stainless steel toaster", arguments[arguments.index("-p")+1])
+            engine = LocalVisualEngine("sd-cli-test", Path("model.safetensors"), "cpu")
+            with patch("explainer_visuals.subprocess.run", side_effect=render):
+                picture = engine.generate("stainless steel toaster", {"visual":"bread in the slots"}, Path(directory), 0)
+        shot = IllustratedShot(picture, (90,160), 0, "wide")
+        first, last = shot.frame(0,None), shot.frame(1,None)
+        self.assertNotEqual(first.tobytes(), last.tobytes())
+        overlay = Image.new("RGBA",(9,6),"white")
+        self.assertEqual(shot.frame(0,(overlay,(2,120))).getpixel((3,121)), (255,255,255))
+
+    def test_procedural_stage_moves_attached_objects(self):
         scene = {"label":"Heating coil", "shape":"ring", "color":"red", "pose":"front", "motion":"pulse",
                  "position":[0., .5, 0.], "size":[.4, .4, .3]}
         _, _, scenes = _validate_plan(_EXAMPLE, "bicycle")
@@ -223,22 +281,17 @@ class PublicHostingTests(unittest.TestCase):
                                        "relation":"on-top", "anchor":"Heating coil"}],
                       "actions":[{"beat":1,"part":"Heating coil","direction":"up","distance":1,
                                   "turn":0,"start":.2,"end":.8}]}
-        with patch("ai_video._request_storyboard", return_value=json.dumps(storyboard)):
-            stage, source, actions = _plan_stage("How does a toaster work?", scenes)
-            self.assertEqual((source, [item.label for item in stage]), ("procedural", ["Heating coil", "Bread"]))
-            self.assertGreater(stage[1].position[1], stage[0].position[1])
-            shot = StageShot(stage,"wide",None,actions=actions,beat=1,duration=10.)
-            start, _, _ = shot.at(1.)
-            end, _, _ = shot.at(9.)
-            following, _, _ = StageShot(stage,"wide",None,actions=actions,beat=2).at(0.)
-            for first, moved, retained in zip(start,end,following):
-                self.assertAlmostEqual(moved[2][1,3] - first[2][1,3], 1.)
-                self.assertAlmostEqual(moved[2][1,3], retained[2][1,3])
-        with patch("ai_video._request_storyboard", return_value=json.dumps({"objects":[{**scene,"shape":"unknown"}]})):
-            stage, source, actions = _plan_stage("How does a toaster work?", scenes)
-            self.assertEqual(source, "schematic")
-            self.assertEqual(stage[0].label, scenes[1]["heading"])
-            self.assertEqual(actions, ())
+        stage = read_stage(storyboard)
+        actions = read_actions(storyboard, stage, scenes)
+        self.assertEqual([item.label for item in stage], ["Heating coil", "Bread"])
+        self.assertGreater(stage[1].position[1], stage[0].position[1])
+        shot = StageShot(stage,"wide",None,actions=actions,beat=1,duration=10.)
+        start, _, _ = shot.at(1.)
+        end, _, _ = shot.at(9.)
+        following, _, _ = StageShot(stage,"wide",None,actions=actions,beat=2).at(0.)
+        for first, moved, retained in zip(start,end,following):
+            self.assertAlmostEqual(moved[2][1,3] - first[2][1,3], 1.)
+            self.assertAlmostEqual(moved[2][1,3], retained[2][1,3])
 
     def test_freewheel_keeps_the_ratchet_moving_after_the_sprocket_stops(self):
         selected = matching_subjects("Explain how a bicycle freewheel coasts.")
@@ -251,6 +304,29 @@ class PublicHostingTests(unittest.TestCase):
             before, after = matrices(first), matrices(last)
             self.assertNotEqual(before["ratchet"], after["ratchet"])
             self.assertEqual(before["sprocket"] == after["sprocket"], view == "coasting")
+
+    def test_toaster_plan_moves_bread_through_a_complete_cycle(self):
+        with patch("ai_video._request_storyboard") as request:
+            template, _, _, scenes = plan_video("Animate bread going into a toaster and popping up", None)
+            request.assert_not_called()
+        self.assertEqual(template.id, "pop-up-toaster")
+        self.assertEqual([scene["view"] for scene in scenes],
+                         ["wide", "loading", "latch", "heating", "browning", "release", "pop-up"])
+
+        def part(view, time, name):
+            shot = Shot("toaster", view, (270,480), duration=1)
+            return next((material, model) for _, material, model, group in shot.at(time)[0] if group == name)
+
+        self.assertGreater(part("loading", 0, "bread")[1][1,3], part("loading", 1, "bread")[1][1,3])
+        for name in ("carriage", "lever", "bread"):
+            self.assertGreater(part("latch", 0, name)[1][1,3], part("latch", 1, name)[1][1,3])
+            self.assertAlmostEqual(part("latch", 1, name)[1][1,3], part("release", 1, name)[1][1,3])
+            self.assertGreater(part("pop-up", 1, name)[1][1,3], part("pop-up", 0, name)[1][1,3])
+        self.assertGreater(part("latch", 0, "spring")[1][1,1], part("latch", 1, "spring")[1][1,1])
+        self.assertEqual(part("heating", .7, "heater")[0][3], 7.)
+        self.assertLess(part("browning", 1, "bread")[0][0], part("heating", .7, "bread")[0][0])
+        self.assertNotEqual(part("release", 0, "latch")[1].tolist(), part("release", 1, "latch")[1].tolist())
+        self.assertNotEqual(part("release", 1, "heater")[0][3], 7.)
 
     def test_ollama_reconnects_after_connection_error_but_does_not_retry_timeout(self):
         reply = requests.Response()

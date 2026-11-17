@@ -167,15 +167,6 @@ def stage_parts(stage):
     return tuple(parts)
 
 
-def storyboard_stage(scenes):
-    """Build a labeled concept scene when the object plan is unavailable."""
-    points = tuple((x,y,0) for y in (1.44,.66,-.12,-.90) for x in (-.72,.72))
-    shapes = ("ring", "sphere", "prism", "cylinder", "box", "cone", "sphere", "prism")
-    colors = ("cyan", "gold", "blue", "violet", "green", "red", "steel", "white")
-    return tuple(StageObject(scene["heading"][:31], shape, color, center, (.30,.30,.27), motion="pulse")
-                 for scene, shape, color, center in zip(scenes[1:], shapes, colors, points))
-
-
 def _motion(obj, t):
     phase = t * 1.45
     wave = sin(phase)

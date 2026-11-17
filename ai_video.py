@@ -1,6 +1,7 @@
 """Plan narrated 3D explainers with a language model and render an MP4."""
 
 import base64
+from contextlib import nullcontext
 from difflib import SequenceMatcher
 from functools import lru_cache
 import json
@@ -20,13 +21,16 @@ import numpy as np
 
 from cinematic_render import FPS, HEIGHT, WIDTH, CinematicRenderer, RendererUnavailable, Shot, caption_layer
 from explainer_parts import part_mentions
-from explainer_templates import GENERATED_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
-from procedural_scene import COLORS, CURATED_STAGES, DIRECTIONS, MAX_OBJECTS, MOTIONS, POSES, RELATIONS, SHAPES, StageShot, read_actions, read_stage, stage_parts, storyboard_stage
+from explainer_templates import GENERATED_TEMPLATE, MECHANISM_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
+from explainer_visuals import IllustratedShot, LocalVisualEngine, VisualUnavailable, visual_settings
+from mechanism_animation import MechanismShot, PLAN_INSTRUCTIONS, mechanism_schema, parse_mechanism_rows
+from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
 
 OLLAMA_MODEL = os.environ.get("AI_VIDEO_OLLAMA_MODEL", "qwen3:4b")
 OLLAMA_URL = os.environ.get("AI_VIDEO_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MECHANISM_MODEL = "qwen3.5:9b"
 GEMINI_MODEL = os.environ.get("AI_VIDEO_GEMINI_MODEL", "gemini-3.1-flash-lite")
 MAX_PROMPT = 1200
 TARGET_SECONDS = 55
@@ -98,6 +102,28 @@ _LONG_EXAMPLE_SCENES = [
      "view": "coasting"},
 ]
 
+_TOASTER_PLAN = {
+    "title": "What Makes a Toaster Pop?",
+    "hook": "What actually makes your toast jump?",
+    "hook_view": "wide",
+    "description": "Watch bread drop into a cutaway toaster, then follow the carriage, heating wires, latch and spring through one complete cycle.",
+    "hashtags": ["#Toaster", "#HowItWorks", "#Engineering"],
+    "scenes": [
+        {"view": "loading", "heading": "Load the slices", "caption": "Two slices slide onto the carriage.",
+         "narration": "Drop two slices into the slots. They land on a metal carriage inside. That carriage is the movable rack that holds the bread upright and brings it back up when the cycle ends."},
+        {"view": "latch", "heading": "Press the lever", "caption": "The latch holds the carriage down against the spring.",
+         "narration": "Pressing the lever lowers the carriage and compresses the return spring. A latch holds the carriage down, so the spring stays squeezed even after you take your hand away."},
+        {"view": "heating", "heading": "Heat the bread", "caption": "The wires heat up and radiate energy onto the bread.",
+         "narration": "Now watch the heating wires on either side of the bread. Electric current makes the wires hot enough to glow. They radiate heat onto both faces of each slice."},
+        {"view": "browning", "heading": "Brown the surface", "caption": "The bread dries and browns at the surface.",
+         "narration": "As the surface dries and heats up, sugars react with amino acids in the bread. That is the Maillard reaction, which gives toast its brown color and roasted flavor."},
+        {"view": "release", "heading": "Release the latch", "caption": "The heater switches off and the latch lets go.",
+         "narration": "At the end of the cycle, the control cuts power to the heating wires and releases the latch. The spring is still compressed, but nothing holds the carriage down anymore."},
+        {"view": "pop-up", "heading": "Lift the toast", "caption": "The return spring drives the carriage upward.",
+         "narration": "The return spring expands and pushes the carriage back up. The toast rises with it and stops where you can reach it. The wires do the browning. The spring does the popping."},
+    ],
+}
+
 
 def _ollama_models(timeout=2):
     try:
@@ -156,12 +182,13 @@ def start_local_ollama():
 
 
 def generation_settings():
+    visuals = visual_settings()
     if os.environ.get("AI_VIDEO_GEMINI_API_KEY"):
-        return {"available": True, "provider": "Gemini"}
+        return {**visuals, "available": True, "provider": "Gemini"}
     installed = _ollama_models()
     if installed is not None and (OLLAMA_MODEL in installed or OLLAMA_MODEL + ":latest" in installed):
-        return {"available": True, "provider": "Ollama"}
-    return {"available": False, "setup": f"Start Ollama and run ollama pull {OLLAMA_MODEL} to enable custom prompts."}
+        return {**visuals, "available": True, "provider": "Ollama"}
+    return {**visuals, "available": False, "setup": f"Start Ollama and run ollama pull {OLLAMA_MODEL} to enable custom prompts."}
 
 
 def validate_generation(payload):
@@ -169,7 +196,8 @@ def validate_generation(payload):
     if not isinstance(prompt, str) or len(prompt) > MAX_PROMPT:
         raise ValueError(f"Keep the prompt under {MAX_PROMPT} characters.")
     template = payload.get("template", "auto")
-    if not isinstance(template, str) or (template not in ("auto", GENERATED_TEMPLATE.id) and template not in TEMPLATES):
+    if not isinstance(template, str) or (template not in ("auto", GENERATED_TEMPLATE.id, MECHANISM_TEMPLATE.id)
+                                         and template not in TEMPLATES):
         raise ValueError("Choose a template from the library.")
     example = payload.get("example", False)
     if type(example) is not bool or (not example and not prompt.strip()):
@@ -255,17 +283,23 @@ def _validate_plan(plan, subject, max_scenes=6):
             if distinct != narration or not _distinct_opening(hook, caption):
                 caption = _SENTENCE_END.split(distinct, maxsplit=1)[0][:96].rstrip()
             narration = distinct
-        clean.append({"heading": text(scene["heading"], 44), "caption": caption, "narration": narration, "view": view})
+        shot = {"heading": text(scene["heading"], 44), "caption": caption, "narration": narration, "view": view}
+        if subject == GENERATED_TEMPLATE.diagram:
+            shot["visual"] = text(scene.get("visual") or caption, 225)
+        clean.append(shot)
     if not clean:
         raise ValueError("The storyboard repeats the hook without explaining it")
     hook_view = plan["hook_view"]
     if hook_view not in VIEWS[subject]:
         raise ValueError("The opening view does not belong to the selected 3D subject")
     opening = {"heading": hook, "narration": hook, "view": hook_view, "opening": True}
+    if subject == GENERATED_TEMPLATE.diagram:
+        opening["visual_subject"] = text(plan.get("visual_subject") or title, 130)
+        opening["visual"] = text(plan.get("hook_visual") or clean[0]["visual"], 225)
     return title, f"{description}\n\n{' '.join(tags)}", [opening, *clean]
 
 
-def _request_storyboard(prompt, instructions, schema, key, long_video, single_match):
+def _request_storyboard(prompt, instructions, schema, key, long_video, single_match, mechanism_model=None):
     if key:
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         response = requests.post(endpoint, headers={"x-goog-api-key": key}, json={
@@ -279,7 +313,8 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
                          if not part.get("thought"))
     else:
         request_body = {
-            "model": OLLAMA_MODEL, "stream": False, "think": False, "format": schema, "keep_alive": "5m",
+            "model": mechanism_model or OLLAMA_MODEL, "stream": False, "think": False, "format": schema,
+            "keep_alive": 0 if "visual_subject" in schema["properties"] else "5m",
             "options": {"temperature": 0.3, "num_predict": 3200 if long_video else 2400,
                         "num_ctx": 6144 if long_video or not single_match else 4096},
             "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
@@ -303,7 +338,12 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     properties = {**_SCHEMA["properties"],
                   "scenes": {**_SCHEMA["properties"]["scenes"], "maxItems": max_scenes}}
     candidates = matching_subjects(prompt)
-    choices = [template] if template == GENERATED_TEMPLATE or template in candidates else candidates or [GENERATED_TEMPLATE]
+    choices = ([template] if template in (GENERATED_TEMPLATE, MECHANISM_TEMPLATE) or template in candidates
+               else candidates or [MECHANISM_TEMPLATE])
+    toaster = TEMPLATES["pop-up-toaster"]
+    if choices == [toaster]:
+        # The script and the cutaway need the same ordered steps for one continuous cycle.
+        return toaster, *_validate_plan(_TOASTER_PLAN, toaster.diagram)
     single_match = len(choices) == 1
     choices_by_id = {item.id:item for item in choices}
     ids = list(choices_by_id)
@@ -315,14 +355,23 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     if not key:
         narration_schema.update(minLength=min(260, round(words_per_scene * 5.3)), maxLength=360)
     scene_properties = properties["scenes"]["items"]["properties"]
+    custom = choices == [GENERATED_TEMPLATE]
+    mechanism = choices == [MECHANISM_TEMPLATE]
+    visual_mode = "AI illustrations" if custom else "an animated cutaway" if mechanism else "3D animation"
+    if custom:
+        properties.update(visual_subject=_TEXT, hook_visual=_TEXT)
+        scene_properties = {**scene_properties, "visual": _TEXT}
     properties["scenes"]["items"] = _object(**{**scene_properties, "view": view_schema, "narration": narration_schema})
     properties["hook_view"] = view_schema
     schema = _object(template={"type": "string", "enum": ids}, **properties)
     coverage = " | ".join(f"{item.id} ({item.coverage}): {', '.join(VIEWS[item.diagram])}" for item in choices)
     visual_style = (
-        ("A separate step will build new 3D objects for this topic. Treat the views as camera directions: use "
-         "wide for the whole scene, detail for a named object, and overhead for objects seen from above. "
-         if choices == [GENERATED_TEMPLATE] else
+        ("A separate image model illustrates each shot. In visual_subject give a short, consistent physical "
+         "description of the exact object or setting, including characteristic features, color and materials. "
+         "In hook_visual and each visual field, describe what is visible in a single camera shot using concrete nouns. "
+         "Specify the real part, its appearance and surroundings. Vary wide views and close-ups. Avoid diagrams, "
+         "typography, abstract blocks and impossible cross-sections. Show only what that narration beat describes. "
+         if custom else
          "Use the selected subject and only its available camera views. ") +
         "Set hook_view to the shot that makes the opening question visible. "
         "For each scene, set view to the exact part or action being narrated. Show how the details requested "
@@ -342,7 +391,8 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         "Plan a factually accurate educational vertical video in English. Return only the requested JSON. "
         "Write a short, natural YouTube title that names the subject and gives viewers a reason to watch. "
         "Keep the title, narration and description faithful to the prompt and the mechanism. "
-        "Use established causes for physical mechanisms. Keep the description focused on the topic and call the visuals 3D animation when describing them. "
+        "Use established causes for physical mechanisms. Keep the description focused on the topic. "
+        f"If you mention the visuals, call them {visual_mode}. "
         "Write a single, standalone hook sentence of 4 to 10 words, maximum 80 characters. "
         "Start with one concrete surprise or a short curiosity question. Name a visible outcome and leave its cause open. "
         "Avoid claims about what the viewer has seen, extra setup sentences, and a second question. "
@@ -365,12 +415,19 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         "building weapons, engineering dangerous pathogens, or exploiting computer systems. "
         f"Vary the scenes to follow the narration. {visual_style}"
     )
+    if mechanism:
+        instructions += (" Explain one full cycle or complete cause-and-effect sequence in order. "
+                         "Use concrete names of the parts that move, carry material or transfer energy, "
+                         "and describe what triggers each change. "
+                         "Describe each step in a way a cutaway side view can show. Avoid repeated steps.")
     try:
         for attempt in range(2):
             try:
                 result = _request_storyboard(prompt, instructions, schema, key, long_video, single_match)
                 plan = json.loads(result)
                 selected_template = choices_by_id[plan["template"]]
+                if selected_template == toaster:
+                    plan = _TOASTER_PLAN
                 title, description, scenes = _validate_plan(plan, selected_template.diagram, max_scenes)
                 return selected_template, title, description, scenes
             except (ValueError, KeyError, TypeError, IndexError):
@@ -399,54 +456,33 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         raise ExplainerError("The AI returned an incomplete storyboard. Try a shorter, more specific prompt.") from None
 
 
-def _plan_stage(prompt, scenes):
-    def options(values):
-        return {"type":"string", "enum":list(values)}
-
-    def vector(low, high):
-        return {"type":"array", "minItems":3, "maxItems":3,
-                "items":{"type":"number", "minimum":low, "maximum":high}}
-
-    schema = _object(objects={"type":"array", "minItems":2, "maxItems":MAX_OBJECTS, "items":_object(
-        label=_TEXT, shape=options(SHAPES), color=options(COLORS), pose=options(POSES), motion=options(MOTIONS),
-        position=vector(-2.5, 2.5), size=vector(.035, 2.65), relation=options(RELATIONS), anchor=_TEXT,
-    )}, actions={"type":"array", "minItems":0, "maxItems":24, "items":_object(
-        beat={"type":"integer", "minimum":0, "maximum":len(scenes)-1}, part=_TEXT,
-        direction=options(DIRECTIONS), distance={"type":"number", "minimum":0, "maximum":1.8},
-        turn={"type":"number", "minimum":-720, "maximum":720},
-        start={"type":"number", "minimum":0, "maximum":1}, end={"type":"number", "minimum":0, "maximum":1},
-    )})
-    instructions = (
-        "Build one coherent miniature 3D stage for this educational video. Return JSON objects only. "
-        "Choose 4 to 9 recognizable parts or props that make the requested cause and effect visible. "
-        "Compose the topic itself with meshes. A named, animated schematic is appropriate for an abstract topic. "
-        "Use the exact names of important parts spoken in the narration as short labels. Give each object a distinct label. "
-        "Coordinates are [x, y, z]: right, up, toward the camera. Keep most objects between x=-1.4 and 1.4, "
-        "y=-0.8 and 1.4. Size is [x, y, z] before pose. For a cylinder the third size is its length; "
-        "upright points that length up, across points right, and front points toward the camera. "
-        "Use small thicknesses for lines and legs. Let small shapes form detailed objects. Use waves for periodic motion. "
-        "Join pieces that belong together. For a piece stacked on or attached to another piece, use on-top, in-front, "
-        "on-left, or on-right as its relation and the other object's exact label as anchor. Independent pieces use free and an empty anchor. "
-        "Place internal parts in front of or beside the housing so they are visible in a cutaway. "
-        "Arrange an opening wide view and leave room around the main objects. Color moving parts distinctly. "
-        "The beats are numbered from zero. Use actions to CHOREOGRAPH each mechanism across the beats. "
-        "Name the exact part and beat, then give its direction and distance from its current location, degrees of rotation around its center, "
-        "and fractions start/end within the beat. For example within the same beat the input moves from 0.1 to 0.4, "
-        "then the driven part moves from 0.4 to 0.85. Move covers away to reveal interiors; show contact then response. "
-        "Actions persist into later beats. Attached children automatically follow their parent. Use still for keyed parts. "
-        "Keep fixed parts still; for a static topic show the described change when appropriate, such as tilting one stack to demonstrate balance. "
-        "Use only the given meshes and parameters. Return no code, paths, external assets, or actionable harmful details."
-    )
-    context = json.dumps({"topic":prompt, "beats":[{"beat":i, "narration":scene["narration"]}
-                         for i, scene in enumerate(scenes)]}, ensure_ascii=False)
+def _plan_mechanism(prompt, scenes):
     key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
+    mechanism_model = None
+    if not key:
+        installed = _ollama_models() or ()
+        preferred = os.environ.get("AI_VIDEO_OLLAMA_MECHANISM_MODEL", OLLAMA_MECHANISM_MODEL)
+        mechanism_model = preferred if preferred in installed else OLLAMA_MODEL
+    script = "\n".join(f"{index}. {scene['narration']}" for index, scene in enumerate(scenes) if index)
+    brief = f"Topic: {prompt}\nNarration beats:\n{script}"
+    schema = mechanism_schema(len(scenes))
+    instructions = PLAN_INSTRUCTIONS
     try:
-        result = _request_storyboard(context, instructions, schema, key, False, True)
-        data = json.loads(result)
-        stage = read_stage(data)
-        return stage, "procedural", read_actions(data, stage, scenes)
-    except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
-        return storyboard_stage(scenes), "schematic", ()
+        for attempt in range(2):
+            try:
+                raw = _request_storyboard(brief, instructions, schema, key, True, True, mechanism_model)
+                return parse_mechanism_rows(json.loads(raw), len(scenes))
+            except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+                if attempt:
+                    raise
+                if isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError):
+                    instructions += f" Fix this validation issue from the previous answer: {error}."
+                instructions += (" Use simple geometry and exact part names in every action. "
+                                 "Check that the geometry and motion fit the board and cover at least three distinct beats.")
+    except requests.RequestException:
+        raise ExplainerError("The AI model could not finish planning the animation. Try the 1-minute option.") from None
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError):
+        raise ExplainerError("The AI could not lay out a working mechanism. Try naming the parts or focusing on one cycle.") from None
 
 
 @lru_cache(maxsize=1)
@@ -664,7 +700,8 @@ def render_explainer(payload, report_progress=None):
         if report_progress:
             report_progress(stage, percent)
 
-    template = GENERATED_TEMPLATE if payload["template"] == GENERATED_TEMPLATE.id else TEMPLATES.get(payload["template"])
+    template = {GENERATED_TEMPLATE.id: GENERATED_TEMPLATE, MECHANISM_TEMPLATE.id: MECHANISM_TEMPLATE}.get(
+        payload["template"], TEMPLATES.get(payload["template"]))
     style = payload.get("voice", "expressive")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
     long_video = max_seconds == MAX_SECONDS
@@ -683,21 +720,20 @@ def render_explainer(payload, report_progress=None):
         title, description, scenes = _validate_plan(plan, template.diagram, 8 if long_video else 6)
     else:
         template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
-    stage, scene_source = CURATED_STAGES.get(template.diagram), "library"
-    actions = ()
-    if template == GENERATED_TEMPLATE:
-        report("scene")
-        stage, scene_source, actions = _plan_stage(payload["prompt"], scenes)
+    custom = template == GENERATED_TEMPLATE
+    animated = template == MECHANISM_TEMPLATE
+    image_engine = LocalVisualEngine.configured() if custom else None
+    if custom and image_engine is None:
+        raise ExplainerError(visual_settings()["custom_visuals_setup"])
+    stage = CURATED_STAGES.get(template.diagram)
     custom_parts = stage_parts(stage) if stage else ()
+    scene_source = "illustrated" if custom else "cutaway" if animated else "library"
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
         for attempt in range(3):
             report("narration")
             mentions = [part_mentions(template.diagram, scene["narration"], custom_parts) for scene in scenes]
-            if scene_source == "schematic":
-                mentions = [row or [(0, custom_parts[min(max(0,index-1),len(custom_parts)-1)])]
-                            for index, row in enumerate(mentions)]
             timing = _continuous_narration(scenes, style, audio_path, mentions)
             if timing is None:
                 frame_counts, caption_ratios = _scene_narration(scenes, style, work, audio_path)
@@ -705,7 +741,7 @@ def render_explainer(payload, report_progress=None):
             else:
                 frame_counts, cue_ratios, caption_ratios = timing
             duration = sum(frame_counts) / FPS
-            if (minimum * .88 <= duration <= max_seconds * 1.12 or example or attempt == 2
+            if (minimum * .88 <= duration <= max_seconds * 1.12 or example or template.diagram == "toaster" or attempt == 2
                     or (long_video and attempt == 1 and duration <= max_seconds)):
                 break
             spoken_words = sum(len(scene["narration"].split()) for scene in scenes)
@@ -718,13 +754,6 @@ def render_explainer(payload, report_progress=None):
             report("revising")
             try:
                 _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
-                if scene_source == "schematic":
-                    stage = storyboard_stage(scenes)
-                    custom_parts = stage_parts(stage)
-                elif actions:
-                    report("scene")
-                    stage, scene_source, actions = _plan_stage(payload["prompt"], scenes)
-                    custom_parts = stage_parts(stage)
             except ExplainerError:
                 # The current take is already complete. Keep it if it can be
                 # exported within the requested limit without truncating speech.
@@ -738,6 +767,24 @@ def render_explainer(payload, report_progress=None):
             seconds = sum(frame_counts) / FPS
             audio_filter = f"atempo={tempo:.8f},apad,atrim=duration={seconds:.6f},{audio_filter}"
 
+        pictures = []
+        mechanism = None
+        if animated:
+            report("mechanism")
+            mechanism = _plan_mechanism(payload["prompt"], scenes)
+            parts = tuple(component.part for component in mechanism[0])
+            # The model uses the script's part names. Highlight the part in the active action.
+            cue_ratios = [_estimated_cue_ratios(scene["narration"],
+                          part_mentions(template.diagram, scene["narration"], parts)) for scene in scenes]
+        if image_engine:
+            for index, scene in enumerate(scenes):
+                report("visuals", index*100//len(scenes))
+                try:
+                    picture = image_engine.generate(scenes[0]["visual_subject"], scene, work, index)
+                except VisualUnavailable as error:
+                    raise ExplainerError(str(error)) from None
+                pictures.append(picture)
+
         fd, output = tempfile.mkstemp(prefix="godd_ai_video_", suffix=".mp4")
         os.close(fd)
         command = [FFMPEG_PATH, "-y", "-v", "error", "-f", "rawvideo", "-pixel_format", "rgb24",
@@ -748,7 +795,8 @@ def render_explainer(payload, report_progress=None):
                    "-movflags", "+faststart", output]
         try:
             report("rendering", 0)
-            with CinematicRenderer() as renderer, (work / "ffmpeg.log").open("wb") as log:
+            render_context = nullcontext() if custom or animated else CinematicRenderer()
+            with render_context as renderer, (work / "ffmpeg.log").open("wb") as log:
                 with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=log) as encoder:
                     try:
                         rendered_frames = 0
@@ -761,11 +809,15 @@ def render_explainer(payload, report_progress=None):
                                 previous_view = view
                             opening = scene.get("opening", False)
                             offset = rendered_frames / FPS
-                            if stage:
-                                shot = StageShot(stage, view, None, offset,
-                                                 actions=actions, beat=beat, duration=count/FPS)
+                            if custom:
+                                shot = IllustratedShot(pictures[beat], (WIDTH, HEIGHT), beat, view)
+                            elif animated:
+                                shot = MechanismShot(mechanism, (WIDTH, HEIGHT), beat)
+                            elif stage:
+                                shot = StageShot(stage, view, None, offset, beat=beat, duration=count/FPS)
                             else:
-                                shot = Shot(template.diagram, view, renderer.size, offset=offset, action_start=action_start)
+                                shot = Shot(template.diagram, view, renderer.size, offset=offset,
+                                            action_start=action_start, duration=count/FPS)
                             schedule = iter(_part_schedule(cues, count, view))
                             pending = next(schedule, None)
                             focused_part = None
@@ -778,10 +830,17 @@ def render_explainer(payload, report_progress=None):
                                     pending = next(schedule, None)
                                 while next_subtitle and next_subtitle[0] <= frame:
                                     _, subtitle_end, text = next_subtitle
-                                    subtitle = caption_layer(text,renderer.size,opening)
+                                    subtitle = caption_layer(text,(WIDTH, HEIGHT),opening)
                                     next_subtitle = next(subtitles,None)
                                 visible_subtitle = subtitle if frame < subtitle_end else None
-                                encoder.stdin.write(renderer.frame(shot, frame/FPS, focused_part,visible_subtitle).tobytes())
+                                fraction = frame/max(1, count-1)
+                                if custom:
+                                    picture = shot.frame(fraction, visible_subtitle)
+                                elif animated:
+                                    picture = shot.frame(fraction, visible_subtitle, focused_part)
+                                else:
+                                    picture = renderer.frame(shot, frame/FPS, focused_part, visible_subtitle)
+                                encoder.stdin.write(picture.tobytes())
                                 rendered_frames += 1
                                 percent = rendered_frames * 100 // total_frames
                                 if percent >= last_percent + 5 and percent < 100:

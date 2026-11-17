@@ -8,7 +8,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from cinematic_geometry import CHROME, ROPE, STEEL, SUBJECTS, mesh, scale, spin, translate, tube
+from cinematic_geometry import CHROME, ROPE, STEEL, SUBJECTS, TOASTER_SLOTS, mesh, scale, spin, translate, tube
 from explainer_templates import VIEWS
 
 
@@ -105,6 +105,16 @@ void main() {
         vec3 color=(vec3(.006,.009,.017)+vec3(.018,.027,.044)*pool*(.23+.77*lit))*(.86+stone*.28);
         pixel=surface_pixel(display_color(color));
         return;
+    }
+    if (metal == 7.) {
+        pixel=surface_pixel(display_color(base));
+        return;
+    }
+    if (metal == 5. || metal == 6.) {
+        float pores=noise(local*91.);
+        float mottling=noise(local*12.)*.60 + noise(local*36.)*.40;
+        base *= (.64+.6*mottling) * mix(.53,1.,smoothstep(.18,.44,pores));
+        metal = 0.;
     }
     float usable = 1.-smoothstep(.010,.036,length(fwidth(local)));
     float grain = noise(local*(metal>.55 ? vec3(28,28,94) : vec3(38)));
@@ -394,15 +404,20 @@ class CinematicRenderer:
 
 
 class Shot:
-    def __init__(self, subject, view, size, caption="", opening=False, offset=0, action_start=None):
+    def __init__(self, subject, view, size, caption="", opening=False, offset=0, action_start=None, duration=3.):
         self.subject = subject
         self.geometry = SUBJECTS[subject]()
         self.view = view
         self.offset = offset
         self.action_start = offset if action_start is None else action_start
+        self.duration = duration
         self.caption = caption_layer(caption,size,opening) if caption else None
+        if subject == "toaster":
+            self.floor = -.955
 
     def at(self, t, part=None):
+        if self.subject == "toaster":
+            return _toaster_shot(self.geometry.parts, self.view, t / max(self.duration, .01))
         time = t + self.offset
         angle = time * 1.44
         track = sin(t*.57)
@@ -536,3 +551,61 @@ class Shot:
             view = part.view
         focus, eye = shots[VIEWS[self.subject].index(view)]
         return objects, eye, np.asarray(focus)
+
+
+def _ease(progress, start, end):
+    fraction = min(1., max(0., (progress-start)/(end-start)))
+    return fraction*fraction*(3.-2.*fraction)
+
+
+def _toaster_shot(parts, view, progress):
+    # The shot boundaries share the same mechanism state so cuts preserve the action.
+    lowered = _ease(progress, .12, .57) if view == "latch" else float(view in ("heating","browning","release","pop-up"))
+    rise = _ease(progress, .18, .36) if view == "pop-up" else 0.
+    if view == "pop-up":
+        rise += .085*sin(3*pi*_ease(progress,.36,.57))*(1.-_ease(progress,.36,.57))
+    engaged = (_ease(progress, .51, .70) if view == "latch" else
+               1.-_ease(progress,.26,.57) if view == "release" else float(view in ("heating","browning")))
+    heat = (_ease(progress,.04,.46) if view == "heating" else
+            1.-_ease(progress,.24,.48) if view == "release" else float(view == "browning"))
+    toasted = _ease(progress,.10,.89) if view == "browning" else float(view in ("release","pop-up"))
+    carriage = .29 - .74*(lowered-rise)
+    cutaway = view in ("latch", "heating", "browning", "release")
+    roll = .88*(1.-engaged)
+    pivot = (1.09,-.37,.55)
+    transforms = {"carriage":translate(0,carriage,0), "lever":translate(0,carriage,0),
+                  "latch":translate(*pivot) @ spin(roll) @ translate(-.103,0,0)}
+    if view == "pop-up":
+        transforms["cover"] = translate(-3.55*(1.-_ease(progress,.58,.95)),0,0)
+    objects = []
+    for name, material, model, group in parts:
+        if group == "cover" and cutaway:
+            continue
+        transform = transforms.get(group)
+        objects.append((name, material, model if transform is None else transform @ model, group))
+    spring = translate(.91,(carriage-.565)/2,.56) @ scale(1,carriage+.565,1)
+    objects.append(("toaster-spring",(.57,.42,.19,.76),spring,"spring"))
+
+    glow = heat*(.965 + .035*sin(9*progress))
+    wire = (.18+2.05*glow,.105+.52*glow,.075-.015*glow,7.) if glow > 0 else (.19,.16,.16,.55)
+    for z in (-.545,0,.545):
+        objects.append(("toaster-wire", wire, translate(0,.017,z), "heater"))
+    crumb = (.94-.30*toasted,.82-.39*toasted,.60-.33*toasted,5.)
+    crust = (.62-.18*toasted,.34-.14*toasted,.15-.07*toasted,6.)
+    if view != "wide":
+        for index, z in enumerate(TOASTER_SLOTS):
+            delay = 1.-_ease(progress,.13*index+.10,.13*index+.66) if view == "loading" else 0.
+            bread = translate(0,carriage+.492+.95*delay,z) @ scale(1.39,.89,.153)
+            objects.extend((("bread-crumb",crumb,bread,"bread"),("bread-crust",crust,bread,"bread")))
+
+    targets = {
+        "wide": ((0,.04,0),(2.15,2.15,5.90)),
+        "loading": ((0,.53,0),(1.98,2.90,5.95)),
+        "latch": ((.38,-.06,.18),(1.32,1.52,4.63)),
+        "heating": ((0,.07,.08),(-.81,1.24,4.47)),
+        "browning": ((0,.13,.10),(-1.04,1.51,4.06)),
+        "release": ((.43,-.09,.33),(1.15,1.39,4.54)),
+        "pop-up": ((0,.22,0),(1.84,2.09,5.88)),
+    }
+    focus, eye = targets[view]
+    return objects, (eye[0]+.33*(progress-.5),eye[1],eye[2]), np.asarray(focus)

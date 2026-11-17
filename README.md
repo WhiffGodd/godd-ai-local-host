@@ -194,14 +194,17 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
 
 Open **AI Videos** from the main navigation. Describe what to explain and click
 **Generate video**. The AI picks a matching 3D subject and chooses the shot for
-each part of your explanation. Topics outside the library get a new 3D illustration
-built locally from modeled shapes, lighting, and motion. Complex scenes may use a
-labeled schematic. Click a library card to preview it, then click **Use** and the
-scene name to use a matching model. **Build a new scene** forces a custom build
-even when the library has a match. The library includes mechanisms, lunar phases,
+each part of your explanation. For topics outside the library, the AI plans a
+cutaway with labeled parts and moves them through each stage of the explanation.
+The generated cutaway is a schematic, so check the arrangement and motion before
+publishing an educational video. Click a library card to preview it, then click
+**Use** and the scene name to use a matching 3D model.
+**Use AI illustrations** selects the image workflow even when the library has a
+match. The Pop-up Toaster scene follows a full cycle in 3D, including loading,
+heating, latch release, and the spring pushing the toast back up. The library
+also includes other mechanisms, lunar phases,
 prism refraction, sound and octaves, and the water cycle. Mechanism scenes can
-expose internal parts in cutaway. Custom scenes can move parts in sequence and
-carry attached objects with them. The studio
+expose internal parts in cutaway. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
 renders a narrated 720 × 1280 MP4 with a 60- or 90-second maximum. Follow the
 preparation stages and watch the finished video in the preview. Pick Friendly, Energetic, or Documentary
@@ -210,10 +213,22 @@ videos are temporary, so download a copy before closing the studio.
 
 The reusable 3D scene modules and renderer are available under the [MIT license](LICENSE-3D).
 
+For AI illustrations, extract a recent [stable-diffusion.cpp release](https://github.com/leejet/stable-diffusion.cpp/releases)
+into `.visual-engine/runtime`, with `sd-cli.exe` or `sd-cli` directly in that
+folder. Put [DreamShaper8_LCM.safetensors](https://huggingface.co/Lykon/DreamShaper/blob/main/DreamShaper8_LCM.safetensors)
+in `.visual-engine`. These files are local to the installation. To use different
+locations, set `AI_VIDEO_IMAGE_CLI` and `AI_VIDEO_IMAGE_MODEL`. The Windows
+Vulkan build detects compatible GPUs. Set `AI_VIDEO_IMAGE_BACKEND=cpu` to use
+the CPU or to run the CLI's CPU build. The hosted studio needs its own runtime
+and model files for the optional AI illustrations mode.
+
 - **Local setup**: Install [Ollama](https://ollama.com/download) and run
   `ollama pull qwen3:4b` once. On Windows, starting Godd AI with `start.bat`,
   `run_gpu.bat`, or `python server.py` starts Ollama when needed and connects
   to `http://127.0.0.1:11434`. On macOS and Linux, start Ollama before Godd AI.
+  Install `qwen3.5:9b` with `ollama pull qwen3.5:9b` for a larger diagram
+  planner. The studio uses it for cutaways when installed. Set
+  `AI_VIDEO_OLLAMA_MECHANISM_MODEL` to select a different installed model.
   Install the packages in `requirements.txt`. The renderer requires OpenGL 3.3
   or newer. On headless Linux, install Mesa EGL and its DRI drivers.
   For continuous narration, download `kokoro-v1.0.onnx` and `voices-v1.0.bin`

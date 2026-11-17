@@ -79,6 +79,14 @@ PARTS = {
         Part("Hub shell", ("hub",), "cutaway", r"(?:hub|outer) shells?|wheel hubs?"),
         Part("Driver", ("driver",), "cutaway", r"(?:freewheel )?drivers?|inner carrier"),
     ),
+    "toaster": (
+        Part("Heating wires", ("heater",), "heating", r"heating (?:wires?|elements?|coils?)|resistance wires?"),
+        Part("Return spring", ("spring",), "latch", r"(?:return )?spring"),
+        Part("Carriage", ("carriage",), "latch", r"carriage|bread tray"),
+        Part("Latch", ("latch",), "release", r"latch|catch"),
+        Part("Lever", ("lever",), "loading", r"lever|handle"),
+        Part("Bread", ("bread",), "loading", r"slices (?:of bread|of toast)|bread|toast"),
+    ),
 }
 
 

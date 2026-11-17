@@ -27,7 +27,7 @@
       <div class="composer">
         <form id="generator">
           <label for="prompt">What should the video explain?</label>
-          <textarea id="prompt" rows="4" maxlength="1200" required placeholder="Explain why a snowman is built with the biggest snowball at the bottom."></textarea>
+          <textarea id="prompt" rows="4" maxlength="1200" required placeholder="Explain how a ballpoint pen extends and retracts its tip. Show each moving part in order."></textarea>
           <div class="examples" aria-label="Example prompts">
             <button type="button" data-topic="Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog.">Bicycle pedals</button>
             <button type="button" data-topic="Explain why the Moon has phases and how the Sun, Earth and Moon line up.">Moon phases</button>
@@ -66,10 +66,10 @@
           <div class="library-heading">
             <h2 id="libraryHeading">3D scene library</h2>
           </div>
-          <p class="status">The studio builds a new 3D illustration when your topic is outside the library.</p>
+          <p id="visualMode" class="status">Custom topics use animated cutaways.</p>
           <div class="scene-actions">
             <button id="autoTemplate" class="secondary auto-template" type="button" aria-pressed="true">Auto-select from prompt</button>
-            <button id="buildScene" class="secondary" type="button" aria-pressed="false">Build a new scene</button>
+            <button id="buildScene" class="secondary" type="button" aria-pressed="false">Use AI illustrations</button>
             <button id="useScene" class="secondary" type="button" hidden aria-pressed="false">Use previewed scene</button>
           </div>
           <p id="sceneSelection" class="status" role="status"></p>

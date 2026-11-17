@@ -50,6 +50,49 @@ def _surface(point, rings, sides):
 
 
 def mesh(name):
+    if name in ("bread-crumb", "bread-crust"):
+        outline = [(-.40,-.50), (.40,-.50), (.46,-.44), (.46,.19), (.50,.23)]
+        outline += [(.50*cos(pi*i/20), .23+.27*sin(pi*i/20)) for i in range(1,21)]
+        outline += [(-.46,.19),(-.46,-.44)]
+        vertices = []
+        for a, b in zip(outline, outline[1:] + outline[:1]):
+            for z in (-.5, .5):
+                if name == "bread-crumb":
+                    face = [(0.,0.), (.915*a[0],.915*a[1]), (.915*b[0],.915*b[1])]
+                else:
+                    inner_a = (.915*a[0],.915*a[1])
+                    inner_b = (.915*b[0],.915*b[1])
+                    face = [a,b,inner_b,a,inner_b,inner_a]
+                vertices.extend((*p,z,0.,0.,2*z) for p in face)
+            if name == "bread-crust":
+                outward = np.array((b[1]-a[1], a[0]-b[0]))
+                outward /= np.linalg.norm(outward)
+                vertices.extend((*point,z,*outward,0.) for point, z in (
+                    (a,-.5),(b,-.5),(b,.5),(a,-.5),(b,.5),(a,.5)))
+        return vertices
+    if name == "toaster-spring":
+        def spring(u, v):
+            a, b = tau*7*u, tau*v
+            r = .106 + .017*cos(b)
+            return (r*cos(a), u-.5+.017*sin(b), r*sin(a), cos(a)*cos(b), sin(b), sin(a)*cos(b))
+        return _surface(spring, 112, 9)
+    if name == "toaster-wire":
+        wire = np.asarray(mesh("cylinder"))
+        path = [(-.75,.52,0)]
+        for i in range(6):
+            y = .52-.19*i
+            x = .75 if i % 2 == 0 else -.75
+            path.append((x,y,0))
+            if i < 5:
+                path.extend(((x*1.038,y-.035,0),(x*1.038,y-.155,0),(x,y-.19,0)))
+        segments = []
+        for a, b in zip(path, path[1:]):
+            model = tube(a,b,.014)
+            direction = model[:3,:3]
+            points = wire[:,:3] @ direction.T + model[:3,3]
+            normals = wire[:,3:] @ np.linalg.inv(direction)
+            segments.append(np.column_stack((points,normals)))
+        return np.concatenate(segments)
     if name == "drilled-rotor":
         vertices = []
         holes = 18
@@ -454,8 +497,48 @@ def freewheel():
     return s
 
 
+TOASTER_STEEL = (.66,.70,.74,.86)
+TOASTER_SLOTS = (-.32,.32)
+
+
+def toaster():
+    s = Subject()
+    metal = TOASTER_STEEL
+    mica = (.34,.25,.22,.16)
+    s.place("beveled-box", RUBBER, (0,-.78,0), (2.55,.26,1.57))
+    s.place("beveled-box", metal, (0,-.59,0), (2.48,.12,1.48))
+    for x in (-1.20,1.20):
+        s.place("beveled-box", metal, (x,.025,0), (.16,1.25,1.50))
+        s.place("beveled-box", CHROME, (x,.65,0), (.24,.13,1.53))
+    for z, width in ((-.64,.26),(0,.29),(.64,.26)):
+        s.place("beveled-box", metal, (0,.65,z), (2.35,.13,width))
+    for z in TOASTER_SLOTS:
+        for side in (-1,1):
+            s.place("beveled-box", CHROME, (0,.676,z+side*.185), (2.02,.073,.044))
+            s.place("beveled-box", STEEL, (side*.94,.65,z), (.11,.12,.34))
+        s.place("beveled-box", CHROME, (0,0,z), (1.57,.086,.31), "carriage")
+        for x in (-.72,.72):
+            s.place("beveled-box", STEEL, (x,.10,z), (.047,.22,.26), "carriage")
+    s.place("beveled-box", metal, (0,.025,-.737), (2.37,1.25,.14))
+    s.place("beveled-box", metal, (0,.025,.737), (2.37,1.25,.14), "cover")
+    s.place("beveled-box", RUBBER, (.967,.10,.822), (.11,.89,.034), "cover")
+    s.place("beveled-box", CHROME, (.967,0,.63), (.11,.084,.41), "lever")
+    s.place("beveled-box", RUBBER, (.967,0,.885), (.27,.125,.23), "lever")
+    s.place("cylinder", RUBBER, (-.92,-.38,.815), (.15,.15,.087), "cover")
+    s.place("cylinder", CHROME, (-.92,-.38,.876), (.113,.113,.08), "cover")
+    s.place("beveled-box", RUBBER, (-.92,-.32,.922), (.027,.056,.021), "cover")
+    for z in (-.545,0):
+        s.place("beveled-box", mica, (0,.02,z-.018), (1.71,1.15,.039))
+    # The guide rod and spring run vertically next to the carriage.
+    s.pipe((.91,-.61,.56),(.91,.53,.56),.043,STEEL,"guide")
+    s.add("ring", CHROME, tube((.91,-.04,.56),(.91,.04,.56),.094), "carriage")
+    s.place("beveled-box", GOLD, (0,0,0), (.25,.084,.14), "latch")
+    s.place("cylinder", STEEL, (1.09,-.37,.55), (.058,.058,.20))
+    return s
+
+
 SUBJECTS = {
     "bicycle": bicycle, "gears": gear_train, "pulley": pulley, "moon": moon,
     "piston": piston, "turbine": turbine, "hydraulics": hydraulic_lift,
-    "bearing": bearing, "disc_brake": disc_brake, "freewheel": freewheel,
+    "bearing": bearing, "disc_brake": disc_brake, "freewheel": freewheel, "toaster": toaster,
 }
