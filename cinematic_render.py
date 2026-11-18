@@ -12,7 +12,7 @@ from cinematic_geometry import CHROME, ROPE, STEEL, SUBJECTS, TOASTER_SLOTS, mes
 from explainer_templates import VIEWS
 
 
-WIDTH, HEIGHT, FPS = 720, 1280, 24
+WIDTH, HEIGHT, FPS = 720, 1280, 30
 
 _VERTEX = """
 #version 330

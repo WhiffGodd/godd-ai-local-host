@@ -32,6 +32,7 @@ function save() {
   sessionStorage.setItem(storeKey, JSON.stringify({
     generation: page.generation, upload: page.upload, sceneOverride: page.selected?.id,
     prompt: $("prompt").value, voice: $("voice").value, maxSeconds: $("maxSeconds").value,
+    visualStyle: $("visualStyle").value,
     draft: $("video").hidden ? null :
       Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
   }));
@@ -67,7 +68,10 @@ function updateTemplateSelection() {
 
 function chooseTemplate(template) {
   page.selected = template;
+  if (template) $("visualStyle").value = "auto";
   updateTemplateSelection();
+  updateVisualMode(page.provider || {});
+  generationControls();
   save();
 }
 
@@ -104,7 +108,9 @@ function drawLibrary() {
 }
 
 function generationControls() {
-  $("generate").disabled = page.generating || page.uploading || !page.provider?.available;
+  const imagesRequired = $("visualStyle").value === "motion" || page.selected === promptScene;
+  $("generate").disabled = page.generating || page.uploading || !page.provider?.available ||
+    (imagesRequired && page.provider?.custom_visuals === false);
   $("generate").textContent = page.generating ? "Generating…" : "Generate video";
 }
 
@@ -163,8 +169,9 @@ function showGenerationProgress(job) {
   const percent = job.progress?.percent;
   const labels = {
     storyboard: "Writing the storyboard…",
+    motion: "Planning the moving objects and scene transitions…",
     mechanism: "Designing moving parts and mapping the steps…",
-    visuals: "Generating detailed images for each shot…",
+    visuals: "Preparing objects and visual effects…",
     revising: "Adjusting the script to fit your chosen length…",
     narration: "Generating the voice-over…",
     rendering: "Rendering the animation…",
@@ -223,6 +230,7 @@ async function generate() {
   try {
     const job = await request("/api/ai-videos", {
       prompt: $("prompt").value.trim(), template: page.selected?.id || "auto", voice: $("voice").value,
+      visual_style: $("visualStyle").value,
       max_seconds: Number($("maxSeconds").value),
     });
     page.generation = job.id;
@@ -305,6 +313,12 @@ $("video").addEventListener("error", () => {
 });
 $("autoTemplate").addEventListener("click", () => chooseTemplate(null));
 $("buildScene").addEventListener("click", () => chooseTemplate(promptScene));
+$("visualStyle").addEventListener("change", () => {
+  if ($("visualStyle").value === "motion") chooseTemplate(null);
+  updateVisualMode(page.provider || {});
+  generationControls();
+  save();
+});
 $("useScene").addEventListener("click", () => chooseTemplate(page.preview));
 for (const button of document.querySelectorAll("[data-topic]")) {
   button.addEventListener("click", () => {
@@ -374,7 +388,9 @@ $("publishForm").addEventListener("submit", async event => {
 });
 
 function updateVisualMode(settings) {
-  $("visualMode").textContent = "Custom topics use animated cutaways.";
+  $("visualMode").textContent = settings.custom_visuals === false ? settings.custom_visuals_setup :
+    $("visualStyle").value === "motion" ? "Reel motion creates and animates realistic objects for your prompt." :
+      "Custom topics use animated cutaways.";
   $("buildScene").disabled = settings.custom_visuals === false;
   $("buildScene").title = settings.custom_visuals_setup || "";
 }
@@ -382,6 +398,7 @@ function updateVisualMode(settings) {
 async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
+  $("visualStyle").value = saved.visualStyle === "auto" ? "auto" : "motion";
   if (["60", "90"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
   if (Array.from($("voice").options).some(option => option.value === saved.voice)) $("voice").value = saved.voice;
   page.generation = saved.generation;
@@ -398,7 +415,7 @@ async function initialize() {
     page.provider = data;
     updateVisualMode(data);
     drawLibrary();
-    page.selected = saved.sceneOverride === promptScene.id ? promptScene :
+    page.selected = $("visualStyle").value === "motion" ? null : saved.sceneOverride === promptScene.id ? promptScene :
       page.templates.find(template => template.id === saved.sceneOverride) || null;
     updateTemplateSelection();
     previewScene(page.selected === promptScene ? null : page.selected);

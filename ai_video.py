@@ -21,9 +21,13 @@ import numpy as np
 
 from cinematic_render import FPS, HEIGHT, WIDTH, CinematicRenderer, RendererUnavailable, Shot, caption_layer
 from explainer_parts import part_mentions
-from explainer_templates import GENERATED_TEMPLATE, MECHANISM_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
+from explainer_templates import GENERATED_TEMPLATE, MECHANISM_TEMPLATE, MOTION_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
 from explainer_visuals import IllustratedShot, LocalVisualEngine, VisualUnavailable, visual_settings
 from mechanism_animation import MechanismShot, PLAN_INSTRUCTIONS, mechanism_schema, parse_mechanism_rows
+from motion_graphics import (
+    MotionReel, STORYBOARD_INSTRUCTIONS, extract_cutout, motion_objects_schema, motion_plan_from_scenes,
+)
+from explainer_photos import find_photo
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
@@ -210,8 +214,11 @@ def validate_generation(payload):
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
     if type(max_seconds) is not int or max_seconds not in (DEFAULT_MAX_SECONDS, MAX_SECONDS):
         raise ValueError("Choose a 60- or 90-second maximum.")
+    visual_style = payload.get("visual_style", "auto")
+    if visual_style not in ("auto", "motion"):
+        raise ValueError("Choose Reel motion or 3D cutaway.")
     return {"prompt": prompt.strip(), "template": template, "example": example, "voice": voice,
-            "max_seconds": max_seconds}
+            "max_seconds": max_seconds, "visual_style": visual_style}
 
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -283,9 +290,14 @@ def _validate_plan(plan, subject, max_scenes=6):
             if distinct != narration or not _distinct_opening(hook, caption):
                 caption = _SENTENCE_END.split(distinct, maxsplit=1)[0][:96].rstrip()
             narration = distinct
-        shot = {"heading": text(scene["heading"], 44), "caption": caption, "narration": narration, "view": view}
+        heading = text(scene["heading"],44)
+        if re.fullmatch(r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|step\s*\d+)[.!:]?",heading,re.I):
+            heading = " ".join(caption.split()[:6]).rstrip(".")
+        shot = {"heading": heading, "caption": caption, "narration": narration, "view": view}
         if subject == GENERATED_TEMPLATE.diagram:
             shot["visual"] = text(scene.get("visual") or caption, 225)
+        if subject == MOTION_TEMPLATE.diagram:
+            shot["objects"] = scene["objects"]
         clean.append(shot)
     if not clean:
         raise ValueError("The storyboard repeats the hook without explaining it")
@@ -296,6 +308,9 @@ def _validate_plan(plan, subject, max_scenes=6):
     if subject == GENERATED_TEMPLATE.diagram:
         opening["visual_subject"] = text(plan.get("visual_subject") or title, 130)
         opening["visual"] = text(plan.get("hook_visual") or clean[0]["visual"], 225)
+    if subject == MOTION_TEMPLATE.diagram:
+        opening["objects"] = plan["hook_objects"]
+        motion_plan_from_scenes([opening,*clean])
     return title, f"{description}\n\n{' '.join(tags)}", [opening, *clean]
 
 
@@ -306,17 +321,19 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
-                                 "maxOutputTokens": 3000},
+                                 "maxOutputTokens": 6000 if "hook_objects" in schema["properties"] else 3000},
         }, timeout=(5, 90))
         response.raise_for_status()
         result = "".join(part.get("text", "") for part in response.json()["candidates"][0]["content"]["parts"]
                          if not part.get("thought"))
     else:
+        motion_story = "hook_objects" in schema["properties"]
         request_body = {
             "model": mechanism_model or OLLAMA_MODEL, "stream": False, "think": False, "format": schema,
-            "keep_alive": 0 if "visual_subject" in schema["properties"] else "5m",
-            "options": {"temperature": 0.3, "num_predict": 3200 if long_video else 2400,
-                        "num_ctx": 6144 if long_video or not single_match else 4096},
+            "keep_alive": 0 if any(name in schema["properties"] for name in
+                                  ("visual_subject","assets","hook_objects")) else "5m",
+            "options": {"temperature": 0.3, "num_predict": 4800 if motion_story else 3200 if long_video else 2400,
+                        "num_ctx": 8192 if motion_story else 6144 if long_video or not single_match else 4096},
             "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
         }
         try:
@@ -338,7 +355,7 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     properties = {**_SCHEMA["properties"],
                   "scenes": {**_SCHEMA["properties"]["scenes"], "maxItems": max_scenes}}
     candidates = matching_subjects(prompt)
-    choices = ([template] if template in (GENERATED_TEMPLATE, MECHANISM_TEMPLATE) or template in candidates
+    choices = ([template] if template in (GENERATED_TEMPLATE, MECHANISM_TEMPLATE, MOTION_TEMPLATE) or template in candidates
                else candidates or [MECHANISM_TEMPLATE])
     toaster = TEMPLATES["pop-up-toaster"]
     if choices == [toaster]:
@@ -357,10 +374,14 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     scene_properties = properties["scenes"]["items"]["properties"]
     custom = choices == [GENERATED_TEMPLATE]
     mechanism = choices == [MECHANISM_TEMPLATE]
-    visual_mode = "AI illustrations" if custom else "an animated cutaway" if mechanism else "3D animation"
+    visual_mode = ("AI illustrations" if custom else "an animated cutaway" if mechanism else
+                   "motion graphics" if choices == [MOTION_TEMPLATE] else "3D animation")
     if custom:
         properties.update(visual_subject=_TEXT, hook_visual=_TEXT)
         scene_properties = {**scene_properties, "visual": _TEXT}
+    if choices == [MOTION_TEMPLATE]:
+        properties["hook_objects"] = motion_objects_schema()
+        scene_properties = {**scene_properties,"objects":motion_objects_schema()}
     properties["scenes"]["items"] = _object(**{**scene_properties, "view": view_schema, "narration": narration_schema})
     properties["hook_view"] = view_schema
     schema = _object(template={"type": "string", "enum": ids}, **properties)
@@ -410,7 +431,8 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         "and canned lines like 'Let's dive in' or 'Here's the kicker'. "
         "Use the requested subject, question, level of detail and emphasis. If the prompt asks why something "
         "happens, answer that question directly in the title, hook and narration. Do not substitute a generic overview. "
-        "Headings must be short. Each caption is one short sentence summarizing the corresponding narration. "
+        "Headings must name the part or change in two to six concrete words. Avoid headings like First or Second. "
+        "Each caption is one short sentence summarizing the corresponding narration. "
         "Follow provider safety rules. Do not give actionable instructions for harming people, "
         "building weapons, engineering dangerous pathogens, or exploiting computer systems. "
         f"Vary the scenes to follow the narration. {visual_style}"
@@ -420,6 +442,8 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
                          "Use concrete names of the parts that move, carry material or transfer energy, "
                          "and describe what triggers each change. "
                          "Describe each step in a way a cutaway side view can show. Avoid repeated steps.")
+    if choices == [MOTION_TEMPLATE]:
+        instructions += STORYBOARD_INSTRUCTIONS
     try:
         for attempt in range(2):
             try:
@@ -709,6 +733,9 @@ def render_explainer(payload, report_progress=None):
     minimum = MIN_SECONDS if not long_video else 75
     report("storyboard")
     example = payload["example"]
+    reel_motion = payload.get("visual_style") == "motion" and not example and template != GENERATED_TEMPLATE
+    if reel_motion:
+        template = MOTION_TEMPLATE
     target_words = round({"expressive": 160, "energetic": 175, "documentary": 150}[style] * target_seconds / TARGET_SECONDS)
     if example:
         template = TEMPLATES["bicycle-drivetrain"]
@@ -722,12 +749,12 @@ def render_explainer(payload, report_progress=None):
         template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
     custom = template == GENERATED_TEMPLATE
     animated = template == MECHANISM_TEMPLATE
-    image_engine = LocalVisualEngine.configured() if custom else None
-    if custom and image_engine is None:
+    image_engine = LocalVisualEngine.configured() if custom or reel_motion else None
+    if (custom or reel_motion) and image_engine is None:
         raise ExplainerError(visual_settings()["custom_visuals_setup"])
     stage = CURATED_STAGES.get(template.diagram)
     custom_parts = stage_parts(stage) if stage else ()
-    scene_source = "illustrated" if custom else "cutaway" if animated else "library"
+    scene_source = "motion" if reel_motion else "illustrated" if custom else "cutaway" if animated else "library"
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
@@ -769,6 +796,34 @@ def render_explainer(payload, report_progress=None):
 
         pictures = []
         mechanism = None
+        motion_reel = None
+        if reel_motion:
+            report("motion")
+            motion_plan = motion_plan_from_scenes(scenes)
+            cutouts = {}
+            photo_credits = []
+            for index,asset in enumerate(motion_plan[0]):
+                report("visuals",round(index*100/len(motion_plan[0])))
+                if asset.kind != "object":
+                    continue
+                sourced = find_photo(asset.query or asset.name)
+                credits_length = sum(len(credit) for credit in dict.fromkeys(photo_credits))
+                if sourced and len(description)+credits_length+len(sourced[1])+100 < 4900:
+                    cutouts[asset.name] = sourced[0]
+                    photo_credits.append(sourced[1])
+                    continue
+                for attempt in range(2):
+                    try:
+                        picture = image_engine.generate(asset.name,{"visual":asset.description,"cutout":True,"avoid":asset.avoid},
+                                                        work,index+attempt*1000)
+                        cutouts[asset.name] = extract_cutout(picture)
+                        break
+                    except VisualUnavailable as error:
+                        if attempt:
+                            raise ExplainerError(str(error)) from None
+            motion_reel = MotionReel(motion_plan,cutouts,scenes,(WIDTH,HEIGHT))
+            if photo_credits:
+                description += "\n\nPhoto credits\n"+"\n\n".join(dict.fromkeys(photo_credits))
         if animated:
             report("mechanism")
             mechanism = _plan_mechanism(payload["prompt"], scenes)
@@ -776,7 +831,7 @@ def render_explainer(payload, report_progress=None):
             # The model uses the script's part names. Highlight the part in the active action.
             cue_ratios = [_estimated_cue_ratios(scene["narration"],
                           part_mentions(template.diagram, scene["narration"], parts)) for scene in scenes]
-        if image_engine:
+        if custom:
             for index, scene in enumerate(scenes):
                 report("visuals", index*100//len(scenes))
                 try:
@@ -795,7 +850,7 @@ def render_explainer(payload, report_progress=None):
                    "-movflags", "+faststart", output]
         try:
             report("rendering", 0)
-            render_context = nullcontext() if custom or animated else CinematicRenderer()
+            render_context = nullcontext() if custom or animated or reel_motion else CinematicRenderer()
             with render_context as renderer, (work / "ffmpeg.log").open("wb") as log:
                 with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=log) as encoder:
                     try:
@@ -809,7 +864,9 @@ def render_explainer(payload, report_progress=None):
                                 previous_view = view
                             opening = scene.get("opening", False)
                             offset = rendered_frames / FPS
-                            if custom:
+                            if reel_motion:
+                                shot = None
+                            elif custom:
                                 shot = IllustratedShot(pictures[beat], (WIDTH, HEIGHT), beat, view)
                             elif animated:
                                 shot = MechanismShot(mechanism, (WIDTH, HEIGHT), beat)
@@ -834,7 +891,9 @@ def render_explainer(payload, report_progress=None):
                                     next_subtitle = next(subtitles,None)
                                 visible_subtitle = subtitle if frame < subtitle_end else None
                                 fraction = frame/max(1, count-1)
-                                if custom:
+                                if reel_motion:
+                                    picture = motion_reel.frame(beat,fraction,visible_subtitle)
+                                elif custom:
                                     picture = shot.frame(fraction, visible_subtitle)
                                 elif animated:
                                     picture = shot.frame(fraction, visible_subtitle, focused_part)

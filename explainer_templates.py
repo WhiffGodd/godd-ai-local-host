@@ -17,7 +17,7 @@ VIEWS = {
     "disc_brake": ("wide", "spinning-rotor", "caliper-and-pads", "braking"),
     "freewheel": ("wide", "cutaway", "engagement", "coasting"),
     "toaster": ("wide", "loading", "latch", "heating", "browning", "release", "pop-up"),
-    **dict.fromkeys(("prism", "sound", "water", "generated", "mechanism"), ("wide", "detail", "overhead")),
+    **dict.fromkeys(("prism", "sound", "water", "generated", "mechanism", "motion"), ("wide", "detail", "overhead")),
 }
 
 
@@ -65,6 +65,8 @@ GENERATED_TEMPLATE = Template("generated", "AI-illustrated scenes", "Custom", "g
                               "Detailed images generated for each shot in the storyboard")
 MECHANISM_TEMPLATE = Template("mechanism", "Animated cutaway", "Custom", "mechanism",
                               "A step-by-step diagram of the parts and how they work together")
+MOTION_TEMPLATE = Template("motion", "Reel motion", "Custom", "motion",
+                          "Realistic objects, animated headlines and coordinated scene motion")
 
 
 def matching_subjects(prompt):

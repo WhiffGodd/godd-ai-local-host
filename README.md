@@ -65,6 +65,19 @@ with automatic subtitles downloads the speech model.
 
 ## Clip subtitles and audio
 
+Clip Studio checks YouTube captions first. When they are missing, it transcribes
+the audio to find complete spoken passages. Analysis runs in the background with
+a progress display and can be reconnected with **Check scan status**.
+
+Use **Automatic** to scan an ordinary recording. For recordings longer than
+30 minutes without captions, it scans six four-minute sections across the full
+timeline. **Choose a time range** scans a specific section, including hours into
+a long stream. **Recent live footage** saves up to the selected length from the
+available live replay. If a stream provides too little replay, it records the
+next three minutes. Stream access, replay availability, and clear speech are
+required. Live clip times refer to the saved window, which remains available for
+preview, thumbnails, download, and YouTube upload for about an hour.
+
 Hindi captions are automatically shown in English letters in the preview,
 downloaded SRT files, and rendered clips. The original speech and caption
 timing stay the same.
@@ -193,7 +206,21 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
 ## AI Video Studio
 
 Open **AI Videos** from the main navigation. Describe what to explain and click
-**Generate video**. The AI picks a matching 3D subject and chooses the shot for
+**Generate video**. **Reel motion** finds photographic objects or creates images locally,
+then animates them independently over colored backgrounds with changing headlines,
+smooth entrances and exits, and timed subtitles. It reuses the same objects across
+steps so their appearance stays consistent. AI video exports run at 30 frames per second.
+This style uses layered photographic assets. Check generated object details and
+the explanation before publishing. The local image engine is required. Its first
+use also downloads the small U2NetP foreground model from the
+[rembg project](https://github.com/danielgatis/rembg) into `.visual-engine`.
+Photographs are selected from Wikimedia Commons using public-domain, CC0 or
+attribution-only license metadata. Source and license credits, including the
+background-removal and animation changes, are added to the video's description.
+Heat, airflow, light, force and electricity use animated overlays.
+
+Choose **3D library and animated cutaways** to use modeled mechanisms.
+The AI picks a matching 3D subject and chooses the shot for
 each part of your explanation. For topics outside the library, the AI plans a
 cutaway with labeled parts and moves them through each stage of the explanation.
 The generated cutaway is a schematic, so check the arrangement and motion before
@@ -213,14 +240,16 @@ videos are temporary, so download a copy before closing the studio.
 
 The reusable 3D scene modules and renderer are available under the [MIT license](LICENSE-3D).
 
-For AI illustrations, extract a recent [stable-diffusion.cpp release](https://github.com/leejet/stable-diffusion.cpp/releases)
+For Reel motion and AI illustrations, extract a recent [stable-diffusion.cpp release](https://github.com/leejet/stable-diffusion.cpp/releases)
 into `.visual-engine/runtime`, with `sd-cli.exe` or `sd-cli` directly in that
-folder. Put [DreamShaper8_LCM.safetensors](https://huggingface.co/Lykon/DreamShaper/blob/main/DreamShaper8_LCM.safetensors)
+folder. Put [DreamShaper_8_pruned.safetensors](https://huggingface.co/Lykon/DreamShaper/blob/main/DreamShaper_8_pruned.safetensors)
 in `.visual-engine`. These files are local to the installation. To use different
 locations, set `AI_VIDEO_IMAGE_CLI` and `AI_VIDEO_IMAGE_MODEL`. The Windows
 Vulkan build detects compatible GPUs. Set `AI_VIDEO_IMAGE_BACKEND=cpu` to use
 the CPU or to run the CLI's CPU build. The hosted studio needs its own runtime
-and model files for the optional AI illustrations mode.
+and model files for Reel motion and AI illustrations.
+The older `DreamShaper8_LCM.safetensors` file is also supported. The standard
+model is preferred when both are installed, with more sampling steps for object detail.
 
 - **Local setup**: Install [Ollama](https://ollama.com/download) and run
   `ollama pull qwen3:4b` once. On Windows, starting Godd AI with `start.bat`,

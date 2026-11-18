@@ -3,7 +3,7 @@ MIT License
 Copyright (c) 2026 Godd AI contributors
 
 This license applies to cinematic_geometry.py, cinematic_render.py,
-explainer_parts.py, explainer_templates.py, mechanism_animation.py, and
+explainer_parts.py, explainer_templates.py, mechanism_animation.py, motion_graphics.py, and
 procedural_scene.py.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

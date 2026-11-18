@@ -175,6 +175,8 @@ def fetch_youtube_data_api(video_id: str, api_key: str = None) -> dict:
                 "author": snippet.get("channelTitle", "Creator"),
                 "thumbnail": thumb_url,
                 "duration": dur_sec,
+                "is_live": snippet.get("liveBroadcastContent") == "live",
+                "live_status": snippet.get("liveBroadcastContent", "none"),
                 "description": desc[:500],
                 "view_count": int(stats.get("viewCount", 100000)),
                 "like_count": int(stats.get("likeCount", 5000)),
@@ -237,7 +239,10 @@ def get_video_metadata(video_id: str, url: str, api_key: str = None) -> dict:
                 "title": info.get("title", f"Video {video_id}"),
                 "author": info.get("uploader", info.get("channel", "Creator")),
                 "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
-                "duration": info.get("duration", 600),
+                "duration": info.get("duration") or 0,
+                "is_live": bool(info.get("is_live")),
+                "live_status": info.get("live_status", "not_live"),
+                "release_timestamp": info.get("release_timestamp"),
                 "description": desc[:500],
                 "view_count": info.get("view_count", 150000),
                 "chapters": chapters
@@ -579,7 +584,7 @@ def generate_word_subtitles(start_sec: float, end_sec: float, text: str) -> list
         
     return subtitles
 
-def analyze_virality_and_cut_clips(transcript: list, video_duration: float, title: str, chapters: list = None) -> list:
+def analyze_virality_and_cut_clips(transcript: list, video_duration: float, title: str, chapters: list = None, ranges=()) -> list:
     """
     AI Content & Virality Detection Engine (Klap-style):
     Identifies high-value, meaningful clips using:
@@ -608,8 +613,11 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
             if start < video_duration
         )
 
-    short_windows = select_short_clip_windows(
-        transcript, video_duration, [(start, end) for start, end, _ in chapter_ranges])
+    selection_ranges = [(max(start,lower),min(end,upper))
+                        for start,end,_ in chapter_ranges for lower,upper in ranges
+                        if max(start,lower) < min(end,upper)] if ranges and chapter_ranges else (
+                            ranges or [(start,end) for start,end,_ in chapter_ranges])
+    short_windows = select_short_clip_windows(transcript, video_duration, selection_ranges)
     if chapter_ranges and not short_windows:
         meaningful_clips = []
         for start_time, chapter_end, ch_title in chapter_ranges:
@@ -663,7 +671,10 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
                 break
             
         if meaningful_clips:
-            return meaningful_clips
+            in_range = [clip for clip in meaningful_clips if not ranges
+                        or any(start <= clip["start"] and clip["end"] <= end for start,end in ranges)]
+            if in_range:
+                return in_range
 
     min_clip_length = 35.0
     candidate_windows = []
@@ -675,6 +686,8 @@ def analyze_virality_and_cut_clips(transcript: list, video_duration: float, titl
     )
     seen_starts = set()
     for c_start, c_end, c_segs in windows:
+        if ranges and not any(start <= c_start and c_end <= end for start,end in ranges):
+            continue
         dur = round(c_end - c_start, 1)
         if not c_segs or dur < min_clip_length or dur > MAX_CLIP_SECONDS:
             continue

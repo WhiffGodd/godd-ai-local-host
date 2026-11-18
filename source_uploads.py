@@ -93,6 +93,21 @@ class SourceUploads:
             entry['updated'] = time.monotonic()
             return entry['path']
 
+    def adopt(self, path):
+        """Register a server-captured stream so previews and exports share a stable file."""
+        size = os.path.getsize(path)
+        token = self.create(size)
+        with self.lock:
+            entry = self.entries[token]
+            try:
+                os.replace(path, entry['path'])
+            except OSError:
+                os.remove(entry['path'])
+                del self.entries[token]
+                raise
+            entry['received'] = size
+        return token
+
 
 def validate_uploaded_video(path):
     import av

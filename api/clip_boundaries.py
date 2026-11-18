@@ -128,7 +128,12 @@ def short_clip_windows(transcript, video_duration, ranges=()):
         final_sentence = closing.last_cue == len(transcript) - 1 and following is None
         chapter_boundary = any(0 <= upper - closing.end <= 2 for upper in chapter_ends)
         summary = closing.text.lower().startswith(CONCLUSIONS) and not follow_text.startswith(ANSWER_CONTINUATIONS)
-        if not (follow_up or next_topic or final_sentence or chapter_boundary or summary):
+        measured_pause = (following is not None and following.start is not None
+                          and following.start-closing.end >= .65
+                          and not follow_text.startswith(ANSWER_CONTINUATIONS)
+                          and any(word.get("end") is not None
+                                  for word in transcript[closing.last_cue].get("words",[])))
+        if not (follow_up or next_topic or final_sentence or chapter_boundary or summary or measured_pause):
             continue
         end = min(closing.end, video_duration)
         if following and following.start is not None:
@@ -170,7 +175,7 @@ def short_clip_windows(transcript, video_duration, ranges=()):
 def select_short_clip_windows(transcript, video_duration, ranges=(), limit=5):
     ranked = sorted(short_clip_windows(transcript, video_duration, ranges),
                     key=lambda clip: (-clip[3], abs(clip[1] - clip[0] - SHORT_TARGET)))
-    if not ranked and not any(re.search(r"[.!?।](?:\s|$)", cue["text"]) for cue in transcript):
+    if not ranked:
         ranked = sorted(pause_clip_windows(transcript, video_duration, ranges),
                         key=lambda clip: (-clip[3], abs(clip[1] - clip[0] - SHORT_TARGET)))
     selected = []
@@ -209,7 +214,12 @@ def pause_clip_windows(transcript, video_duration, ranges):
         start_next = float(following["start"])
         end = min(float(cue["end"]), float(words[-1]["end"]))
         gap = start_next - end
-        if gap < 1.15 or not SPEECH_RESTART.match(following["text"].strip()):
+        next_text = following["text"].strip()
+        independent_restart = (len(next_text.split()) >= 5 and next_text[0].isupper()
+                               and not DEPENDENT_START.match(next_text))
+        if gap < 1.15 or not (SPEECH_RESTART.match(next_text) or independent_restart):
+            continue
+        if cue["text"].strip().endswith("?") and DIRECT_QUESTION.match(cue["text"].strip()):
             continue
         cuts.append((index + 1, round(end + min(0.18, gap / 2), 2), round(start_next, 2), min(gap, 3)))
 

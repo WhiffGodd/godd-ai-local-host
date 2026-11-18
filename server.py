@@ -21,6 +21,7 @@ from ai_video import ExplainerError, generation_settings, render_explainer, star
 from explainer_templates import TEMPLATES, template_catalog
 from render_jobs import RenderJobs
 from source_uploads import SourceUploads, MAX_CHUNK_BYTES, validate_uploaded_video
+from clip_analysis import AnalysisJobs, analyze_source, validate_analysis
 from api.youtube_access import download_error_response
 from api.clip_boundaries import MAX_CLIP_SECONDS
 from api.clip_metadata import add_clip_metadata
@@ -46,6 +47,7 @@ PORT = int(os.environ.get("PORT", 8080))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CAPTION_RESULTS = OrderedDict()
 SOURCE_UPLOADS = SourceUploads()
+ANALYSIS_JOBS = AnalysisJobs(SOURCE_UPLOADS)
 YOUTUBE = YouTubeConnections()
 YOUTUBE_PREFIX = "/api/youtube/"
 AI_YOUTUBE_PREFIX = YOUTUBE_PREFIX + "ai-videos/"
@@ -449,6 +451,15 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_ai_video_get(path, urllib.parse.parse_qs(parsed.query))
             return
 
+        if path.startswith("/api/analyses/"):
+            job = ANALYSIS_JOBS.snapshot(path.removeprefix("/api/analyses/"))
+            self.youtube_json(200 if job else 404, job or {"error":"This analysis expired. Start a new scan."})
+            return
+
+        if path.startswith("/api/source-previews/"):
+            self.handle_source_preview(path.removeprefix("/api/source-previews/"))
+            return
+
         if path in ("/api/status", "/healthz"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -500,6 +511,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "subtitles": [],
                 "subtitle_style": query.get("subtitle_style", ["source"])[0]
             }
+            payload["upload_id"] = query.get("upload_id", [None])[0]
             self.handle_render_clip(payload)
             return
 
@@ -665,11 +677,18 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "The export queue is full. Please try again shortly."}).encode())
             return
 
-        if path == "/api/analyze":
+        if path in ("/api/analyze", "/api/analyses"):
             try:
                 validate_render_payload({**payload, "start": 0, "duration": 1})
-            except (ValueError, TypeError):
-                self.send_error(400, "Provide a valid HTTPS YouTube URL")
+                payload = validate_analysis(payload)
+            except (ValueError, TypeError,AttributeError) as error:
+                self.youtube_json(400, {"error":str(error)})
+                return
+            if path == "/api/analyses":
+                try:
+                    self.youtube_json(202, ANALYSIS_JOBS.submit(payload))
+                except queue.Full:
+                    self.youtube_json(429, {"error":"The analysis queue is busy. Try again shortly."})
                 return
             self.handle_analyze(payload)
             return
@@ -681,7 +700,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(400, "Provide a valid YouTube URL and a clip of 1 second to 2 minutes")
                 return
             try:
-                region = preview_facecam(clip["url"], clip["start"], clip["duration"])
+                region = preview_facecam(clip["url"], clip["start"], clip["duration"],
+                                         uploaded_source_path(payload))
             except Exception as error:
                 print(f"[FaceCam] Preview unavailable: {error}")
                 region = None
@@ -789,66 +809,58 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(image)
 
     def handle_analyze(self, payload: dict):
-        url = payload.get("url", "").strip()
-        if not url:
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": "No URL provided"}).encode("utf-8"))
-            return
-
-        video_id = extract_youtube_id(url)
-        if not video_id:
-            # Check if this matches a sample or direct test
-            video_id = "sample_test_vid"
-
-        print(f"[godd ai] Analyzing video URL: {url} (ID: {video_id})")
-
         try:
-            # 1. Fetch metadata
-            meta = get_video_metadata(video_id, url)
-            
-            # 2. Fetch transcript using YouTube API + yt-dlp real timedtext
-            transcript = fetch_transcript_segments(video_id, url=url, video_title=meta.get("title", ""))
-            
-            # 3. Analyze virality and generate clips (timestamps + YouTube ASR subtitles)
-            clips = analyze_virality_and_cut_clips(
-                transcript=transcript,
-                video_duration=meta.get("duration", 600),
-                title=meta.get("title", ""),
-                chapters=meta.get("chapters", [])
-            )
+            self.youtube_json(200, analyze_source(payload,SOURCE_UPLOADS,lambda stage,percent: None))
+        except Exception as error:
+            status,code,message = download_error_response(error)
+            if isinstance(error,ValueError):
+                status,code,message = 400,"ANALYSIS_FAILED",str(error)
+            self.youtube_json(status,{"error":message,"code":code})
 
-            # Response returned immediately — fast & reliable (2s response time)
-            response_data = {
-                "success": True,
-                "video": {
-                    "id": video_id,
-                    "url": url,
-                    "title": meta.get("title", "Viral Video Stream"),
-                    "author": meta.get("author", "Creator"),
-                    "thumbnail": meta.get("thumbnail", f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"),
-                    "duration": meta.get("duration", 600),
-                    "duration_formatted": f"{int(meta.get('duration', 600) // 60)}:{int(meta.get('duration', 600) % 60):02d}",
-                    "view_count": meta.get("view_count", 250000),
-                    "recommended_layout": "split"
-                },
-                "clips": add_clip_metadata(clips, meta.get("title", ""), meta.get("author", ""),
-                                           f"https://www.youtube.com/watch?v={video_id}"),
-                "transcript_available": bool(transcript)
-            }
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+    def handle_source_preview(self, token):
+        try:
+            path = SOURCE_UPLOADS.completed_path(token)
+        except ValueError:
+            self.youtube_json(404,{"error":"This live replay expired. Scan the stream again."})
+            return
+        with open(path,"rb") as media:
+            size = os.fstat(media.fileno()).st_size
+            start,end = 0,size-1
+            requested = self.headers.get("Range")
+            if requested:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)",requested)
+                if not match or not any(match.groups()):
+                    self.send_error(416)
+                    return
+                first,last = match.groups()
+                if first:
+                    start,end = int(first),min(int(last),end) if last else end
+                else:
+                    start = max(0,size-int(last))
+                if start > end or start >= size:
+                    self.send_response(416)
+                    self.send_header("Content-Range",f"bytes */{size}")
+                    self.end_headers()
+                    return
+                media.seek(start)
+            self.send_response(206 if requested else 200)
+            self.send_header("Content-Type","video/mp4")
+            self.send_header("Cache-Control","private, no-store")
+            self.send_header("Accept-Ranges","bytes")
+            self.send_header("Content-Length",str(end-start+1))
+            if requested:
+                self.send_header("Content-Range",f"bytes {start}-{end}/{size}")
             self.end_headers()
-            self.wfile.write(json.dumps(response_data).encode("utf-8"))
-
-        except Exception as e:
-            traceback.print_exc()
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            remaining = end-start+1
+            try:
+                while remaining:
+                    chunk = media.read(min(65536,remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+                pass
 
     def handle_srt(self, payload: dict):
         subtitles = payload.get("subtitles", [])
@@ -889,7 +901,8 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 subtitles=subtitles,
                 subtitle_style=subtitle_style,
                 video_subtitles=video_subtitles,
-                caption_source=payload.get("caption_source", "auto")
+                caption_source=payload.get("caption_source", "auto"),
+                local_source_path=uploaded_source_path(payload)
             )
 
             caption_token = None

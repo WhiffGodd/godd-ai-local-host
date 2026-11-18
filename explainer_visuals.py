@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 
 
 _ROOT = Path(__file__).resolve().parent / ".visual-engine"
-_MODEL = "DreamShaper8_LCM.safetensors"
+_MODEL = "DreamShaper_8_pruned.safetensors"
 _SETUP = "Custom topics need the local image model. See AI Video Studio setup in the README."
 _STYLE = ("photorealistic editorial photograph, realistic proportions and materials, "
           "detailed surfaces, soft directional studio lighting, vertical composition, subject centered, "
@@ -56,7 +56,10 @@ class LocalVisualEngine:
         requested = os.environ.get("AI_VIDEO_IMAGE_CLI")
         executable = shutil.which(requested) if requested else (
             str(default) if default.is_file() else shutil.which("sd-cli"))
-        model = Path(os.environ.get("AI_VIDEO_IMAGE_MODEL", str(_ROOT / _MODEL))).expanduser()
+        default_model = _ROOT / _MODEL
+        if not default_model.is_file():
+            default_model = _ROOT / "DreamShaper8_LCM.safetensors"
+        model = Path(os.environ.get("AI_VIDEO_IMAGE_MODEL", str(default_model))).expanduser()
         if not executable or not model.is_file():
             return None
         backend = os.environ.get("AI_VIDEO_IMAGE_BACKEND") or _default_backend(executable)
@@ -65,13 +68,24 @@ class LocalVisualEngine:
     def generate(self, subject, scene, work, index):
         visual = scene.get("visual") or scene["caption"]
         prompt = f"{visual}. Main subject: {subject}. {_STYLE}"
+        cutout = scene.get("cutout", False)
+        if cutout:
+            prompt = (f"{visual}. Photorealistic product photograph of one object only, entire object visible, "
+                      "centered isolated object against a perfectly plain pure black background, "
+                      "realistic materials, soft studio rim lighting, no text, no floor, no other objects.")
         shot = f"{subject}\n{visual}\n{index}"
         seed = int.from_bytes(sha256(shot.encode()).digest()[:4], "big") % (2**31 - 1)
         output = work / f"visual-{index}.png"
+        lcm = "lcm" in self.model.name.casefold()
         command = [self.executable, "-m", str(self.model), "-p", prompt, "-n", _NEGATIVE,
-                   "-W", "448", "-H", "768", "--steps", "8", "--sampling-method", "lcm",
-                   "--cfg-scale", "1.7", "--seed", str(seed), "--backend", self.backend,
+                   "-W", "512" if cutout else "448", "-H", "512" if cutout else "768",
+                   "--steps", "8" if lcm else "20", "--sampling-method", "lcm" if lcm else "euler_a",
+                   "--cfg-scale", ("3" if cutout else "1.7") if lcm else "7",
+                   "--seed", str(seed), "--backend", self.backend,
                    "--offload-to-cpu", "--vae-tiling", "-o", str(output)]
+        if cutout:
+            command[command.index("-n")+1] = (scene.get("avoid","")+
+                ", several objects, duplicates, collection, set of objects, "+_NEGATIVE)
         try:
             with (work / "visual-engine.log").open("wb") as log:
                 subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,

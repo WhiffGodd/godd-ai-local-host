@@ -45,7 +45,7 @@ def _get_whisper_model():
 
 
 def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: float,
-                                  audio_stream_url: str = None) -> list:
+                                  audio_stream_url: str = None, input_args=None) -> list:
     """Transcribe the selected export audio; return clip-relative speech timings."""
     if not WHISPER_AVAILABLE:
         raise RuntimeError("Automatic subtitles require faster-whisper. Install requirements.txt or select subtitles Off.")
@@ -54,19 +54,26 @@ def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: flo
             raise RuntimeError("yt-dlp is not installed")
         info = extract_youtube_info(video_url, {'quiet': True, 'no_warnings': True})
         _, audio_stream_url, _ = select_export_streams(info)
+        input_args = stream_http_input_args(info, audio_stream_url)
     with tempfile.TemporaryDirectory(prefix="godd_ai_speech_") as tmp_dir:
         wav_path = os.path.join(tmp_dir, "speech.wav")
-        cmd = [FFMPEG_PATH, "-y", "-ss", str(start_sec), "-i", audio_stream_url,
+        cmd = [FFMPEG_PATH, "-y", "-ss", str(start_sec), *(input_args or []), "-i", audio_stream_url,
                "-t", str(end_sec - start_sec), "-map", "0:a:0", "-vn",
                "-af", "aresample=async=1:first_pts=0", "-ar", "16000", "-ac", "1", wav_path]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=max(120, (end_sec - start_sec) * 4))
         if result.returncode:
             raise RuntimeError(f"Could not extract speech for subtitles: {result.stderr[-500:]}")
-        # Serialize model use and loading across HTTP request threads.
-        with _WHISPER_LOCK:
-            model = _get_whisper_model()
-            language = os.environ.get("WHISPER_LANGUAGE") or None
-            segments, _ = model.transcribe(wav_path, beam_size=5, temperature=0.0,
+        return transcribe_audio_file(wav_path)
+
+
+def transcribe_audio_file(wav_path):
+    if not WHISPER_AVAILABLE:
+        raise RuntimeError("Speech recognition requires faster-whisper. Install requirements.txt and restart the app.")
+    # Serialize model use and loading across HTTP request threads.
+    with _WHISPER_LOCK:
+        model = _get_whisper_model()
+        language = os.environ.get("WHISPER_LANGUAGE") or None
+        segments, _ = model.transcribe(wav_path, beam_size=5, temperature=0.0,
                                             task="transcribe", language=language,
                                             multilingual=language is None and model.model.is_multilingual,
                                             vad_filter=True, word_timestamps=True, chunk_length=18,
@@ -74,17 +81,17 @@ def transcribe_audio_with_whisper(video_url: str, start_sec: float, end_sec: flo
                                             repetition_penalty=1.12, no_repeat_ngram_size=4,
                                             hallucination_silence_threshold=1.0,
                                             condition_on_previous_text=False)
-            recognized = [{"text": seg.text.strip(), "start": float(seg.start),
+        recognized = [{"text": seg.text.strip(), "start": float(seg.start),
                      "end": float(seg.end), "duration": float(seg.end - seg.start),
                      "words": [{"word": w.word.strip(), "start": float(w.start),
                                 "end": float(w.end)} for w in (seg.words or [])]}
                     for seg in segments if seg.text.strip()]
-            if os.environ.get("RELEASE_WHISPER_MODEL") == "1":
-                global _whisper_model
-                _whisper_model = None
-                del model
-                gc.collect()
-            return recognized
+        if os.environ.get("RELEASE_WHISPER_MODEL") == "1":
+            global _whisper_model
+            _whisper_model = None
+            del model
+            gc.collect()
+        return recognized
 
 
 def speech_words_for_clip(speech, duration):
@@ -128,7 +135,9 @@ def select_export_streams(info):
     if not videos:
         raise RuntimeError("Could not find playable video stream URL")
     video = max(videos, key=lambda f: (f.get("height") or 0, f.get("tbr") or 0))
-    audios = [f for f in formats if f.get("url") and f.get("acodec") not in (None, "none", "")]
+    audios = [f for f in formats if f.get("url") and
+              (f.get("acodec") not in (None, "none", "") or
+               (f.get("vcodec") == "none" and "m3u8" in f.get("protocol","") and f.get("acodec") != "none"))]
     def audio_rank(f):
         note = str(f.get("format_note", "")).lower()
         return ("original" in note, f.get("language_preference") or 0,
@@ -319,7 +328,9 @@ def youtube_render_info(video_url):
     })
 
 
-def preview_facecam(video_url, start, duration):
+def preview_facecam(video_url, start, duration, local_source_path=None):
+    if local_source_path:
+        return detect_facecam_in_stream(local_source_path,start,duration,["-protocol_whitelist","file,pipe"])
     info = youtube_render_info(video_url)
     stream, _, _ = select_export_streams(info)
     return detect_facecam_in_stream(stream, start, duration, stream_http_input_args(info, stream))

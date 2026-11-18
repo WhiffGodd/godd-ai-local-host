@@ -121,6 +121,13 @@ input  { font-family: inherit; outline: none; }
   box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
   margin-bottom: 20px;
 }
+.analysis-options { display:flex; flex-wrap:wrap; gap:12px; padding:12px 10px 0; text-align:left; }
+.analysis-options label { display:flex; flex-direction:column; gap:6px; flex:1 1 130px; color:var(--text-secondary,#cbd5e1); font-size:13px; }
+.analysis-options label[hidden] { display:none; }
+.analysis-options select,.analysis-options input { width:100%; padding:10px; border:1px solid #405068; border-radius:8px; background:#101827; color:#edf4ff; font:inherit; }
+.analysis-help { color:var(--text-secondary,#b5c1d3); font-size:13px; line-height:1.6; padding:8px 12px; }
+#sourcePreview { width:100%; height:100%; object-fit:contain; background:#080b12; }
+.layout-crop #sourcePreview { object-fit:cover; }
 .url-row {
   display: flex; align-items: center; gap: 10px;
   background: rgba(255,255,255,0.03);

@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (saved && document.getElementById('backendUrlInput')) {
     document.getElementById('backendUrlInput').value = saved;
   }
+  updateAnalysisOptions();
+  if (sessionStorage.getItem('godd_clip_analysis')) resumeClipAnalysis();
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,6 +90,8 @@ function goHome() {
   pausePlayer();
   activeClip = null;
   destroyFacecamPlayer();
+  const source = document.getElementById('sourcePreview');
+  if (source) source.pause();
   document.getElementById('heroSection').style.display = '';
   document.getElementById('processingSection').style.display = 'none';
   document.getElementById('studioSection').style.display = 'none';
@@ -116,70 +120,124 @@ function setProcStatus(msg) {
   if (el) el.textContent = msg;
 }
 
+let clipAnalysisBusy = false;
+
+function updateAnalysisOptions() {
+  const mode = document.getElementById('analysisMode')?.value || 'auto';
+  document.getElementById('analysisStartLabel').hidden = mode !== 'range';
+  document.getElementById('analysisMinutesLabel').hidden = mode === 'auto';
+}
+
+function scanStartSeconds() {
+  const value = document.getElementById('analysisStart').value.trim();
+  if (!/^\d+(?::[0-5]\d){0,2}$/.test(value)) throw new Error('Enter a start time such as 1:30:00.');
+  return value.split(':').reduce((sum,part) => sum*60+Number(part),0);
+}
+
+async function analysisRequest(backend, path, body) {
+  const response = await fetch(backend+path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? {'Content-Type':'application/json'} : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 404) sessionStorage.removeItem('godd_clip_analysis');
+    throw new Error(data.error || 'Could not reach the analysis server.');
+  }
+  return data;
+}
+
+function analysisScreen() {
+  pausePlayer();
+  document.getElementById('heroSection').style.display = 'none';
+  document.getElementById('studioSection').style.display = 'none';
+  document.getElementById('processingSection').style.display = 'flex';
+  document.getElementById('checkAnalysis').hidden = true;
+  animateProcessing();
+}
+
+async function resumeClipAnalysis() {
+  if (clipAnalysisBusy) return;
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem('godd_clip_analysis')); } catch (_) {}
+  if (!saved?.id || !saved.backend) return;
+  clipAnalysisBusy = true;
+  analysisScreen();
+  try {
+    await watchClipAnalysis(saved.backend,saved.id);
+  } catch (error) {
+    setProcStatus(error.message);
+    document.getElementById('checkAnalysis').hidden = !sessionStorage.getItem('godd_clip_analysis');
+    if (!sessionStorage.getItem('godd_clip_analysis')) {
+      goHome();
+      showErrModal(error.message,'analysis');
+    }
+  } finally {
+    clipAnalysisBusy = false;
+  }
+}
+
+async function watchClipAnalysis(backend,id) {
+  const until = Date.now()+60*60*1000;
+  while (Date.now()<until) {
+    const job = await analysisRequest(backend,'/api/analyses/'+encodeURIComponent(id));
+    if (job.state === 'failed') {
+      sessionStorage.removeItem('godd_clip_analysis');
+      throw new Error(job.error || 'Could not finish this scan.');
+    }
+    if (job.state === 'complete') {
+      sessionStorage.removeItem('godd_clip_analysis');
+      const data = job.result;
+      if (!data.clips?.length) {
+        goHome();
+        showErrModal('No complete spoken passage was found in the scanned footage. Choose another time range.','analysis');
+        return;
+      }
+      displayStudio(data.video,data.clips);
+      document.getElementById('analysisNotice').textContent = data.message || '';
+      showToast(data.transcript_source === 'speech' ? 'Clips found using speech transcription.' : 'Clips found using captions.');
+      return;
+    }
+    const progress = job.progress;
+    const stage = progress?.stage || 'Waiting for the current scan to finish';
+    setProcStatus(stage+(Number.isFinite(progress?.percent) ? ' '+progress.percent+'%' : '')+'…');
+    await new Promise(resolve => setTimeout(resolve,2000));
+  }
+  throw new Error('The scan is still running. Use Check scan status to reconnect.');
+}
+
 async function analyzeVideo() {
+  if (clipAnalysisBusy) return;
   const url = document.getElementById('urlInput').value.trim();
   if (!url) {
     showToast('Please paste a YouTube link first');
     return;
   }
 
-  const videoId = extractYtId(url);
   const backend = getBackend();
-
-  // Show processing screen immediately
-  document.getElementById('heroSection').style.display = 'none';
-  document.getElementById('studioSection').style.display = 'none';
-  document.getElementById('processingSection').style.display = 'flex';
-  animateProcessing();
-  setProcStatus('Analyzing video & finding key content moments…');
-
-  // Candidate endpoints (prefer Render backend, fallback to relative /api/analyze)
-  const endpoints = [
-    `${backend}/api/analyze`,
-    '/api/analyze'
-  ];
-
-  for (const ep of endpoints) {
-    try {
-      const ctrl = new AbortController();
-      // 25s timeout — analyze should take 2-4 seconds now
-      const timer = setTimeout(() => ctrl.abort(), 25000);
-
-      const res = await fetch(ep, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-        signal: ctrl.signal
-      });
-      clearTimeout(timer);
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.clips) && data.clips.length === 0) {
-          document.getElementById('processingSection').style.display = 'none';
-          document.getElementById('heroSection').style.display = 'block';
-          showErrModal(data.transcript_available === false
-            ? 'Captions are unavailable for this video. Try a video with captions so the app can find where an answer ends.'
-            : 'No clip with a clear speech boundary was found within 2 minutes. Try another video or a source with clearer captions.', 'analysis');
-          return;
-        }
-        if (data.success && Array.isArray(data.clips) && data.clips.length > 0) {
-          setProcStatus('Done! Loading Klap studio…');
-          displayStudio(data.video, data.clips);
-          showToast(data.clips.some(c => c.has_real_captions === false)
-            ? 'Transcript unavailable: these are suggested time ranges. Review and adjust their endings.'
-            : '✅ Clips selected using speech boundaries. Review the ending before export.');
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn(`[Analysis] ${ep} failed:`, e.message);
+  clipAnalysisBusy = true;
+  try {
+    const mode = document.getElementById('analysisMode').value;
+    const payload = {url,analysis_mode:mode,analysis_minutes:Number(document.getElementById('analysisMinutes').value),
+                     analysis_start:mode === 'range' ? scanStartSeconds() : 0};
+    analysisScreen();
+    setProcStatus('Starting your scan…');
+    const job = await analysisRequest(backend,'/api/analyses',payload);
+    sessionStorage.setItem('godd_clip_analysis',JSON.stringify({backend,id:job.id}));
+    await watchClipAnalysis(backend,job.id);
+  } catch (error) {
+    if (sessionStorage.getItem('godd_clip_analysis')) {
+      setProcStatus(error.message);
+      document.getElementById('checkAnalysis').hidden = false;
+    } else {
+      goHome();
+      showErrModal(error.message,'analysis');
     }
+  } finally {
+    clipAnalysisBusy = false;
   }
-
-  document.getElementById('processingSection').style.display = 'none';
-  document.getElementById('heroSection').style.display = 'block';
-  showErrModal('Could not analyze the video. Check your backend connection and try again.', 'analysis');
 }
 
 let _procInterval = null;
@@ -306,18 +364,35 @@ function selectClip(clipId) {
 
 // ─── YOUTUBE PLAYER ───────────────────────────────────────────────────────────
 function loadYTPlayer(videoId, startSec, endSec) {
-  if (!videoId || videoId.length !== 11) return;
-
   pausePlayer();
   isPlaying = false;
   updatePlayIcon(false);
 
   const fallback = document.getElementById('fallbackIframe');
   const ytDiv = document.getElementById('ytPlayerDiv');
+  const source = document.getElementById('sourcePreview');
+  source.pause();
+  if (currentVideoData?.upload_id) {
+    fallback.style.display = 'none';
+    fallback.removeAttribute('src');
+    ytDiv.style.display = 'none';
+    source.hidden = false;
+    const address = getBackend()+'/api/source-previews/'+encodeURIComponent(currentVideoData.upload_id);
+    if (source.src !== address) source.src = address;
+    if (source.readyState >= 1) source.currentTime = startSec;
+    else source.onloadedmetadata = () => { source.currentTime = startSec; };
+    source.onended = pausePlayer;
+    source.onpause = () => { if (isPlaying) pausePlayer(); };
+    return;
+  }
+  source.hidden = true;
+  if (!videoId || videoId.length !== 11) return;
 
   // If YT API Player already initialized, seek to clip
   if (ytPlayerCreated && ytPlayer && typeof ytPlayer.cueVideoById === 'function') {
     try {
+      fallback.style.display = 'none';
+      ytDiv.style.display = '';
       ytPlayer.cueVideoById({
         videoId: videoId,
         startSeconds: startSec,
@@ -353,12 +428,14 @@ function loadYTPlayer(videoId, startSec, endSec) {
           onReady: (e) => {
             ytPlayerCreated = true;
             if (!activeClip) return;
+            if (currentVideoData?.upload_id) { e.target.pauseVideo(); return; }
             e.target.cueVideoById({videoId: activeVideoId, startSeconds: activeClip.start, endSeconds: activeClip.end});
             if (isPlaying) e.target.playVideo();
             updateLayoutPreview();
           },
           onStateChange: (e) => {
             if (!activeClip) return;
+            if (currentVideoData?.upload_id) return;
             if (e.data === YT.PlayerState.PLAYING) {
               isPlaying = true;
               updatePlayIcon(true);
@@ -413,6 +490,14 @@ function startPlayer() {
   isPlaying = true;
   updatePlayIcon(true);
   lastTs = performance.now();
+  if (currentVideoData?.upload_id) {
+    const source = document.getElementById('sourcePreview');
+    source.play().then(() => { if (!animId) animLoop(); }).catch(error => {
+      pausePlayer();
+      showToast(error.message || 'Could not play this replay.');
+    });
+    return;
+  }
 
   if (ytPlayer && ytPlayerCreated && typeof ytPlayer.playVideo === 'function') {
     try { ytPlayer.playVideo(); } catch(_) {}
@@ -425,6 +510,7 @@ function pausePlayer() {
   isPlaying = false;
   pauseFacecam();
   updatePlayIcon(false);
+  document.getElementById('sourcePreview')?.pause();
   if (animId) {
     cancelAnimationFrame(animId);
     animId = null;
@@ -475,7 +561,7 @@ function setSyncOffset(val) {
 function animLoop(ts) {
   if (!isPlaying) { animId = null; return; }
   if (!ts) ts = performance.now();
-  if (ytPlayerCreated && ytPlayer.getPlayerState() === YT.PlayerState.BUFFERING) {
+  if (!currentVideoData?.upload_id && ytPlayerCreated && ytPlayer.getPlayerState() === YT.PlayerState.BUFFERING) {
     lastTs = ts;
     animId = requestAnimationFrame(animLoop);
     return;
@@ -484,7 +570,9 @@ function animLoop(ts) {
   const delta = Math.min(0.1, (ts - lastTs) / 1000);
   lastTs = ts;
 
-  if (ytPlayer && ytPlayerCreated && typeof ytPlayer.getCurrentTime === 'function') {
+  if (currentVideoData?.upload_id) {
+    currentTime = Math.max(0, document.getElementById('sourcePreview').currentTime-activeClip.start);
+  } else if (ytPlayer && ytPlayerCreated && typeof ytPlayer.getCurrentTime === 'function') {
     try {
       const yt = ytPlayer.getCurrentTime();
       if (yt !== lastYtReportedTime && yt > 0) {
@@ -515,6 +603,7 @@ function animLoop(ts) {
   if (currentTime >= clipDur) {
     currentTime = clipDur;
     pausePlayer();
+    if (currentVideoData?.upload_id) document.getElementById('sourcePreview').currentTime = activeClip.start;
     return;
   }
 
@@ -542,6 +631,9 @@ function scrubSeek(e) {
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   currentTime = pct * clipDur;
+  if (currentVideoData?.upload_id) {
+    document.getElementById('sourcePreview').currentTime = activeClip.start+currentTime;
+  }
   if (ytPlayer && ytPlayerCreated && typeof ytPlayer.seekTo === 'function') {
     try { ytPlayer.seekTo(activeClip.start + currentTime, true); } catch(_) {}
   }
@@ -780,6 +872,11 @@ function setLayout(name) {
 function updateLayoutPreview() {
   const container = document.getElementById('ytContainer');
   const clip = activeClip;
+  if (currentVideoData?.upload_id) {
+    destroyFacecamPlayer();
+    container.className = 'yt-container layout-'+(currentLayout === 'split' ? 'fit' : currentLayout);
+    return;
+  }
   const region = clip?.facecamPreview?.region;
   if (currentLayout === 'split' && ytPlayerCreated && region) {
     loadFacecamPlayer(clip, region);
@@ -925,7 +1022,8 @@ async function downloadClip() {
   const durSec   = activeClip.end - activeClip.start;
   const backend  = getBackend();
   const clipTitle = clipExportTitle(activeClip);
-  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'source')}`;
+  const sourceParam = currentVideoData?.upload_id ? '&upload_id='+encodeURIComponent(currentVideoData.upload_id) : '';
+  const directDlUrl = `${backend}/api/render-clip?url=${encodeURIComponent(videoUrl)}&start=${encodeURIComponent(startSec)}&duration=${encodeURIComponent(durSec)}&layout=${encodeURIComponent(currentLayout || 'split')}&title=${encodeURIComponent(clipTitle)}&subtitle_style=${encodeURIComponent(currentStyle || 'source')}${sourceParam}`;
 
   // 1. Show modal with immediate direct download link ready
   setDlProgress(`🎬 Rendering "${clipTitle}" in 1080p…`, 18, directDlUrl);
@@ -938,11 +1036,12 @@ async function downloadClip() {
   }, 1800);
 
   // 3. Request video stream
+  let renderTimer;
   try {
     const ctrl = new AbortController();
-    const renderTimer = setTimeout(() => ctrl.abort(), 180000); // 3 min timeout
+    renderTimer = setTimeout(() => ctrl.abort(), 1800000);
 
-    const res = await fetch(`${backend}/api/render-clip`, {
+    let res = await fetch(`${backend}/api/exports`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -954,10 +1053,23 @@ async function downloadClip() {
         subtitle_style: currentStyle || 'source',
         subtitles: activeClip.subtitles || [],
         video_subtitles: activeClip.video_subtitles || [],
+        upload_id: currentVideoData?.upload_id,
+        caption_source: activeClip.subtitles_edited ? 'provided' : 'auto',
         stream: true
       }),
       signal: ctrl.signal
     });
+    if (res.status === 202) {
+      let job = await res.json();
+      while (job.state !== 'complete') {
+        if (job.state === 'failed') throw new Error(job.error || 'The export failed.');
+        await new Promise(resolve => setTimeout(resolve,2500));
+        const status = await fetch(`${backend}/api/exports/${job.id}`, {signal:ctrl.signal});
+        if (!status.ok) throw new Error('Could not check the clip export.');
+        job = await status.json();
+      }
+      res = await fetch(`${backend}/api/exports/${job.id}/download`,{signal:ctrl.signal});
+    }
 
     clearTimeout(renderTimer);
     clearInterval(ticker);
@@ -987,11 +1099,11 @@ async function downloadClip() {
 
   } catch (err) {
     clearInterval(ticker);
-    console.warn('[Download] Fetch failed, triggering native browser download:', err);
-    setDlProgress('⬇️ Starting native browser download…', 92, directDlUrl);
-    // Automatic fallback: trigger direct browser GET download
-    window.location.href = directDlUrl;
-    setTimeout(() => hideDlProgress(), 5000);
+    hideDlProgress();
+    showErrModal(err.message || 'Could not download this clip.');
+  } finally {
+    clearTimeout(renderTimer);
+    clearInterval(ticker);
   }
 }
 

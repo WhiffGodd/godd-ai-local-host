@@ -43,6 +43,27 @@
         <input id="urlInput" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" onkeydown="if(event.key==='Enter')analyzeVideo()">
         <button class="btn-paste" onclick="pasteClip()">Paste</button>
       </div>
+      <div class="analysis-options">
+        <label for="analysisMode">Scan footage
+          <select id="analysisMode" onchange="updateAnalysisOptions()">
+            <option value="auto">Automatic</option>
+            <option value="recent">Recent live footage</option>
+            <option value="range">Choose a time range</option>
+          </select>
+        </label>
+        <label id="analysisStartLabel" for="analysisStart" hidden>Start time
+          <input id="analysisStart" type="text" value="0:00" placeholder="1:30:00" inputmode="numeric">
+        </label>
+        <label id="analysisMinutesLabel" for="analysisMinutes" hidden>Scan length
+          <select id="analysisMinutes">
+            <option value="5">5 minutes</option>
+            <option value="10" selected>10 minutes</option>
+            <option value="20">20 minutes</option>
+            <option value="30">30 minutes</option>
+          </select>
+        </label>
+      </div>
+      <p class="analysis-help">Missing captions are transcribed from speech. Long recordings are scanned in sections. Live scans use available replay footage or record the next 3 minutes.</p>
       <button class="btn-analyze" onclick="analyzeVideo()">
         ⚡ Find Viral Clips — It's Free!
       </button>
@@ -73,12 +94,14 @@
       <div class="proc-step" id="ps3"><span class="ps-dot"></span> Scoring virality &amp; emotion</div>
       <div class="proc-step" id="ps4"><span class="ps-dot"></span> Building 9:16 clips with captions</div>
     </div>
-    <p class="proc-note">First request may take 30–60s while Render server wakes up</p>
+    <p class="proc-note">Speech transcription can take several minutes. You can return to this tab while the scan continues.</p>
+    <button id="checkAnalysis" type="button" class="nav-btn" onclick="resumeClipAnalysis()" hidden>Check scan status</button>
   </div>
 </section>
 
 <!-- ═══════════════════ STUDIO ═══════════════════ -->
 <section id="studioSection" style="display:none">
+  <p id="analysisNotice" class="analysis-help" role="status"></p>
 
   <!-- Top bar -->
   <div class="studio-topbar">
@@ -124,6 +147,7 @@
           <!-- Gameplay Player Wrap -->
           <div class="game-video-wrap" id="gameVideoWrap">
             <div id="ytPlayerDiv"></div>
+            <video id="sourcePreview" playsinline preload="metadata" hidden></video>
             <iframe id="fallbackIframe" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display:none; width:100%; height:100%;"></iframe>
           </div>
         </div>

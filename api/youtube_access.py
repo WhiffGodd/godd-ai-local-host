@@ -96,7 +96,8 @@ def extract_youtube_info(url, options=None):
         if failed and now - failed[0] < 60:
             raise RuntimeError(failed[1])
         cached = _INFO_CACHE.get(key)
-        if cached and now - cached[0] < 300:
+        lifetime = 15 if cached and cached[1].get("is_live") else 300
+        if cached and now - cached[0] < lifetime:
             return cached[1]
         opts = dict(options or {})
         # A complete cached response can serve every caller without another
