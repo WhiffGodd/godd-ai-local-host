@@ -40,12 +40,13 @@ uniform vec4 material;
 uniform float highlight;
 uniform float highlight_edge;
 uniform bool machined;
+uniform bool rolling_mark;
 uniform sampler2D shadow_map;
 out vec4 pixel;
 vec4 surface_pixel(vec3 color) {
     float selected = highlight * step(highlight_edge, length(local.xy));
     float brightness = .64 + .36 * max(color.r, max(color.g,color.b));
-    return vec4(mix(color, vec3(.12,.91,.98)*brightness, .44*selected), selected);
+    return vec4(mix(color, vec3(.12,.91,.98)*brightness, .25*selected), selected);
 }
 float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float noise(vec3 p) {
@@ -82,6 +83,12 @@ void main() {
     vec3 N=normalize(n), V=normalize(eye-world), L=normalize(source-world);
     vec3 base=pow(material.rgb,vec3(2.2));
     float metal=material.a;
+    if (rolling_mark) {
+        float width=max(fwidth(local.x),.008);
+        float stripe=1.-smoothstep(.075-width,.075+width,abs(local.x));
+        float dot=1.-smoothstep(.13,.15,length(local.xy-vec2(.43,.32)));
+        base=mix(base,pow(vec3(.95,.50,.10),vec3(2.2)),max(stripe,dot)*.94);
+    }
     if (metal > 1.5 && metal < 3.5) {
         vec3 p=normalize(local);
         float land=noise(p*3.0)*.58 + noise(p*8.5)*.29 + noise(p*25.)*.13;
@@ -348,14 +355,27 @@ class CinematicRenderer:
 
     def _arrays(self, name):
         if name not in self.meshes:
-            buffer = self.ctx.buffer(np.asarray(mesh(name),dtype="f4").tobytes())
-            color = self.ctx.vertex_array(self.shader, [(buffer,"3f 3f","point","normal")])
-            depth = self.ctx.vertex_array(self.depth_shader, [(buffer,"3f 12x","point")])
-            self.meshes[name] = buffer, color, depth
+            self.register_mesh(name,mesh(name))
         return self.meshes[name]
+
+    def register_mesh(self, name, vertices):
+        if name in self.meshes:
+            return
+        buffer = self.ctx.buffer(np.asarray(vertices,dtype="f4").tobytes())
+        color = self.ctx.vertex_array(self.shader, [(buffer,"3f 3f","point","normal")])
+        depth = self.ctx.vertex_array(self.depth_shader, [(buffer,"3f 12x","point")])
+        self.meshes[name] = buffer, color, depth
 
     def frame(self, shot, elapsed, part=None, subtitle=None):
         objects, eye, focus = shot.at(elapsed, part)
+        previous_camera = getattr(shot,"camera_from",None)
+        if previous_camera is not None and elapsed<.8:
+            amount = min(1.,max(0.,elapsed/.8))
+            amount = amount**3*(10+amount*(-15+6*amount))
+            old_eye,old_focus = previous_camera
+            eye = np.asarray(old_eye)+(np.asarray(eye)-old_eye)*amount
+            focus = np.asarray(old_focus)+(np.asarray(focus)-old_focus)*amount
+        self.last_camera = (np.asarray(eye).copy(),np.asarray(focus).copy())
         space = shot.subject == "moon"
         light = (-3.9,4.8,5.4) if not space else (-5.,1.7,2.0)
         light_view = _perspective(1.,1.05) @ _look_at(light,(0,0,0))
@@ -387,6 +407,7 @@ class CinematicRenderer:
         for name, material, model, group in objects:
             self.shader["material"].value = material
             self.shader["machined"].value = name.startswith(("gear", "ratchet", "drilled", "recessed")) or name in ("ring", "cylinder", "bolt")
+            self.shader["rolling_mark"].value = name == "bearing-ball"
             self.shader["highlight"].value = float(group in groups and (not edge or name.startswith("gear")))
             _matrix(self.shader["model"], model)
             self._arrays(name)[1].render()
@@ -396,6 +417,11 @@ class CinematicRenderer:
         if part:
             layer, xy = _part_badge(part.label,self.size)
             frame.paste(layer,xy,layer)
+        if shot.subject == "bearing":
+            label = ("PARTS SEPARATED FOR INSPECTION" if shot.view == "exploded" else
+                     "WORKING CUTAWAY" if shot.view in ("cutaway","cage","rolling-balls") else "WORKING BALL BEARING")
+            draw = ImageDraw.Draw(frame)
+            draw.text((self.size[0]*.07,self.size[1]*.075),label,font=_font(round(self.size[0]*.030)),fill="#a9c1d0")
         caption = subtitle or shot.caption
         if caption:
             layer, xy = caption
@@ -404,13 +430,14 @@ class CinematicRenderer:
 
 
 class Shot:
-    def __init__(self, subject, view, size, caption="", opening=False, offset=0, action_start=None, duration=3.):
+    def __init__(self, subject, view, size, caption="", opening=False, offset=0, action_start=None, duration=3., previous_view=None):
         self.subject = subject
         self.geometry = SUBJECTS[subject]()
         self.view = view
         self.offset = offset
         self.action_start = offset if action_start is None else action_start
         self.duration = duration
+        self.previous_view = previous_view
         self.caption = caption_layer(caption,size,opening) if caption else None
         if subject == "toaster":
             self.floor = -.955
@@ -418,6 +445,10 @@ class Shot:
     def at(self, t, part=None):
         if self.subject == "toaster":
             return _toaster_shot(self.geometry.parts, self.view, t / max(self.duration, .01))
+        if self.subject == "bearing":
+            from bearing_mechanism import bearing_shot
+            return bearing_shot(self.geometry.parts,self.view,t+self.offset,
+                                t/max(self.duration,.01),part,self.previous_view,t)
         time = t + self.offset
         angle = time * 1.44
         track = sin(t*.57)
@@ -502,13 +533,6 @@ class Shot:
                      ((-.77,-.29,0),(-1.57+track*.39,1.21,2.71-track*.20)),
                      ((.62,-.10,0),(1.83+track*.38,1.37,3.01-track*.20)),
                      ((-.10,-.64,.07),(-.39+track*.35,.48,3.26-track*.21))]
-        elif self.subject == "bearing":
-            transforms = {"inner":_between_pivots(0,.16,angle), "cage":_between_pivots(0,.16,angle*.36)}
-            transforms["balls"] = transforms["cage"]
-            shots = [((0,.18,0),(1.80+track*.51,1.52,4.66-track*.29)),
-                     ((0,.19,.14),(-1.42+track*.39,1.11,3.10-track*.21)),
-                     ((.50,.51,.15),(1.68+track*.32,1.45,2.33-track*.20)),
-                     ((0,.33,0),(-1.94+track*.43,1.21,3.75-track*.23))]
         elif self.subject == "disc_brake":
             braking = self.view in ("caliper-and-pads", "braking")
             brake_time = time - self.action_start
@@ -547,8 +571,6 @@ class Shot:
             transform = transforms.get(group)
             objects.append((name, material, model if transform is None else transform @ model, group))
         view = self.view
-        if part and view not in ("wide", "coasting", "braking", "engagement", "cutaway"):
-            view = part.view
         focus, eye = shots[VIEWS[self.subject].index(view)]
         return objects, eye, np.asarray(focus)
 

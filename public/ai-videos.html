@@ -38,13 +38,8 @@
             <button type="button" data-topic="Explain how a bicycle freewheel uses pawls and a ratchet ring to drive the wheel while pedaling and let it spin when coasting. Show the inside in cutaway.">Freewheel cutaway</button>
             <button type="button" data-topic="Explain why a snowman uses the biggest snowball as its base. Show three stacked snowballs and a carrot nose.">Snowman stability</button>
           </div>
-          <div class="voice-setting">
-            <label for="visualStyle">Animation style</label>
-            <select id="visualStyle">
-              <option value="motion">Reel motion — realistic objects and animated headlines</option>
-              <option value="auto">3D library and animated cutaways</option>
-            </select>
-          </div>
+          <input id="visualStyle" type="hidden" value="auto">
+          <p class="status">Working 3D animation with moving parts, cutaway views, and spoken explanations.</p>
           <div class="voice-setting">
             <label for="voice">Narration style</label>
             <select id="voice">
@@ -73,14 +68,14 @@
           <div class="library-heading">
             <h2 id="libraryHeading">3D scene library</h2>
           </div>
-          <p id="visualMode" class="status">Custom topics use animated cutaways.</p>
+          <p id="visualMode" class="status">Matching topics use working 3D models with moving parts.</p>
           <div class="scene-actions">
             <button id="autoTemplate" class="secondary auto-template" type="button" aria-pressed="true">Auto-select from prompt</button>
-            <button id="buildScene" class="secondary" type="button" aria-pressed="false">Use AI illustrations</button>
+            <button id="buildScene" class="secondary" type="button" aria-pressed="false" hidden>Use AI illustrations</button>
             <button id="useScene" class="secondary" type="button" hidden aria-pressed="false">Use previewed scene</button>
           </div>
           <p id="sceneSelection" class="status" role="status"></p>
-          <div id="templateGrid" class="template-grid" aria-label="Preview a 3D scene"></div>
+          <div id="templateGrid" class="template-grid" aria-label="Select and preview a working 3D scene"></div>
         </section>
       </div>
       <aside class="output" aria-labelledby="previewHeading">

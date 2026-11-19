@@ -33,6 +33,7 @@ function save() {
     generation: page.generation, upload: page.upload, sceneOverride: page.selected?.id,
     prompt: $("prompt").value, voice: $("voice").value, maxSeconds: $("maxSeconds").value,
     visualStyle: $("visualStyle").value,
+    styleVersion: 3,
     draft: $("video").hidden ? null :
       Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
   }));
@@ -102,7 +103,10 @@ function drawLibrary() {
     const name = document.createElement("span");
     name.textContent = template.name;
     button.append(image, name);
-    button.addEventListener("click", () => previewScene(template));
+    button.addEventListener("click", () => {
+      chooseTemplate(template);
+      previewScene(template);
+    });
     return button;
   }));
 }
@@ -311,7 +315,10 @@ $("title").addEventListener("input", save);
 $("video").addEventListener("error", () => {
   if (!$("video").hidden) message("previewStatus", "The preview could not load. Try Download MP4 or refresh the studio.", true);
 });
-$("autoTemplate").addEventListener("click", () => chooseTemplate(null));
+$("autoTemplate").addEventListener("click", () => {
+  $("visualStyle").value = "auto";
+  chooseTemplate(null);
+});
 $("buildScene").addEventListener("click", () => chooseTemplate(promptScene));
 $("visualStyle").addEventListener("change", () => {
   if ($("visualStyle").value === "motion") chooseTemplate(null);
@@ -324,6 +331,7 @@ for (const button of document.querySelectorAll("[data-topic]")) {
   button.addEventListener("click", () => {
     $("prompt").value = button.dataset.topic;
     $("prompt").focus();
+    $("visualStyle").value = "auto";
     chooseTemplate(null);
   });
 }
@@ -388,9 +396,7 @@ $("publishForm").addEventListener("submit", async event => {
 });
 
 function updateVisualMode(settings) {
-  $("visualMode").textContent = settings.custom_visuals === false ? settings.custom_visuals_setup :
-    $("visualStyle").value === "motion" ? "Reel motion creates and animates realistic objects for your prompt." :
-      "Custom topics use animated cutaways.";
+  $("visualMode").textContent = "Matching topics use working 3D models. Other topics use AI-planned 3D cutaways. Select a scene to use and preview it.";
   $("buildScene").disabled = settings.custom_visuals === false;
   $("buildScene").title = settings.custom_visuals_setup || "";
 }
@@ -398,12 +404,20 @@ function updateVisualMode(settings) {
 async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
-  $("visualStyle").value = saved.visualStyle === "auto" ? "auto" : "motion";
+  $("visualStyle").value = "auto";
   if (["60", "90"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
   if (Array.from($("voice").options).some(option => option.value === saved.voice)) $("voice").value = saved.voice;
   page.generation = saved.generation;
   page.upload = saved.upload;
   const url = new URL(location.href);
+  const requestedVideo = url.searchParams.get("video");
+  if (requestedVideo && /^[A-Za-z0-9_-]{20,80}$/.test(requestedVideo)) {
+    page.generation = requestedVideo;
+    page.upload = null;
+    saved.draft = null;
+    url.searchParams.delete("video");
+    history.replaceState(null, "", url);
+  }
   if (url.searchParams.has("youtube")) {
     url.searchParams.delete("youtube");
     history.replaceState(null, "", url);
@@ -415,8 +429,7 @@ async function initialize() {
     page.provider = data;
     updateVisualMode(data);
     drawLibrary();
-    page.selected = $("visualStyle").value === "motion" ? null : saved.sceneOverride === promptScene.id ? promptScene :
-      page.templates.find(template => template.id === saved.sceneOverride) || null;
+    page.selected = page.templates.find(template => template.id === saved.sceneOverride) || null;
     updateTemplateSelection();
     previewScene(page.selected === promptScene ? null : page.selected);
     message("generationStatus", data.setup || "");

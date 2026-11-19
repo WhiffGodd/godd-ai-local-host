@@ -65,7 +65,7 @@ PARTS = {
         Part("Inner race", ("inner",), "inner-race", r"inner (?:race|ring)"),
         Part("Outer race", ("outer",), "outer-race", r"outer (?:race|ring)"),
         Part("Rolling balls", ("balls",), "rolling-balls", r"rolling (?:balls?|elements?)|(?:steel )?balls?"),
-        Part("Bearing cage", ("cage",), "rolling-balls", r"(?:bearing )?cage|retainer"),
+        Part("Bearing cage", ("cage",), "cage", r"(?:bearing )?cage|retainer"),
     ),
     "disc_brake": (
         Part("Brake pads", ("pad-1", "pad1"), "caliper-and-pads", r"(?:brake )?pads?"),

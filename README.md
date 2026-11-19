@@ -206,7 +206,29 @@ This is an alternative source path, not a claim that YouTube's IP block is remov
 ## AI Video Studio
 
 Open **AI Videos** from the main navigation. Describe what to explain and click
-**Generate video**. **Reel motion** finds photographic objects or creates images locally,
+**Generate video**. The default **Working mechanisms** mode selects a matching 3D model.
+Clicking a library card selects that model and opens its preview in one step.
+The site uses working 3D models and animated 3D cutaways throughout. Custom
+cutaways use solid part profiles with bevelled edges, tubes and helical springs,
+rendered with the same lighting, materials and shadows as the scene library.
+Part names and subtle surface highlights identify the narration's subject without
+pointer lines. Camera changes ease between scenes and do not jump when a new
+part is named within the same shot.
+Known mechanism prompts keep their working model even if a browser saved the old
+photo-motion setting. The ball bearing has grooved races, a pocketed cage,
+individually spinning balls, rotating witness marks, and cutaway and exploded
+inspection views. Its outer race stays fixed while the inner race drives rolling
+motion. Camera and inspection transitions preserve the running mechanism's time.
+Prompts about bearing-ball spacing use a reviewed sequence tied to these parts,
+including the distinction between ball spin, ball-centre travel, and cage motion.
+Questions about other bearing topics retain the AI storyboard workflow.
+When `qwen3.5:9b` is already installed, modeled topics use it for storyboard
+writing and release it before rendering. Otherwise they use the configured
+`AI_VIDEO_OLLAMA_MODEL`. Set `AI_VIDEO_OLLAMA_STORYBOARD_MODEL` to choose another
+installed storyboard model. Narration validation rejects repeated explanations
+and a known ambiguity between bearing-ball spin and the cage's orbital motion.
+
+The legacy photo API mode finds photographic objects or creates images locally,
 then animates them independently over colored backgrounds with changing headlines,
 smooth entrances and exits, and timed subtitles. It reuses the same objects across
 steps so their appearance stays consistent. AI video exports run at 30 frames per second.
@@ -219,15 +241,14 @@ attribution-only license metadata. Source and license credits, including the
 background-removal and animation changes, are added to the video's description.
 Heat, airflow, light, force and electricity use animated overlays.
 
-Choose **3D library and animated cutaways** to use modeled mechanisms.
+Choose **Working mechanisms** to use modeled mechanisms.
 The AI picks a matching 3D subject and chooses the shot for
 each part of your explanation. For topics outside the library, the AI plans a
 cutaway with labeled parts and moves them through each stage of the explanation.
-The generated cutaway is a schematic, so check the arrangement and motion before
-publishing an educational video. Click a library card to preview it, then click
-**Use** and the scene name to use a matching 3D model.
-**Use AI illustrations** selects the image workflow even when the library has a
-match. The Pop-up Toaster scene follows a full cycle in 3D, including loading,
+The generated 3D cutaway is an AI-designed illustration, so check the arrangement and motion before
+publishing an educational video. Click a library card to select and preview its model.
+Image workflows remain available to legacy API clients. The studio's normal
+generation flow uses animated geometry. The Pop-up Toaster scene follows a full cycle in 3D, including loading,
 heating, latch release, and the spring pushing the toast back up. The library
 also includes other mechanisms, lunar phases,
 prism refraction, sound and octaves, and the water cycle. Mechanism scenes can

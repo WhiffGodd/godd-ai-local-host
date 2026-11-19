@@ -50,6 +50,9 @@ def _surface(point, rings, sides):
 
 
 def mesh(name):
+    if name.startswith("bearing-"):
+        from bearing_mechanism import bearing_mesh
+        return bearing_mesh(name)
     if name in ("bread-crumb", "bread-crust"):
         outline = [(-.40,-.50), (.40,-.50), (.46,-.44), (.46,.19), (.50,.23)]
         outline += [(.50*cos(pi*i/20), .23+.27*sin(pi*i/20)) for i in range(1,21)]
@@ -432,19 +435,8 @@ def hydraulic_lift():
 
 
 def bearing():
-    s = Subject()
-    s.place("beveled-box", STEEL, (0,-.93,-.30), (2.45,.21,1.20))
-    for z in (-.16,.10):
-        s.place("ring", STEEL, (0,.16,z), (1.04,1.04,.082), "outer")
-        s.place("ring", CHROME, (0,.16,z+.034), (.52,.52,.087), "inner")
-    s.place("ring", GOLD, (0,.16,-.08), (.79,.79,.065), "cage")
-    for index in range(9):
-        angle = tau*index/9
-        x, y = .65*cos(angle), .16+.65*sin(angle)
-        s.place("sphere", CHROME, (x,y,.07), (.143,.143,.143), "balls")
-        s.place("bolt", GOLD, (.43*cos(angle),.16+.43*sin(angle),.177), (.033,.033,.055), "inner")
-        s.place("bolt", STEEL, (.93*cos(angle),.16+.93*sin(angle),.164), (.053,.053,.056))
-    return s
+    from bearing_mechanism import bearing_geometry
+    return bearing_geometry()
 
 
 def disc_brake():

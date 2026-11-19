@@ -13,7 +13,7 @@ VIEWS = {
     "piston": ("wide", "piston-travel", "connecting-rod", "crankshaft"),
     "turbine": ("wide", "rotor-blades", "hub-and-shaft", "tower-and-nacelle"),
     "hydraulics": ("wide", "input-piston", "output-piston", "fluid-pipe"),
-    "bearing": ("wide", "inner-race", "rolling-balls", "outer-race"),
+    "bearing": ("wide", "inner-race", "rolling-balls", "outer-race", "cutaway", "cage", "exploded"),
     "disc_brake": ("wide", "spinning-rotor", "caliper-and-pads", "braking"),
     "freewheel": ("wide", "cutaway", "engagement", "coasting"),
     "toaster": ("wide", "loading", "latch", "heating", "browning", "release", "pop-up"),
@@ -46,7 +46,7 @@ TEMPLATES = {template.id: template for template in (
     Template("hydraulic-lift", "Hydraulic Lift", "Mechanisms", "hydraulics",
              "A small input piston sending pressure through fluid to lift a load on a larger output piston"),
     Template("ball-bearing", "Ball Bearing", "Mechanisms", "bearing",
-             "A ball bearing with an inner race, rolling balls, a cage, and a fixed outer race"),
+             "A working ball bearing with grooved races, individually spinning balls, a pocketed cage, and cutaway and exploded inspection views"),
     Template("disc-brake", "Disc Brake", "Mechanisms", "disc_brake",
              "A disc brake with a spinning rotor and caliper pads that clamp it and slow it down"),
     Template("freewheel-cutaway", "Bicycle Freewheel Cutaway", "Mechanisms", "freewheel",
@@ -63,8 +63,8 @@ TEMPLATES = {template.id: template for template in (
 
 GENERATED_TEMPLATE = Template("generated", "AI-illustrated scenes", "Custom", "generated",
                               "Detailed images generated for each shot in the storyboard")
-MECHANISM_TEMPLATE = Template("mechanism", "Animated cutaway", "Custom", "mechanism",
-                              "A step-by-step diagram of the parts and how they work together")
+MECHANISM_TEMPLATE = Template("mechanism", "Animated 3D cutaway", "Custom", "mechanism",
+                              "Solid part profiles, tubes and springs animated step by step with 3D lighting and materials")
 MOTION_TEMPLATE = Template("motion", "Reel motion", "Custom", "motion",
                           "Realistic objects, animated headlines and coordinated scene motion")
 

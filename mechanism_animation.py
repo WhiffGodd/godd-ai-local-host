@@ -175,7 +175,7 @@ def parse_mechanism_rows(data, beats):
     return read_mechanism({"parts":parts,"actions":actions},beats)
 
 
-def _transform(component, events, beat, fraction):
+def motion_state(events, beat, fraction):
     dx = dy = turn = heat = flow = 0.
     sx = sy = 1.
     for action in events:
@@ -194,6 +194,11 @@ def _transform(component, events, beat, fraction):
             heat += (x-heat)*eased
         elif 0. < p < 1.:
             flow = p if x >= 0 else -p
+    return dx,dy,turn,sx,sy,heat,flow
+
+
+def _transform(component, events, beat, fraction):
+    dx,dy,turn,sx,sy,heat,flow = motion_state(events,beat,fraction)
     px, py = component.pivot
     c, s = cos(turn), sin(turn)
     points = []
@@ -324,10 +329,6 @@ class MechanismShot:
                     target = tuple(sum(axis)/len(points) for axis in zip(*points))
         if target:
             layer, (x,y) = _part_badge(active,self.size)
-            anchor = (x+layer.width//2,y+layer.height)
-            draw.line((anchor,(anchor[0],anchor[1]+radius*2),target),fill="#75f3ff",width=radius//2+1)
-            tx,ty = target
-            draw.ellipse((tx-radius,ty-radius,tx+radius,ty+radius),fill="#75f3ff")
             frame.paste(layer,(x,y),layer)
         if subtitle:
             frame.paste(subtitle[0],subtitle[1],subtitle[0])
