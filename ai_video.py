@@ -31,6 +31,7 @@ from explainer_photos import find_photo
 from bearing_mechanism import spacing_storyboard
 from mechanism_3d import Mechanism3D, Mechanism3DShot
 from narration_budget import compact_sentences, word_count
+from sliding_latch import latch_mechanism, latch_storyboard, matches_latch
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
@@ -43,7 +44,7 @@ MAX_PROMPT = 1200
 TARGET_SECONDS = 55
 MIN_SECONDS = 50
 DEFAULT_MAX_SECONDS = 60
-MAX_SECONDS = 90
+MAX_SECONDS = 120
 VOICE_STYLES = {
     "expressive": ("en_US-amy-medium", 0.91, 0.96, 0.97),
     "energetic": ("en_US-amy-medium", 0.84, 0.91, 0.87),
@@ -215,8 +216,8 @@ def validate_generation(payload):
     if not isinstance(voice, str) or voice not in VOICE_STYLES:
         raise ValueError("Choose a narration style.")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
-    if type(max_seconds) is not int or max_seconds not in (DEFAULT_MAX_SECONDS, MAX_SECONDS):
-        raise ValueError("Choose a 60- or 90-second maximum.")
+    if type(max_seconds) is not int or max_seconds not in (DEFAULT_MAX_SECONDS,90,MAX_SECONDS):
+        raise ValueError("Choose a 60-, 90-, or 120-second maximum.")
     visual_style = payload.get("visual_style", "auto")
     if visual_style not in ("auto", "motion"):
         raise ValueError("Choose Reel motion or 3D cutaway.")
@@ -344,28 +345,59 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
                          if not part.get("thought"))
     else:
         motion_story = "hook_objects" in schema["properties"]
+        layout = all(name in schema["properties"] for name in ("parts","actions"))
         request_body = {
-            "model": mechanism_model or OLLAMA_MODEL, "stream": False, "think": False, "format": schema,
+            "model": mechanism_model or OLLAMA_MODEL, "stream": layout, "think": False, "format": schema,
             "keep_alive": 0 if mechanism_model or any(name in schema["properties"] for name in
                                   ("visual_subject","assets","hook_objects")) else "5m",
-            "options": {"temperature": 0.3, "num_predict": 4800 if motion_story else 3200 if long_video else 2400,
-                        "num_ctx": 8192 if motion_story else 6144 if long_video or not single_match else 4096},
+            "options": {"temperature": 0.15 if layout else 0.3,
+                        "num_predict": 1800 if layout else 4800 if motion_story else 3200 if long_video else 2400,
+                        "num_ctx": 4096 if layout else 8192 if motion_story else 6144 if long_video or not single_match else 4096},
             "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
         }
+        started = time.monotonic()
+        def send():
+            return requests.post(f"{OLLAMA_URL}/api/chat",json=request_body,
+                                 timeout=(4,90 if layout else 300),**({"stream":True} if layout else {}))
         try:
-            response = requests.post(f"{OLLAMA_URL}/api/chat", json=request_body, timeout=(4, 300))
+            response = send()
         except requests.ConnectTimeout:
             raise
         except requests.ConnectionError:
             start_local_ollama()
-            response = requests.post(f"{OLLAMA_URL}/api/chat", json=request_body, timeout=(4, 300))
-        response.raise_for_status()
-        result = response.json()["message"]["content"]
+            response = send()
+        if layout:
+            chunks = []
+            complete = False
+            try:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if time.monotonic()-started>180:
+                        raise requests.ReadTimeout("Animation planning exceeded its time budget")
+                    if not line:
+                        continue
+                    event = json.loads(line)
+                    if event.get("error"):
+                        raise requests.HTTPError("The local model stopped while generating the layout",response=response)
+                    chunks.append(event.get("message",{}).get("content",""))
+                    if event.get("done"):
+                        if event.get("done_reason")=="length":
+                            raise ValueError("The part layout exceeded the response budget; use more compact rows")
+                        complete = True
+                        break
+                if not complete:
+                    raise requests.ConnectionError("The layout stream ended before completion")
+                result = "".join(chunks)
+            finally:
+                response.close()
+        else:
+            response.raise_for_status()
+            result = response.json()["message"]["content"]
     return result
 
 
 def plan_video(prompt, template, voice_style="expressive", target_words=150, max_seconds=DEFAULT_MAX_SECONDS):
-    long_video = max_seconds == MAX_SECONDS
+    long_video = max_seconds > DEFAULT_MAX_SECONDS
     target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
     max_scenes = 8 if long_video else 6
     properties = {**_SCHEMA["properties"],
@@ -374,6 +406,9 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     choices = ([template] if template in (GENERATED_TEMPLATE, MECHANISM_TEMPLATE, MOTION_TEMPLATE) or template in candidates
                else candidates or [MECHANISM_TEMPLATE])
     toaster = TEMPLATES["pop-up-toaster"]
+    if matches_latch(prompt) and choices in ([TEMPLATES["spring-loaded-latch"]],[MECHANISM_TEMPLATE]):
+        template = TEMPLATES["spring-loaded-latch"]
+        return template, *_validate_plan(latch_storyboard(),template.diagram,max_scenes)
     if choices == [toaster]:
         # The script and the cutaway need the same ordered steps for one continuous cycle.
         return toaster, *_validate_plan(_TOASTER_PLAN, toaster.diagram)
@@ -523,12 +558,14 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         raise ExplainerError("The AI returned an incomplete storyboard. Try a shorter, more specific prompt.") from None
 
 
-def _plan_mechanism(prompt, scenes):
+def _plan_mechanism(prompt, scenes, report_progress=None):
+    if matches_latch(prompt):
+        return latch_mechanism(len(scenes))
     key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
     mechanism_model = None
     if not key:
         installed = _ollama_models() or ()
-        preferred = os.environ.get("AI_VIDEO_OLLAMA_MECHANISM_MODEL", OLLAMA_MECHANISM_MODEL)
+        preferred = os.environ.get("AI_VIDEO_OLLAMA_MECHANISM_MODEL", OLLAMA_MODEL)
         mechanism_model = preferred if preferred in installed else OLLAMA_MODEL
     script = "\n".join(f"{index}. {scene['narration']}" for index, scene in enumerate(scenes) if index)
     brief = f"Topic: {prompt}\nNarration beats:\n{script}"
@@ -537,8 +574,21 @@ def _plan_mechanism(prompt, scenes):
     try:
         for attempt in range(2):
             try:
-                raw = _request_storyboard(brief, instructions, schema, key, True, True, mechanism_model)
+                if attempt and report_progress:
+                    report_progress("mechanism_retry")
+                candidate = mechanism_model
+                if attempt and not key:
+                    alternate = OLLAMA_MODEL if candidate!=OLLAMA_MODEL else OLLAMA_MECHANISM_MODEL
+                    if alternate in installed:
+                        candidate = alternate
+                raw = _request_storyboard(brief, instructions, schema, key, False, True, candidate)
                 return parse_mechanism_rows(json.loads(raw), len(scenes))
+            except requests.RequestException as error:
+                status = getattr(getattr(error,"response",None),"status_code",None)
+                print(f"[AI layout] Attempt {attempt+1}: {type(error).__name__}, HTTP {status}",flush=True)
+                if attempt:
+                    raise
+                instructions += " Use a compact layout and only the necessary functional parts. Return the requested JSON only."
             except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
                 if attempt:
                     raise
@@ -547,7 +597,7 @@ def _plan_mechanism(prompt, scenes):
                 instructions += (" Use simple geometry and exact part names in every action. "
                                  "Check that the geometry and motion fit the board and cover at least three distinct beats.")
     except requests.RequestException:
-        raise ExplainerError("The AI model could not finish planning the animation. Try the 1-minute option.") from None
+        raise ExplainerError("The local AI did not complete the part layout after two attempts. Check the AI connection and retry.") from None
     except (ValueError, KeyError, TypeError, AttributeError, IndexError):
         raise ExplainerError("The AI could not lay out a working mechanism. Try naming the parts or focusing on one cycle.") from None
 
@@ -823,7 +873,7 @@ def render_explainer(payload, report_progress=None):
         payload["template"], TEMPLATES.get(payload["template"]))
     style = payload.get("voice", "expressive")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
-    long_video = max_seconds == MAX_SECONDS
+    long_video = max_seconds > DEFAULT_MAX_SECONDS
     target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
     minimum = MIN_SECONDS if not long_video else 75
     report("storyboard")
@@ -846,7 +896,7 @@ def render_explainer(payload, report_progress=None):
     else:
         template, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
     custom = template == GENERATED_TEMPLATE
-    animated = template == MECHANISM_TEMPLATE
+    animated = template.diagram == MECHANISM_TEMPLATE.diagram
     reviewed_bearing = template.diagram == "bearing" and bool(spacing_storyboard(payload["prompt"],long_video))
     image_engine = LocalVisualEngine.configured() if custom or reel_motion else None
     if (custom or reel_motion) and image_engine is None:
@@ -942,7 +992,7 @@ def render_explainer(payload, report_progress=None):
                 description += "\n\nPhoto credits\n"+"\n\n".join(dict.fromkeys(photo_credits))
         if animated:
             report("mechanism")
-            mechanism = _plan_mechanism(payload["prompt"], scenes)
+            mechanism = _plan_mechanism(payload["prompt"], scenes,report)
             try:
                 mechanism_model = Mechanism3D(mechanism)
             except ValueError as error:

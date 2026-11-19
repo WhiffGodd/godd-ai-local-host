@@ -222,6 +222,12 @@ motion. Camera and inspection transitions preserve the running mechanism's time.
 Prompts about bearing-ball spacing use a reviewed sequence tied to these parts,
 including the distinction between ball spin, ball-centre travel, and cage motion.
 Questions about other bearing topics retain the AI storyboard workflow.
+The Spring-Loaded Sliding Latch also has a reviewed five-part layout and a
+complete retract-and-return sequence. Its narration and geometry do not require
+AI planning. The bolt, handle, and spring endpoint remain connected throughout.
+Other custom layouts try the smaller configured local model first, then a
+bounded alternative attempt. Layout responses stream with a separate planning
+time budget, independently of the maximum video length.
 When `qwen3.5:9b` is already installed, modeled topics use it for storyboard
 writing and release it before rendering. Otherwise they use the configured
 `AI_VIDEO_OLLAMA_MODEL`. Set `AI_VIDEO_OLLAMA_STORYBOARD_MODEL` to choose another
@@ -254,7 +260,7 @@ also includes other mechanisms, lunar phases,
 prism refraction, sound and octaves, and the water cycle. Mechanism scenes can
 expose internal parts in cutaway. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
-renders a narrated 720 × 1280 MP4 with a 60- or 90-second maximum. Follow the
+renders a narrated 720 × 1280 MP4 with a 60-, 90-, or 120-second maximum. Follow the
 preparation stages and watch the finished video in the preview. Pick Friendly,
 Energetic, or Documentary to change the delivery. Generated videos are temporary,
 so download a copy before closing the studio.

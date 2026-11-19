@@ -175,6 +175,7 @@ function showGenerationProgress(job) {
     storyboard: "Writing the storyboard…",
     motion: "Planning the moving objects and scene transitions…",
     mechanism: "Designing moving parts and mapping the steps…",
+    mechanism_retry: "Retrying the animation layout…",
     visuals: "Preparing objects and visual effects…",
     revising: "Fitting the complete narration to your time limit…",
     narration: "Generating the voice-over…",
@@ -214,7 +215,7 @@ async function watchGeneration(draft) {
       page.generation = null;
       save();
     }
-    if (error.finished && /Ollama|Gemini/.test(error.message)) $("checkModel").hidden = false;
+    if (error.finished && /Ollama|Gemini|local AI|AI connection/.test(error.message)) $("checkModel").hidden = false;
     $("checkGeneration").hidden = !page.generation;
     message("generationStatus", page.generation ? error.message + " Use Check video status to reconnect." : error.message, true);
     message("previewStatus", page.generation ? "Waiting for a status update." : "No video is available to preview.");
@@ -405,7 +406,7 @@ async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
   $("visualStyle").value = "auto";
-  if (["60", "90"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
+  if (["60", "90", "120"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
   if (Array.from($("voice").options).some(option => option.value === saved.voice)) $("voice").value = saved.voice;
   page.generation = saved.generation;
   page.upload = saved.upload;

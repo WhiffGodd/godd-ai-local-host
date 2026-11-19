@@ -21,7 +21,7 @@
   <main class="wrap">
     <div class="intro">
       <h1>AI Video Studio</h1>
-      <p>Turn a prompt into a narrated explainer up to 1 minute 30 seconds long.</p>
+      <p>Turn a prompt into a narrated explainer up to 2 minutes long.</p>
     </div>
     <div class="workbench">
       <div class="composer">
@@ -29,6 +29,7 @@
           <label for="prompt">What should the video explain?</label>
           <textarea id="prompt" rows="4" maxlength="1200" required placeholder="Explain how a ballpoint pen extends and retracts its tip. Show each moving part in order."></textarea>
           <div class="examples" aria-label="Example prompts">
+            <button type="button" data-topic="Explain a spring-loaded sliding latch in one fixed side cutaway. Show the fixed housing and strike, the sliding bolt and attached handle, and the return spring through extended, partly retracted, fully retracted, partly returned, and fully extended stages.">Sliding latch</button>
             <button type="button" data-topic="Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog.">Bicycle pedals</button>
             <button type="button" data-topic="Explain why the Moon has phases and how the Sun, Earth and Moon line up.">Moon phases</button>
             <button type="button" data-topic="Explain how a fixed pulley lets you lift a weight by pulling down.">Fixed pulley</button>
@@ -53,6 +54,7 @@
             <select id="maxSeconds">
               <option value="90">1 minute 30 seconds</option>
               <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
             </select>
           </div>
           <div class="generate-actions">

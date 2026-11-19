@@ -53,6 +53,8 @@ TEMPLATES = {template.id: template for template in (
              "A hub cover moves aside to show pawls engaging the ratchet under pedaling and clicking past the moving ratchet when coasting"),
     Template("pop-up-toaster", "Pop-up Toaster", "Mechanisms", "toaster",
              "Two slices of bread, the lever and carriage, a compressed spring, glowing heating wires, and the toast popping up"),
+    Template("spring-loaded-latch", "Spring-Loaded Sliding Latch", "Mechanisms", "mechanism",
+             "A reviewed five-part sliding latch: fixed housing and strike, connected bolt and handle, and a compression return spring"),
     Template("light-prism", "Light Through a Prism", "Science", "prism",
              "An incoming beam and the colors that leave a glass prism at different angles"),
     Template("sound-octave", "Sound and Octaves", "Science", "sound",
@@ -73,6 +75,7 @@ def matching_subjects(prompt):
     if re.search(r"\b(?:freewheels?|freehubs?|(?:bicycle|bike)\b.*\bpawls?|bicycle ratchets?)\b", prompt, re.I):
         return [TEMPLATES["freewheel-cutaway"]]
     terms = {
+        "spring-loaded-latch": r"\b(?:spring[- ]loaded (?:sliding )?latch|sliding (?:latch|bolt))\b",
         "bicycle-drivetrain": r"\b(?:bicycles?|bikes?|cycles?)\b.*\b(?:pedal\w*|cranks?|chain|chainrings?|sprockets?|coast\w*)\b|\b(?:pedal\w*|cranks?|chainrings?)\b.*\b(?:bicycles?|bikes?)\b|\b(?:freewheels?|bicycle drivetrains?)\b",
         "gear-train": r"\b(?:meshing gears?|gear trains?|gear ratios?|spur gears?|touching gears|gears? mesh)\b",
         "pulley-system": r"\bpulleys?\b",
