@@ -176,7 +176,7 @@ function showGenerationProgress(job) {
     motion: "Planning the moving objects and scene transitions…",
     mechanism: "Designing moving parts and mapping the steps…",
     visuals: "Preparing objects and visual effects…",
-    revising: "Adjusting the script to fit your chosen length…",
+    revising: "Fitting the complete narration to your time limit…",
     narration: "Generating the voice-over…",
     rendering: "Rendering the animation…",
     finalizing: "Finishing the MP4…",

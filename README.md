@@ -255,10 +255,15 @@ prism refraction, sound and octaves, and the water cycle. Mechanism scenes can
 expose internal parts in cutaway. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
 renders a narrated 720 × 1280 MP4 with a 60- or 90-second maximum. Follow the
-preparation stages and watch the finished video in the preview. Pick Friendly, Energetic, or Documentary
-to change the delivery. Generated
-videos are temporary, so download a copy before closing the studio.
+preparation stages and watch the finished video in the preview. Pick Friendly,
+Energetic, or Documentary to change the delivery. Generated videos are temporary,
+so download a copy before closing the studio.
 
+Narration is budgeted before recording. If a take runs long, the studio uses
+its measured speaking rate to shorten complete sentences while preserving every
+scene and the ending, then regenerates the voice and subtitle timings. The
+90-second setting accepts a shorter complete explanation without expanding it
+to fill the maximum. Only modest final tempo adjustments are used.
 The reusable 3D scene modules and renderer are available under the [MIT license](LICENSE-3D).
 
 For Reel motion and AI illustrations, extract a recent [stable-diffusion.cpp release](https://github.com/leejet/stable-diffusion.cpp/releases)

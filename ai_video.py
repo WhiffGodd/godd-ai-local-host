@@ -30,6 +30,7 @@ from motion_graphics import (
 from explainer_photos import find_photo
 from bearing_mechanism import spacing_storyboard
 from mechanism_3d import Mechanism3D, Mechanism3DShot
+from narration_budget import compact_sentences, word_count
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
@@ -281,7 +282,9 @@ def _validate_plan(plan, subject, max_scenes=6):
         view = scene["view"]
         if view not in VIEWS[subject]:
             raise ValueError("The view does not belong to the selected 3D subject")
-        narration = text(scene["narration"], 360)
+        if len(scene["narration"])>2000:
+            raise ValueError("A narration scene is too long")
+        narration = text(scene["narration"], 2000)
         if len(narration.split()) < 5:
             raise ValueError("Missing narration")
         caption = text(scene["caption"], 96)
@@ -387,7 +390,8 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     words_per_scene = round((target_words - 8) / (7 if long_video else 5))
     narration_schema = {**_TEXT, "description": f"About {words_per_scene} spoken words with concrete detail."}
     if not key:
-        narration_schema.update(minLength=min(260, round(words_per_scene * 5.3)), maxLength=360)
+        narration_schema.update(minLength=max(35,round(words_per_scene*2.7)),
+                                maxLength=min(360,max(100,round(words_per_scene*6))))
     scene_properties = properties["scenes"]["items"]["properties"]
     custom = choices == [GENERATED_TEMPLATE]
     mechanism = choices == [MECHANISM_TEMPLATE]
@@ -449,11 +453,12 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
         "Start with one concrete surprise or a short curiosity question. Name a visible outcome and leave its cause open. "
         "Avoid claims about what the viewer has seen, extra setup sentences, and a second question. "
         "The hook is spoken and shown by itself before the scenes. "
-        f"Use {'7 to 8' if long_video else '5 to 6'} consecutive scenes. Start scene one with the first new fact or visible action that answers the hook. "
+        f"Use {'5 to 8' if long_video else '5 to 6'} consecutive scenes. Start scene one with the first new fact or visible action that answers the hook. "
         "Move directly to the first physical action or cause. Say the names of the physical parts as you explain what they do. "
         "Keep the question and setup out of the explanation. "
         "Explain cause and effect, then end with the payoff and a complete answer. "
         f"Write about {target_words} spoken words, including the hook, for a {target_seconds}-second video. "
+        "The selected length is a maximum. A shorter complete explanation is valid. Do not add filler to reach the time limit. "
         f"Aim for {words_per_scene} spoken words per scene. Develop each beat with a visible cause-and-effect "
         "detail or a concrete example that directly answers the prompt. Finish every sentence. "
         f"{delivery} "
@@ -757,6 +762,58 @@ def _subtitle_schedule(captions, count):
         yield first, last, text
 
 
+def _shorten_narration(scenes, budget, subject):
+    """Fit the spoken script without dropping scenes, changing shots or cutting audio."""
+    def checked(rows):
+        if len(rows)!=len(scenes) or word_count(rows)>budget:
+            raise ValueError("The revised narration exceeds its word budget")
+        plan = {"title":"Complete explanation","description":"Complete explanation.","hashtags":["#Shorts"],
+                "hook":rows[0]["narration"],"hook_view":rows[0]["view"],"scenes":rows[1:]}
+        if subject == MOTION_TEMPLATE.diagram:
+            plan["hook_objects"] = rows[0]["objects"]
+        if subject == GENERATED_TEMPLATE.diagram:
+            plan["visual_subject"] = rows[0]["visual_subject"]
+            plan["hook_visual"] = rows[0]["visual"]
+        validated = _validate_plan(plan,subject,8)[2]
+        if len(validated)!=len(scenes):
+            raise ValueError("Keep every explanation step")
+        # Keep all original geometry/scene data. Only narration and its short
+        # caption change, then speech timing is regenerated for the new take.
+        return [{**original,"narration":row["narration"],**({"caption":row["caption"]} if "caption" in row else {})}
+                for original,row in zip(scenes,validated)]
+
+    compact = compact_sentences(scenes,budget)
+    if compact:
+        try:
+            return checked(compact)
+        except (ValueError,KeyError,TypeError):
+            pass
+    body = scenes[1:]
+    per_scene = max(5,(budget-len(scenes[0]["narration"].split()))//len(body))
+    schema = _object(narrations={"type":"array","minItems":len(body),"maxItems":len(body),
+        "items":{"type":"string","minLength":15,"maxLength":max(45,min(280,per_scene*5))}})
+    instructions = ("Shorten an existing educational voiceover. Return only the requested JSON. "
+        f"Return exactly {len(body)} narration strings in the original order, each at most {per_scene} words. "
+        "Use one or two COMPLETE short sentences per scene. Preserve the physical cause, action and result of every step. "
+        "Keep the part names, numbers, negations and scientific meaning. Do not invent facts or reverse relationships. "
+        "Remove setup, filler and repetition. The final scene must finish the explanation. Do not repeat the opening hook. "
+        "Keep the explanation non-actionable for harmful topics and follow provider safety rules.")
+    brief = json.dumps({"opening_hook":scenes[0]["narration"],
+        "steps":[{"heading":scene["heading"],"narration":scene["narration"]} for scene in body]})
+    key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
+    for attempt in range(2):
+        try:
+            raw = _request_storyboard(brief,instructions,schema,key,False,True,mechanism_model=OLLAMA_MODEL)
+            lines = json.loads(raw)["narrations"]
+            if len(lines)!=len(body) or any(not isinstance(line,str) or not re.search(r'[.!?]["\u201d\u2019]?$',line.strip()) for line in lines):
+                raise ValueError("Use complete sentences and retain every scene")
+            revised = [dict(scenes[0]),*[{**scene,"narration":line.strip()} for scene,line in zip(body,lines)]]
+            return checked(revised)
+        except (ValueError,KeyError,TypeError,requests.RequestException) as error:
+            instructions += f" Previous revision failed: {type(error).__name__}. Keep within the word limits and finish every sentence."
+    raise ExplainerError("The AI could not shorten the narration. Check the AI connection and retry.")
+
+
 def render_explainer(payload, report_progress=None):
     def report(stage, percent=None):
         if report_progress:
@@ -800,7 +857,10 @@ def render_explainer(payload, report_progress=None):
     with tempfile.TemporaryDirectory(prefix="godd_explainer_") as directory:
         work = Path(directory)
         audio_path = work / "narration.wav"
-        for attempt in range(3):
+        if word_count(scenes)>target_words:
+            report("revising")
+            scenes = _shorten_narration(scenes,target_words,template.diagram)
+        for attempt in range(4):
             report("narration")
             mentions = [part_mentions(template.diagram, scene["narration"], custom_parts) for scene in scenes]
             timing = _continuous_narration(scenes, style, audio_path, mentions)
@@ -810,10 +870,20 @@ def render_explainer(payload, report_progress=None):
             else:
                 frame_counts, cue_ratios, caption_ratios = timing
             duration = sum(frame_counts) / FPS
-            if (minimum * .88 <= duration <= max_seconds * 1.12 or example or template.diagram == "toaster" or attempt == 2
-                    or reviewed_bearing
-                    or (long_video and attempt == 1 and duration <= max_seconds)):
+            if duration<=max_seconds*1.12 and (long_video or duration>=minimum*.88 or example
+                                             or reviewed_bearing or template.diagram=="toaster"):
                 break
+            if attempt==3:
+                _fit_runtime(frame_counts,max_seconds)
+                break
+            if duration>max_seconds*1.12:
+                # Use the measured voice rate rather than asking the model to
+                # guess another full storyboard's length. Keep the same shots.
+                budget = min(word_count(scenes)-1,round(word_count(scenes)*(max_seconds-4)/duration))
+                budget = max(len(scenes[0]["narration"].split())+8*(len(scenes)-1),budget)
+                report("revising")
+                scenes = _shorten_narration(scenes,budget,template.diagram)
+                continue
             spoken_words = sum(len(scene["narration"].split()) for scene in scenes)
             estimated = round(spoken_words * target_seconds / duration)
             if duration < minimum * .88:
@@ -824,6 +894,8 @@ def render_explainer(payload, report_progress=None):
             report("revising")
             try:
                 _, title, description, scenes = plan_video(payload["prompt"], template, style, target_words, max_seconds)
+                if word_count(scenes)>target_words:
+                    scenes = _shorten_narration(scenes,target_words,template.diagram)
             except ExplainerError:
                 # The current take is already complete. Keep it if it can be
                 # exported within the requested limit without truncating speech.
