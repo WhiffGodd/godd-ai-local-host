@@ -64,7 +64,7 @@ class LatchPlanningTests(unittest.TestCase):
         self.assertEqual(json.loads(result),{'parts':[],'actions':[]})
         settings = post.call_args.kwargs
         self.assertTrue(settings['json']['stream'])
-        self.assertEqual(settings['json']['options']['num_ctx'],4096)
+        self.assertGreaterEqual(settings['json']['options']['num_ctx'],8192)
         response.close.assert_called_once()
 
     def test_unfinished_layout_stream_is_not_accepted_as_a_complete_plan(self):

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>AI Videos · Godd AI</title>
+  <title>AI Mechanism Videos · Godd AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -15,20 +15,27 @@
   <header class="topbar">
     <nav class="wrap" aria-label="Studio">
       <a class="brand" href="/"><span aria-hidden="true">↯</span> godd.ai</a>
-      <div class="nav-links"><a href="/">Clip Studio</a><a href="/ai-videos.html" aria-current="page">AI Videos</a></div>
+      <div class="nav-links"><a href="/">Clip Studio</a><a href="/ai-videos.html" aria-current="page">AI Mechanism Videos</a></div>
     </nav>
   </header>
   <main class="wrap">
     <div class="intro">
-      <h1>AI Video Studio</h1>
+      <h1>AI Mechanism Videos</h1>
       <p>Turn a prompt into a narrated explainer up to 2 minutes long.</p>
     </div>
     <div class="workbench">
       <div class="composer">
         <form id="generator">
           <label for="prompt">What should the video explain?</label>
-          <textarea id="prompt" rows="4" maxlength="1200" required placeholder="Explain how a ballpoint pen extends and retracts its tip. Show each moving part in order."></textarea>
+          <textarea id="prompt" rows="6" maxlength="12000" aria-describedby="promptHelp" required placeholder="Describe the system, its parts, their connections, and the stages you want to explain."></textarea>
+          <p id="promptHelp" class="status"><span id="promptCount">0 / 12,000</span> characters. Include parts, connections, motion and the order of events.</p>
           <div class="examples" aria-label="Example prompts">
+            <button type="button" data-category="Biology" data-scene="oral-medicine" data-seconds="60" data-topic="Explain the journey of a typical immediate-release oral tablet. Show swallowing and peristalsis, breakup and dissolution in digestive fluid, absorption of dissolved medicine through the small-intestine lining, portal blood carrying it to the liver, systemic circulation, an illustrative protein-binding target, and clearance. Show actual anatomical cutaways, moving tissue, blood cells and enlarged medicine markers. Make clear that medicines and formulations behave differently.">Pill's journey</button>
+            <button type="button" data-category="Biology" data-scene="swallowing-peristalsis" data-seconds="60" data-topic="Explain swallowing and esophageal peristalsis in a continuous 3D cutaway. Show one food bolus moving down the esophagus. Contract the muscle behind it, relax the tube ahead of it, and move the contraction with the bolus. Show the lower esophageal sphincter opening for entry into the stomach and then closing. Keep the anatomy connected and use smooth motion.">Swallowing</button>
+            <button type="button" data-category="Biology" data-scene="alveolar-gas-exchange" data-seconds="60" data-topic="Explain gas exchange in the lung alveoli. Start with breathing lungs, then show thin-walled alveolar air sacs surrounded by capillaries and moving red blood cells. Show oxygen moving from air into blood and carbon dioxide moving from blood into air. Explain oxygen binding to hemoglobin and carbon dioxide leaving during exhalation. Use clear labels and enlarged molecular markers.">Lung gas exchange</button>
+            <button type="button" data-seconds="25" data-topic="Create a 3D educational animation explaining electricity in a battery, switch and bulb circuit. Show connected copper wires, exposed switch contacts and the bulb filament. Close the switch to light the bulb; open it to stop current. Use blue for electron drift from negative to positive and orange for conventional current in the opposite direction. Explain voltage and current, with clear labels, a dark background and smooth motion. Vertical 9:16, 25 seconds.">Electric circuit</button>
+            <button type="button" data-topic="Explain a low-voltage DC relay in a fixed cutaway. Show the coil wound around an iron core, pivoted armature, return spring, normally open contacts and two separate wire circuits. Energize the coil; show the armature pulling toward the core and closing the isolated load contacts. De-energize it; the spring opens the contacts. Distinguish control current from load current. Keep every connection visible.">Relay</button>
+            <button type="button" data-topic="Explain one cycle of a brushed DC motor. Show a battery, connecting wires, brushes, split-ring commutator, copper rotor coil and fixed stator magnets. Show current through the rotor, torque, rotation and commutation every half-turn. Keep magnets and brushes fixed; rotate the rotor and commutator together. Label electron drift separately from conventional current.">Electric motor</button>
             <button type="button" data-topic="Explain a spring-loaded sliding latch in one fixed side cutaway. Show the fixed housing and strike, the sliding bolt and attached handle, and the return spring through extended, partly retracted, fully retracted, partly returned, and fully extended stages.">Sliding latch</button>
             <button type="button" data-topic="Explain how bicycle pedals turn the rear wheel through the crank, chain and rear cog.">Bicycle pedals</button>
             <button type="button" data-topic="Explain why the Moon has phases and how the Sun, Earth and Moon line up.">Moon phases</button>
@@ -52,7 +59,8 @@
           <div class="voice-setting">
             <label for="maxSeconds">Maximum video length</label>
             <select id="maxSeconds">
-              <option value="90">1 minute 30 seconds</option>
+              <option value="25">25 seconds</option>
+              <option value="90" selected>1 minute 30 seconds</option>
               <option value="60">1 minute</option>
               <option value="120">2 minutes</option>
             </select>
@@ -76,6 +84,11 @@
             <button id="buildScene" class="secondary" type="button" aria-pressed="false" hidden>Use AI illustrations</button>
             <button id="useScene" class="secondary" type="button" hidden aria-pressed="false">Use previewed scene</button>
           </div>
+          <div class="scene-actions" aria-label="Library category">
+            <button id="allScenes" class="secondary" type="button" aria-pressed="true">All scenes</button>
+            <button id="biologyScenes" class="secondary" type="button" aria-pressed="false">Biology</button>
+          </div>
+          <p id="biologyLibraryNote" class="status" hidden>Anatomy cutaways with moving tissue, blood flow and enlarged molecular markers.</p>
           <p id="sceneSelection" class="status" role="status"></p>
           <div id="templateGrid" class="template-grid" aria-label="Select and preview a working 3D scene"></div>
         </section>
@@ -89,7 +102,7 @@
         <p id="selectedStyle" class="selected-style"></p>
         <p id="previewStatus" class="status" role="status"></p>
         <section class="publish" aria-labelledby="publishHeading">
-          <h2 id="publishHeading">AI Studio YouTube</h2>
+          <h2 id="publishHeading">Mechanism Videos YouTube</h2>
           <p id="connectionStatus" class="status" role="status"></p>
           <button id="connect" class="secondary" type="button" hidden>Connect YouTube</button>
           <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>

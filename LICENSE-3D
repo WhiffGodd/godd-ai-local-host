@@ -4,7 +4,8 @@ Copyright (c) 2026 Godd AI contributors
 
 This license applies to cinematic_geometry.py, cinematic_render.py, bearing_mechanism.py,
 explainer_parts.py, explainer_templates.py, mechanism_animation.py, mechanism_3d.py, motion_graphics.py, sliding_latch.py, and
-procedural_scene.py.
+procedural_scene.py, dc_circuit.py, electrical_relay.py, electrical_components.py,
+electrical_detail.py, biological_components.py, biology_explainers.py, and biology_shots.py.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

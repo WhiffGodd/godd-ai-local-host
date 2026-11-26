@@ -10,14 +10,17 @@ from PIL import Image, ImageColor, ImageDraw
 
 from cinematic_render import _part_badge
 from explainer_parts import Part
+from biological_components import BIOLOGICAL_SHAPES
 
 
 PALETTE = {
     "steel": "#91aabd", "dark": "#30485f", "white": "#edf3e9", "gold": "#eab15b",
     "red": "#fa7869", "blue": "#55aafe", "cyan": "#60e0eb", "green": "#82d393",
+    "tissue":"#bf7970", "blood":"#b83143", "bone":"#e8dfc7", "purple":"#9d7eb4",
 }
-SHAPES = ("plate", "contour", "oval", "gear", "pipe", "spring", "path")
-EFFECTS = ("move", "turn", "expand", "flow", "energize")
+ELECTRICAL_SHAPES = ("wire", "battery", "bulb", "led", "resistor", "capacitor", "coil", "motor", "terminal", "relay", "switch")
+SHAPES = ("plate", "contour", "oval", "gear", "pipe", "spring", "path", *ELECTRICAL_SHAPES, *BIOLOGICAL_SHAPES)
+EFFECTS = ("move", "turn", "expand", "flow", "energize", "current", "dissolve", "pulse")
 
 
 def _object(**fields):
@@ -25,9 +28,16 @@ def _object(**fields):
 
 
 def mechanism_schema(beats):
+    pair = {"type":"array", "items":{"type":"number"}, "minItems":2, "maxItems":2}
     return _object(
-        parts={"type": "array", "minItems": 3, "maxItems": 12, "items": {"type": "string"}},
-        actions={"type": "array", "minItems": 3, "maxItems": 18, "items": {"type": "string"},
+        parts={"type": "array", "minItems": 3, "maxItems": 24, "items": _object(
+            name={"type":"string"}, shape={"type":"string","enum":list(SHAPES)},
+            color={"type":"string","enum":list(PALETTE)}, pivot=pair,
+            points={"type":"array","minItems":2,"maxItems":48,"items":pair})},
+        actions={"type": "array", "minItems": 3, "maxItems": 64, "items": _object(
+            beat={"type":"integer","minimum":1,"maximum":beats-1}, part={"type":"string"},
+            effect={"type":"string","enum":list(EFFECTS)}, amount=pair,
+            start={"type":"number","minimum":0,"maximum":.9}, end={"type":"number","minimum":.05,"maximum":1}),
                  "description": f"Actions must reference narration beats 1 through {beats-1}."},
     )
 
@@ -44,11 +54,13 @@ For a biological, electrical, or other non-mechanical process use the real struc
 materials, signals, and pathways. Add only elements that belong to the system.
 Arrange parts at true contact points, pivots, and connections. Match the nouns in the narration.
 Use a plate for a two-corner rectangular component, an oval or gear for a two-corner bounding box,
-a contour for a closed polygon with 3..18 absolute outline points, a pipe or path for connected
+a contour for a closed polygon with 3..48 absolute outline points, a pipe or path for connected
 centerline points, and a spring for two endpoints. Use contours with recognizable profiles for
 irregular parts. Give all parts a pivot in board coordinates. Make the cutaway large and readable.
 An action is a change on a 1-based narration beat after the hook, with a start and end fraction
-between 0 and 1. Spread the events across the narration in order. Include at least three animated beats.
+between 0 and 1. Start MUST be strictly less than end. Use start 0.1, end 0.8 when unsure.
+Never use a zero-length interval or zero movement as a placeholder. Omit inactive actions.
+Spread the events across the narration in order. Include at least three animated beats.
 For move, amount is [dx,dy] in board units. For turn, use [clockwise degrees,0].
 For expand, amount is [relative x scale,relative y scale], e.g. [1,0.6] to compress vertically.
 Move, turn and expand changes remain applied in following beats. Apply matching changes to parts
@@ -63,13 +75,43 @@ For example, a sliding gate could use a fixed track from [12,70] to [88,75], a g
 outline [[25,40],[59,40],[59,68],[25,68]], and a cylinder behind it on the left.
 Moving the gate by [20,0] shifts it along the track; its upright outline doesn't turn.
 The example demonstrates coordinates only. Design the specific object in this prompt.
-Return JSON with two arrays of short strings called parts and actions.
-Part row: name|shape|color|pivotX,pivotY|pointX,pointY pointX,pointY ...
-Example: Track|plate|steel|50,72|12,70 88,75
-Colors: steel, dark, white, gold, red, blue, cyan, green.
-Action row: beat|part name|effect|amountX,amountY|start,end
-Example: 2|Gate|move|20,0|0.10,0.70
-Keep all rows in that syntax. Use a space between coordinate pairs and no extra commentary.
+Return JSON with arrays of OBJECTS called parts and actions, following the supplied schema.
+Example part: {"name":"Track","shape":"plate","color":"steel","pivot":[50,72],"points":[[12,70],[88,75]]}.
+Example action: {"beat":2,"part":"Gate","effect":"move","amount":[20,0],"start":0.1,"end":0.7}.
+Electrical components available: wire, battery, bulb, led, resistor, capacitor, coil, motor,
+terminal, relay and switch. Use their real shapes instead of generic colored blocks.
+These are detailed manufactured components: marked battery cells, electrolytic capacitor cans
+with radial leads and polarity stripes, banded axial resistors, glass bulbs, and insulated cables.
+Always include a native battery/capacitor/etc for each complete physical component requested.
+Do not substitute two floating rectangles for a capacitor or a block for a battery.
+Use a detail view to expose the battery/capacitor internals while keeping their physical case.
+Wire has a copper conductor, stripped ends, insulated jacket and smooth bends. Name return
+and negative wires explicitly. Use the wire shape for electrical connections, not a plate.
+Wire takes an ordered centerline. All other electrical shapes take two bounding-box corners.
+Battery terminals are top/bottom center (+ at top); other electrical terminals are left/right center.
+Capacitor lead adapters reach left/right center (positive left, negative right); its actual leads exit the bottom.
+Connect wire endpoints EXACTLY to these terminal positions. Never short the battery.
+Use separate movable contours for a switch blade, relay armature, and attached contacts.
+A switch shape is its FIXED insulated base and end contacts; its blade must be a separate part.
+Motor has a visible rotor: turn actions rotate its rotor only. Coil shows actual copper windings.
+For current on wire/path/pipe, amount [level,0] persists between beats: +1 follows listed points,
+-1 reverses direction, 0 stops. Set EVERY series wire to zero when the switch opens.
+Flow is temporary; use current for continuing electrical current. Energize controls filament/LED glow.
+Do not animate current across an open contact. Voltage may exist while current is zero.
+Electron drift is opposite conventional current. Do not describe energy as fast electrons.
+This is a qualitative educational animation, not a circuit solver; do not invent measured values.
+Biology components: tablet, capsule, esophagus, stomach, intestine, villus, blood_vessel,
+red_blood_cell, liver, kidney, ureter, bladder, heart, lung, alveolus, cell, membrane, receptor, neuron, torso,
+food_bolus. Use these anatomical meshes rather than colored blocks. All take two bounding-box
+corners, except blood_vessel, which can take an ordered centerline. Esophagus ports are top/bottom
+center; blood vessels with two corners run left/right through the box center.
+For dissolve use [fraction,0], from 0 intact to 1 dissolved, on tablet/capsule only. It persists.
+For pulse use [cycles per second,amplitude], e.g. [1,0.06], on biological parts only.
+Flow follows a blood vessel, esophagus, intestine or neuron route. Show absorption as movement
+of dissolved molecule markers through a lining; never pass an intact pill into a blood vessel.
+The illustrated oral-medicine route is gut -> portal blood -> liver -> systemic blood -> tissue.
+Do not invent a specific medicine's mechanism, dose, treatment claim or timing. Different
+formulations and medicines behave differently. Use neutral educational descriptions.
 Supply data only. Follow provider safety rules and keep explanations non-actionable for harmful topics."""
 
 
@@ -82,6 +124,48 @@ def _pair(value, lower, upper):
 
 def _name(value):
     return " ".join(value.replace("_", " ").split())[:42]
+
+
+def _electrical_shape(name, shape):
+    """Do not turn a complete named electrical component into a generic block.
+
+    Preserve separately modeled subparts such as contacts and capacitor plates.
+    """
+    if shape in ELECTRICAL_SHAPES:
+        return shape
+    if re.search(r'\b(?:terminal|filament|plate|electrode|contact|shaft|blade|housing|core|cover|lead|brush|armature)\b',name,re.I):
+        return shape
+    for pattern,native in ((r'\b(?:batter(?:y|ies)|battery cell)\b','battery'),
+                           (r'\bcapacitors?\b','capacitor'),(r'\bresistors?\b','resistor'),
+                           (r'\bled\b','led'),(r'\b(?:lightbulb|bulb|lamp)s?\b','bulb'),
+                           (r'\b(?:electric |DC )?motor\b','motor'),(r'\b(?:coil|solenoid|winding)s?\b','coil')):
+        if re.search(pattern,name,re.I):
+            return native
+    if shape in ('pipe','path') and re.search(r'\b(?:wire|cable)s?\b',name,re.I):
+        return 'wire'
+    return shape
+
+
+def _biological_shape(name,shape):
+    if shape in BIOLOGICAL_SHAPES:
+        return shape
+    if re.search(r'\b(?:cell|plasma|lipid) membrane\b',name,re.I):
+        return 'membrane'
+    if re.fullmatch(r'(?:target |cell |protein )?receptor',name,re.I):
+        return 'receptor'
+    if re.fullmatch(r'(?:target |animal |human )?cell',name,re.I):
+        return 'cell'
+    if re.search(r'\b(?:wall|lining|valve|epithelium|nucleus|plate|receptor)\b',name,re.I):
+        return shape
+    for pattern,native in ((r'\bred blood cells?\b','red_blood_cell'),(r'\bblood vessels?|capillar(?:y|ies)\b','blood_vessel'),
+                           (r'\b(?:pill|tablet)s?\b','tablet'),(r'\bcapsules?\b','capsule'),
+                           (r'\b(?:esophagus|oesophagus)\b','esophagus'),(r'\bstomach\b','stomach'),
+                           (r'\b(?:small intestine|intestine)\b','intestine'),(r'\bvill(?:us|i)\b','villus'),
+                           (r'\bliver\b','liver'),(r'\bkidneys?\b','kidney'),(r'\bheart\b','heart'),
+                           (r'\blungs?\b','lung'),(r'\balveol(?:us|i)\b','alveolus'),(r'\bneurons?\b','neuron')):
+        if re.search(pattern,name,re.I):
+            return native
+    return shape
 
 
 @dataclass(frozen=True)
@@ -106,18 +190,19 @@ class Action:
 def read_mechanism(data, beats):
     entries, events = data["parts"], data["actions"]
     if (not isinstance(entries,list) or not isinstance(events,list)
-            or not 3 <= len(entries) <= 12 or not 3 <= len(events) <= 18):
+            or not 3 <= len(entries) <= 24 or not 3 <= len(events) <= 64):
         raise ValueError("Invalid mechanism size")
     components = {}
     for item in entries:
         name = _name(item["name"])
-        shape = item["shape"]
+        shape = _biological_shape(name,_electrical_shape(name,item["shape"]))
         pivot = _pair(item["pivot"], 0, 100)
         points = tuple(_pair(point, 0, 100) for point in item["points"])
-        if (not name or name.casefold() in components or shape not in SHAPES or not 2 <= len(points) <= 18
+        if (not name or name.casefold() in components or shape not in SHAPES or not 2 <= len(points) <= 48
                 or (shape == "contour" and len(points) < 3) or len(set(points)) < 2):
             raise ValueError("Invalid mechanism component")
-        if shape in ("plate","gear","oval") and any(len(set(axis)) < 2 for axis in zip(*points)):
+        if shape in ("plate","gear","oval", *[s for s in ELECTRICAL_SHAPES if s != "wire"],
+                     *[s for s in BIOLOGICAL_SHAPES if s not in ('blood_vessel','ureter','digestive_tube')]) and any(len(set(axis)) < 2 for axis in zip(*points)):
             raise ValueError("A filled shape needs width and height")
         alias = re.escape(name) + ("" if name.endswith("s") else "s?")
         label = name[0].upper()+name[1:]
@@ -129,8 +214,10 @@ def read_mechanism(data, beats):
         name = _name(item["part"]).casefold()
         amount = _pair(item["amount"], -720, 720)
         start, end = _pair([item["start"], item["end"]], 0, 1)
+        if start >= end:
+            raise ValueError(f"{item['part']} on beat {beat} needs start < end; received {start}, {end}")
         if (type(beat) is not int or not 1 <= beat < beats or name not in components
-                or effect not in EFFECTS or start >= end):
+                or effect not in EFFECTS):
             raise ValueError("Invalid mechanism action")
         if effect == "move" and max(map(abs, amount)) > 55:
             raise ValueError("Invalid travel distance")
@@ -139,13 +226,22 @@ def read_mechanism(data, beats):
         if ((effect == "move" and amount == (0,0)) or (effect == "turn" and not amount[0])
                 or (effect == "expand" and amount == (1,1))):
             continue
-        if effect == "flow" and components[name].shape not in ("pipe", "path"):
+        if effect in ("flow","current") and components[name].shape not in ("pipe", "path", "wire",'blood_vessel','esophagus','intestine','neuron','ureter','digestive_tube'):
             raise ValueError("Flow needs a connected route")
+        if effect == "current" and not -1. <= amount[0] <= 1.:
+            raise ValueError("Current level must be between -1 and 1")
         if effect == "energize" and not 0. <= amount[0] <= 1.:
             raise ValueError("Invalid heat, light, or pressure level")
+        if effect=='dissolve' and (components[name].shape not in ('tablet','capsule') or not 0<=amount[0]<=1):
+            raise ValueError('Dissolve needs a tablet/capsule and a fraction between 0 and 1')
+        if effect=='pulse' and (components[name].shape not in BIOLOGICAL_SHAPES or not 0<=amount[0]<=4 or not 0<=amount[1]<=.25):
+            raise ValueError('Biological pulse needs 0..4 cycles per second and 0..0.25 amplitude')
         actions.append(Action(beat, components[name].part.label, effect, amount, start, end))
-    if len({action.beat for action in actions}) < 3 or all(action.effect == "energize" for action in actions):
+    if len({action.beat for action in actions}) < 3 or (all(action.effect == "energize" for action in actions)
+            and not any(part.shape in ELECTRICAL_SHAPES for part in components.values())):
         raise ValueError("The animation needs at least three moving beats")
+    if all(action.effect in ("current","energize") and not action.amount[0] for action in actions):
+        raise ValueError("The electrical animation never switches on or carries current")
     actions.sort(key=lambda action: (action.beat, action.start, action.end))
     mechanism = tuple(components.values()), tuple(actions)
     l,t,r,b = _bounds(mechanism)
@@ -159,6 +255,9 @@ def read_mechanism(data, beats):
 
 
 def parse_mechanism_rows(data, beats):
+    # Read older saved layouts too, while generating strictly typed JSON from now on.
+    if data.get("parts") and isinstance(data["parts"][0], dict):
+        return read_mechanism(data, beats)
     def pair(text):
         return [float(value) for value in text.split(",")]
 
@@ -192,9 +291,29 @@ def motion_state(events, beat, fraction):
             sx, sy = sx*(1+(x-1)*eased), sy*(1+(y-1)*eased)
         elif action.effect == "energize":
             heat += (x-heat)*eased
-        elif 0. < p < 1.:
+        elif action.effect == "flow" and 0. < p < 1.:
             flow = p if x >= 0 else -p
     return dx,dy,turn,sx,sy,heat,flow
+
+
+def current_level(events, beat, fraction):
+    """Persist signed current between beats, with an immediate open-contact stop."""
+    level = 0.
+    for action in events:
+        if action.effect == "current" and (action.beat < beat or
+                action.beat == beat and fraction >= action.start):
+            level = action.amount[0]
+    return level
+
+
+def biological_level(events,effect,beat,fraction):
+    level=0.
+    for action in events:
+        if action.effect!=effect or action.beat>beat:
+            continue
+        p=1. if action.beat<beat else min(1.,max(0.,(fraction-action.start)/(action.end-action.start)))
+        level+=(action.amount[0]-level)*(p*p*(3-2*p))
+    return level
 
 
 def _transform(component, events, beat, fraction):
@@ -211,9 +330,9 @@ def _transform(component, events, beat, fraction):
 @lru_cache(maxsize=96)
 def _outline(component):
     points = component.points
-    if component.shape in ("contour","path","pipe"):
+    if component.shape in ("contour","path","pipe","wire",'blood_vessel','ureter','digestive_tube'):
         return points
-    if component.shape == "plate":
+    if component.shape == "plate" or component.shape in (*ELECTRICAL_SHAPES,*BIOLOGICAL_SHAPES):
         x,y,x2,y2 = _envelope(points)
         return ((x,y),(x2,y),(x2,y2),(x,y2))
     if component.shape == "spring":

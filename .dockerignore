@@ -13,8 +13,10 @@ public/*
 !public/ai-videos.html
 !public/ai-videos.js
 !public/ai-videos.css
+!public/cinematic/
 tests/
 *.mp4
 **/*.mp4
 *.webm
+!public/cinematic/*.webm
 **/*.captions.json

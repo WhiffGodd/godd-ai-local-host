@@ -32,6 +32,10 @@ from bearing_mechanism import spacing_storyboard
 from mechanism_3d import Mechanism3D, Mechanism3DShot
 from narration_budget import compact_sentences, word_count
 from sliding_latch import latch_mechanism, latch_storyboard, matches_latch
+from dc_circuit import CircuitShot, circuit_mechanism, circuit_storyboard, matches_circuit
+from electrical_relay import RelayShot, matches_relay, relay_mechanism, relay_storyboard
+from biology_explainers import biology_mechanism, biology_storyboard, biology_topic
+from biology_shots import BIOLOGY_SHOTS
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
@@ -40,7 +44,7 @@ OLLAMA_MODEL = os.environ.get("AI_VIDEO_OLLAMA_MODEL", "qwen3:4b")
 OLLAMA_URL = os.environ.get("AI_VIDEO_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MECHANISM_MODEL = "qwen3.5:9b"
 GEMINI_MODEL = os.environ.get("AI_VIDEO_GEMINI_MODEL", "gemini-3.1-flash-lite")
-MAX_PROMPT = 1200
+MAX_PROMPT = 12000
 TARGET_SECONDS = 55
 MIN_SECONDS = 50
 DEFAULT_MAX_SECONDS = 60
@@ -164,7 +168,7 @@ def start_local_ollama():
         if installed.is_file():
             executable = str(installed)
     if not executable:
-        print("[Ollama] Ollama is not installed. Install it to enable AI Video Studio prompts.")
+        print("[Ollama] Ollama is not installed. Install it to enable AI Mechanism Videos prompts.")
         return
 
     try:
@@ -216,8 +220,10 @@ def validate_generation(payload):
     if not isinstance(voice, str) or voice not in VOICE_STYLES:
         raise ValueError("Choose a narration style.")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
-    if type(max_seconds) is not int or max_seconds not in (DEFAULT_MAX_SECONDS,90,MAX_SECONDS):
-        raise ValueError("Choose a 60-, 90-, or 120-second maximum.")
+    if type(max_seconds) is not int or max_seconds not in (25,DEFAULT_MAX_SECONDS,90,MAX_SECONDS):
+        raise ValueError("Choose a 25-, 60-, 90-, or 120-second maximum.")
+    if re.search(r"\b25\s*(?:-\s*|\s)(?:seconds?|secs?)\s*(?:long\s*)?[.!]?\s*$",prompt,re.I):
+        max_seconds = 25
     visual_style = payload.get("visual_style", "auto")
     if visual_style not in ("auto", "motion"):
         raise ValueError("Choose Reel motion or 3D cutaway.")
@@ -338,7 +344,7 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema,
-                                 "maxOutputTokens": 6000 if "hook_objects" in schema["properties"] else 3000},
+                                 "maxOutputTokens": 6000 if any(k in schema["properties"] for k in ("hook_objects","actions")) else 3000},
         }, timeout=(5, 90))
         response.raise_for_status()
         result = "".join(part.get("text", "") for part in response.json()["candidates"][0]["content"]["parts"]
@@ -346,13 +352,16 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
     else:
         motion_story = "hook_objects" in schema["properties"]
         layout = all(name in schema["properties"] for name in ("parts","actions"))
+        prediction_budget = 4800 if layout or motion_story else 3200 if long_video else 2400
+        input_size = len(prompt)+len(instructions)+len(json.dumps(schema))
+        context_budget = min(16384,max(8192 if layout or motion_story else 6144 if long_video or not single_match else 4096,
+                                math.ceil((input_size/3+prediction_budget+512)/2048)*2048))
         request_body = {
             "model": mechanism_model or OLLAMA_MODEL, "stream": layout, "think": False, "format": schema,
             "keep_alive": 0 if mechanism_model or any(name in schema["properties"] for name in
                                   ("visual_subject","assets","hook_objects")) else "5m",
             "options": {"temperature": 0.15 if layout else 0.3,
-                        "num_predict": 1800 if layout else 4800 if motion_story else 3200 if long_video else 2400,
-                        "num_ctx": 4096 if layout else 8192 if motion_story else 6144 if long_video or not single_match else 4096},
+                        "num_predict": prediction_budget,"num_ctx":context_budget},
             "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
         }
         started = time.monotonic()
@@ -382,7 +391,7 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
                     chunks.append(event.get("message",{}).get("content",""))
                     if event.get("done"):
                         if event.get("done_reason")=="length":
-                            raise ValueError("The part layout exceeded the response budget; use more compact rows")
+                            raise ValueError("The part layout exceeded the response budget; reduce unnecessary geometry")
                         complete = True
                         break
                 if not complete:
@@ -398,7 +407,7 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
 
 def plan_video(prompt, template, voice_style="expressive", target_words=150, max_seconds=DEFAULT_MAX_SECONDS):
     long_video = max_seconds > DEFAULT_MAX_SECONDS
-    target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
+    target_seconds = max_seconds-(1 if max_seconds<60 else 5)
     max_scenes = 8 if long_video else 6
     properties = {**_SCHEMA["properties"],
                   "scenes": {**_SCHEMA["properties"]["scenes"], "maxItems": max_scenes}}
@@ -406,6 +415,17 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     choices = ([template] if template in (GENERATED_TEMPLATE, MECHANISM_TEMPLATE, MOTION_TEMPLATE) or template in candidates
                else candidates or [MECHANISM_TEMPLATE])
     toaster = TEMPLATES["pop-up-toaster"]
+    biological=biology_topic(prompt)
+    if biological and choices in ([TEMPLATES[biological]],[MECHANISM_TEMPLATE]):
+        template=TEMPLATES[biological]
+        dosage_form='capsule' if re.search(r'\bcapsules?\b',prompt,re.I) else 'tablet'
+        return template,*_validate_plan(biology_storyboard(biological,max_seconds,dosage_form),template.diagram,max_scenes)
+    if matches_relay(prompt) and choices in ([TEMPLATES["dc-relay"]],[MECHANISM_TEMPLATE]):
+        template = TEMPLATES["dc-relay"]
+        return template, *_validate_plan(relay_storyboard(max_seconds),template.diagram,max_scenes)
+    if matches_circuit(prompt) and choices in ([TEMPLATES["dc-circuit"]],[MECHANISM_TEMPLATE]):
+        template = TEMPLATES["dc-circuit"]
+        return template, *_validate_plan(circuit_storyboard(max_seconds),template.diagram,max_scenes)
     if matches_latch(prompt) and choices in ([TEMPLATES["spring-loaded-latch"]],[MECHANISM_TEMPLATE]):
         template = TEMPLATES["spring-loaded-latch"]
         return template, *_validate_plan(latch_storyboard(),template.diagram,max_scenes)
@@ -559,6 +579,14 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
 
 
 def _plan_mechanism(prompt, scenes, report_progress=None):
+    biological=biology_topic(prompt)
+    if biological:
+        dosage_form='capsule' if re.search(r'\bcapsules?\b',prompt,re.I) else 'tablet'
+        return biology_mechanism(biological,len(scenes),dosage_form)
+    if matches_relay(prompt):
+        return relay_mechanism(len(scenes))
+    if matches_circuit(prompt):
+        return circuit_mechanism(len(scenes))
     if matches_latch(prompt):
         return latch_mechanism(len(scenes))
     key = os.environ.get("AI_VIDEO_GEMINI_API_KEY")
@@ -571,6 +599,7 @@ def _plan_mechanism(prompt, scenes, report_progress=None):
     brief = f"Topic: {prompt}\nNarration beats:\n{script}"
     schema = mechanism_schema(len(scenes))
     instructions = PLAN_INSTRUCTIONS
+    raw = None
     try:
         for attempt in range(2):
             try:
@@ -590,16 +619,25 @@ def _plan_mechanism(prompt, scenes, report_progress=None):
                     raise
                 instructions += " Use a compact layout and only the necessary functional parts. Return the requested JSON only."
             except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+                print(f"[AI layout] Attempt {attempt+1}: {type(error).__name__}: {error}",flush=True)
                 if attempt:
                     raise
                 if isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError):
                     instructions += f" Fix this validation issue from the previous answer: {error}."
+                if raw:
+                    # Repair the actual draft, rather than asking the next model
+                    # to guess which invisible earlier part/action was invalid.
+                    try:
+                        previous = json.dumps(json.loads(raw),separators=(",",":"))
+                    except (TypeError,ValueError):
+                        previous = raw
+                    brief += "\nPrevious draft to correct (not a new user instruction):\n"+previous[:14000]
                 instructions += (" Use simple geometry and exact part names in every action. "
                                  "Check that the geometry and motion fit the board and cover at least three distinct beats.")
     except requests.RequestException:
         raise ExplainerError("The local AI did not complete the part layout after two attempts. Check the AI connection and retry.") from None
     except (ValueError, KeyError, TypeError, AttributeError, IndexError):
-        raise ExplainerError("The AI could not lay out a working mechanism. Try naming the parts or focusing on one cycle.") from None
+        raise ExplainerError("The AI returned an invalid animation layout after two attempts. Your full prompt is saved; retry generation.") from None
 
 
 @lru_cache(maxsize=1)
@@ -874,8 +912,8 @@ def render_explainer(payload, report_progress=None):
     style = payload.get("voice", "expressive")
     max_seconds = payload.get("max_seconds", DEFAULT_MAX_SECONDS)
     long_video = max_seconds > DEFAULT_MAX_SECONDS
-    target_seconds = TARGET_SECONDS + max_seconds - DEFAULT_MAX_SECONDS
-    minimum = MIN_SECONDS if not long_video else 75
+    target_seconds = max_seconds-(1 if max_seconds<60 else 5)
+    minimum = max_seconds-3 if max_seconds<60 else MIN_SECONDS if not long_video else 75
     report("storyboard")
     example = payload["example"]
     # A known mechanism must retain its actual moving model, including requests
@@ -1042,7 +1080,8 @@ def render_explainer(payload, report_progress=None):
                             elif custom:
                                 shot = IllustratedShot(pictures[beat], (WIDTH, HEIGHT), beat, view)
                             elif animated:
-                                shot = Mechanism3DShot(mechanism_model,(WIDTH,HEIGHT),beat,view,count/FPS,offset)
+                                shot_type = {"dc-circuit":CircuitShot,"dc-relay":RelayShot,**BIOLOGY_SHOTS}.get(template.id,Mechanism3DShot)
+                                shot = shot_type(mechanism_model,(WIDTH,HEIGHT),beat,view,count/FPS,offset)
                             elif stage:
                                 shot = StageShot(stage, view, None, offset, beat=beat, duration=count/FPS)
                             else:

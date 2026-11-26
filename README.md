@@ -203,9 +203,9 @@ YouTube. Uploads are identified by random tokens, expire after one hour, and
 are lost if the free service restarts. Only use videos you are allowed to upload.
 This is an alternative source path, not a claim that YouTube's IP block is removed.
 
-## AI Video Studio
+## AI Mechanism Videos
 
-Open **AI Videos** from the main navigation. Describe what to explain and click
+Open **AI Mechanism Videos** from the main navigation. Describe what to explain and click
 **Generate video**. The default **Working mechanisms** mode selects a matching 3D model.
 Clicking a library card selects that model and opens its preview in one step.
 The site uses working 3D models and animated 3D cutaways throughout. Custom
@@ -260,10 +260,92 @@ also includes other mechanisms, lunar phases,
 prism refraction, sound and octaves, and the water cycle. Mechanism scenes can
 expose internal parts in cutaway. The studio
 creates a short English script, opens with a spoken and on-screen hook, and
-renders a narrated 720 × 1280 MP4 with a 60-, 90-, or 120-second maximum. Follow the
+renders a narrated 720 × 1280 MP4 with a 25-, 60-, 90-, or 120-second maximum. Follow the
 preparation stages and watch the finished video in the preview. Pick Friendly,
 Energetic, or Documentary to change the delivery. Generated videos are temporary,
 so download a copy before closing the studio.
+
+Prompts can contain up to 12,000 characters. Describe the parts, their connections,
+the order of events and which parts stay fixed. The planner receives the entire
+prompt with a context budget that grows for longer instructions. Layouts use
+typed part and action objects, with validation and a bounded retry.
+
+The **Electric circuit** example selects the 25-second option and a reviewed
+battery–switch–bulb model. The contacts physically close before current appears;
+opening them stops the current and lets the filament cool. Blue markers represent
+electron drift from negative to positive through the external circuit. Orange
+markers represent conventional current in the opposite direction. Marker size and
+speed are exaggerated for visibility; the model is qualitative rather than a
+circuit solver. This distinction follows [OpenStax's explanation of electrical
+current](https://openstax.org/books/university-physics-volume-2/pages/9-1-electrical-current).
+Other electrical prompts can use native copper wire, battery, bulb, LED, resistor,
+capacitor, coil, terminal, switch, relay and motor geometry. Persistent current
+actions, filament glow and rotor motion are available to the planner. AI-planned
+connections and behavior still need review in the preview before publishing.
+Electrical components use manufactured 3D models: a cylindrical battery with
+polarity marks and metal contacts, an electrolytic capacitor with a marked sleeve,
+scored vent, rubber bung and radial leads, a banded axial resistor, glass bulb and
+threaded base, LED lens, wound coil and motor internals. Detail views open the
+battery/capacitor case to reveal the internal layers. Wires have smooth insulation,
+exposed copper strands and connector ends; their endpoints remain at the planned
+terminals. The same models are used in library previews and exported videos.
+The **Relay** example also has a reviewed continuous model: its control coil
+attracts a pivoted armature, the attached spring follows it, and separate load
+contacts close before the lamp receives current. Solid-state, latching, normally
+closed and other relay variants use the general planner instead.
+
+Use the **Biology** filter for three reviewed scenes: **A Pill's Journey**,
+**Swallowing and Peristalsis**, and **Lung Gas Exchange**. The pill scene follows a
+typical immediate-release oral dose through swallowing, disintegration and
+dissolution, intestinal absorption, portal blood and liver processing, an
+illustrative protein-binding target, and clearance. Capsule prompts use a capsule
+model and matching narration. Solid pills never pass into blood. The process is
+generalized; named medicines and modified-release products use the general
+planner rather than being presented as this same example. No dose, treatment
+recommendation or real-time pharmacokinetic prediction is supplied.
+
+Reusable 3D anatomy includes a head and oral cavity, esophagus, stomach and
+digestive tubes, intestinal villi, liver, kidneys, ureters and bladder, heart,
+lungs and alveoli, blood vessels and biconcave red blood cells, cell membranes,
+receptors and neurons. Reviewed scenes animate peristaltic contraction, breakup
+and particle transport, circulation and opposing gas transfer. Anatomy, particle
+sizes and time are schematic. Other biological prompts use AI-planned assemblies
+and should be reviewed before publication.
+
+Science references: [NIH medicine journey](https://www.nigms.nih.gov/biobeat/2023/09/what-happens-to-medicine-in-your-body),
+[NIDDK digestion](https://www.niddk.nih.gov/health-information/digestive-diseases/digestive-system-how-it-works),
+and [NHLBI lung function](https://www.nhlbi.nih.gov/health/lungs).
+
+### Ten example prompts
+
+Choose **1 minute** and **Auto-select from prompt**. Videos use vertical 9:16.
+Biology prompts 1–3 and electrical prompts 1–2 use the reviewed scenes.
+The remaining prompts use reusable components and AI-planned animation; preview
+their geometry, motion and explanation before publishing.
+
+#### Biology
+
+1. **A pill’s journey.** Show the journey of a typical immediate-release tablet: swallowing, esophageal peristalsis, breakup and dissolution, absorption through the small intestine, portal blood and liver processing, circulation to tissue, illustrative protein binding and clearance. Keep the anatomy connected. Show dissolved medicine entering blood, and explain that medicines and formulations differ.
+
+2. **How swallowing works.** Explain esophageal peristalsis using one food bolus. Show muscle contracting behind it and relaxing ahead. Move the contraction along the esophagus with the food, then show the lower esophageal sphincter opening for entry into the stomach and closing afterward. Keep the food and active muscle wave visible.
+
+3. **How oxygen enters blood.** Explain gas exchange in lung alveoli. Begin with breathing lungs, then show thin-walled air sacs, surrounding capillaries and moving red blood cells. Animate oxygen moving from air into blood and carbon dioxide moving the opposite way. Explain hemoglobin’s role in oxygen transport and show carbon dioxide leaving during exhalation.
+
+4. **How a cell receives a signal.** Show an illustrative signaling molecule approaching a receptor in a cell membrane. Include a lipid bilayer, the receptor and the cell interior. Let the molecule bind to a matching pocket, then show a signal passing into the cell. Label this as a simplified example; avoid naming a medicine or claiming a treatment effect.
+
+5. **How a nerve signal travels.** Explain a signal traveling along one neuron. Show dendrites, the cell body, an axon and its terminal. Use a traveling glow to represent local membrane-voltage changes along the axon. Explain that the glow is a teaching marker rather than a particle moving through a wire. Keep the neuron fixed while the signal progresses.
+
+#### Electrical systems
+
+1. **How a switch lights a bulb.** Show a battery, switch and filament bulb connected by insulated copper wires. Begin with the switch open and no current. Close the contacts, show current and a warming filament, then open the switch and let the bulb cool. Distinguish blue electron drift from orange conventional current moving in the opposite direction.
+
+2. **How a relay controls a separate circuit.** Explain a low-voltage DC relay with separate control and lamp circuits. Energize the copper coil, magnetize the iron core, pull the pivoted armature, stretch its return spring and close the normally open load contacts. Then switch off and show the complete return. Keep the circuits electrically isolated and stop current when contacts open.
+
+3. **How an electromagnet picks up metal.** Show a battery and switch connected to a copper coil around an iron core. Place a steel paperclip below it. Close the switch, animate coil current and illustrative magnetic-field lines, and lift the paperclip toward the core. Open the switch and let it fall. Keep the coil fixed; no circuit current flows through the paperclip.
+
+4. **How a capacitor charges.** Show a battery charging an electrolytic capacitor through a resistor and switch. Use a detailed capacitor can, polarity stripe, radial leads and insulated wires. Close the switch, show a brief charging current that gradually decreases, and reveal charge separation in a cutaway. Never show electrons crossing the dielectric. Explain stored electric-field energy.
+
+5. **Why a resistor warms up.** Show a low-voltage battery, switch, banded resistor and connected copper wires. Close the switch, animate current and gradually warm the resistor’s appearance. Explain electrical energy transferring into thermal energy. Open the switch, stop current and show cooling. Keep the resistor’s shape unchanged and avoid flames, melting or invented temperatures.
 
 Narration is budgeted before recording. If a take runs long, the studio uses
 its measured speaking rate to shorten complete sentences while preserving every
@@ -288,7 +370,7 @@ model is preferred when both are installed, with more sampling steps for object 
   `run_gpu.bat`, or `python server.py` starts Ollama when needed and connects
   to `http://127.0.0.1:11434`. On macOS and Linux, start Ollama before Godd AI.
   Install `qwen3.5:9b` with `ollama pull qwen3.5:9b` for a larger diagram
-  planner. The studio uses it for cutaways when installed. Set
+  planner. The studio tries the smaller model first and can retry with it. Set
   `AI_VIDEO_OLLAMA_MECHANISM_MODEL` to select a different installed model.
   Install the packages in `requirements.txt`. The renderer requires OpenGL 3.3
   or newer. On headless Linux, install Mesa EGL and its DRI drivers.

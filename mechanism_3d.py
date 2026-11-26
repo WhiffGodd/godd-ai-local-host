@@ -7,8 +7,11 @@ import mapbox_earcut
 import numpy as np
 from PIL import ImageColor
 
-from cinematic_geometry import mesh, scale, spin, translate, tube
-from mechanism_animation import _bounds, _outline, motion_state
+from cinematic_geometry import scale, spin, translate
+from mechanism_animation import ELECTRICAL_SHAPES, _bounds, _outline, biological_level, current_level, motion_state
+from biological_components import BIOLOGICAL_SHAPES, biological_mesh, biological_parts, biological_route
+from electrical_components import electrical_meshes
+from electrical_detail import rounded_route, swept_tube
 
 
 def extrude_profile(points, depth=.18):
@@ -54,19 +57,7 @@ def extrude_profile(points, depth=.18):
 
 
 def _wire(points,radius):
-    cylinder = np.asarray(mesh("cylinder"),dtype=np.float32)
-    pieces = []
-    for a,b in zip(points,points[1:]):
-        if np.linalg.norm(np.asarray(b)-a)<1e-7:
-            continue
-        matrix = tube(a,b,radius)
-        positions = cylinder[:,:3]@matrix[:3,:3].T+matrix[:3,3]
-        normals = cylinder[:,3:]@np.linalg.inv(matrix[:3,:3])
-        normals /= np.linalg.norm(normals,axis=1,keepdims=True)
-        pieces.append(np.column_stack((positions,normals)))
-    if not pieces:
-        raise ValueError("A tube needs two distinct endpoints")
-    return np.concatenate(pieces).astype(np.float32)
+    return swept_tube(points,radius)
 
 
 class Mechanism3D:
@@ -79,9 +70,30 @@ class Mechanism3D:
         self.radius_y = max(.6,(bottom-top)*self.unit/2)
         self.floor = -(bottom-self.centre[1])*self.unit-.26
         self.compiled = []
+        self.roles = {}
+        self.routes = {}
+        electrical = any(part.shape in (*ELECTRICAL_SHAPES,*BIOLOGICAL_SHAPES) for part in self.parts)
         for index,component in enumerate(self.parts):
             name = "custom-cutaway-"+str(index)
-            z = index*.055
+            z = 0. if electrical else index*.055
+            events = tuple(action for action in self.actions if action.part==component.part.label)
+            if component.shape in BIOLOGICAL_SHAPES:
+                route=biological_route(component)
+                if route is not None:
+                    self.routes[component.part.label]=np.array([self.world(point,.075) for point in route])
+                for piece,(vertices,material,role) in enumerate(biological_parts(component,self.world)):
+                    piece_name=name+'-'+str(piece)
+                    self.roles[piece_name]=role
+                    self.compiled.append((component,events,piece_name,vertices,material,z))
+                continue
+            if component.shape == 'wire':
+                self.routes[component.part.label]=np.array([self.world(point,.085) for point in rounded_route(component.points)])
+            if component.shape in ELECTRICAL_SHAPES:
+                for piece,(vertices,material,role) in enumerate(electrical_meshes(component,self.world,_wire)):
+                    piece_name = name+"-"+str(piece)
+                    self.roles[piece_name] = role
+                    self.compiled.append((component,events,piece_name,vertices,material,z))
+                continue
             points = [self.world(point,z) for point in _outline(component)]
             if component.shape == "spring":
                 start,end = (self.world(point,z) for point in component.points[:2])
@@ -93,7 +105,7 @@ class Mechanism3D:
                 coil = [start+direction*(step/100)+.11*(side*cos(tau*6*step/100)
                          +np.array((0.,0.,1.))*sin(tau*6*step/100)) for step in range(101)]
                 vertices = _wire([start,*coil,end],.021)
-            elif component.shape in ("pipe","path"):
+            elif component.shape in ("pipe","path","wire"):
                 vertices = _wire(points,.049 if component.shape=="pipe" else .026)
             else:
                 vertices = extrude_profile([point[:2] for point in points])
@@ -110,6 +122,9 @@ class Mechanism3D:
     def upload(self, renderer):
         for _,_,name,vertices,_,_ in self.compiled:
             renderer.register_mesh(name,vertices)
+        if any(part.shape in BIOLOGICAL_SHAPES for part in self.parts):
+            renderer.register_mesh('bio-rbc',biological_mesh('bio-rbc'))
+            renderer.register_mesh('bio-marker',biological_mesh('sphere'))
 
 
 class Mechanism3DShot:
@@ -123,26 +138,54 @@ class Mechanism3DShot:
     def at(self, time, part=None):
         fraction = min(1.,max(0.,time/max(self.duration-1/30,.01)))
         objects = []
+        flow_parts=set()
         for component,events,name,_,material,z in self.model.compiled:
             dx,dy,turn,sx,sy,heat,flow = motion_state(events,self.beat,fraction)
+            dissolved=biological_level(events,'dissolve',self.beat,fraction)
+            biological_scale=1.
+            for action in events:
+                if action.effect=='pulse' and (action.beat<self.beat or action.beat==self.beat and fraction>=action.start):
+                    hz,amplitude=action.amount
+                    biological_scale=1+amplitude*sin(tau*hz*(self.offset+time))
+            if dissolved>=.999:
+                continue
+            role = self.model.roles.get(name)
+            if role == 'internal' and self.view != 'detail':
+                continue
+            if role in ('shell_front','shell_print') and self.view == 'detail' and component.shape in ('battery','capacitor'):
+                continue
+            if role == 'can_top' and self.view == 'detail' and component.shape == 'capacitor':
+                continue
+            if role == "field" and heat <= .02:
+                continue
+            if component.shape == "motor" and role != "rotor":
+                turn = 0.
             pivot = self.model.world(component.pivot)
             movement = np.array((dx,-dy,0.))*self.model.unit
-            matrix = translate(*(pivot+movement))@spin(-turn)@scale(sx,sy,1.)@translate(*(-pivot))
-            if heat:
+            factor=biological_scale*max(.025,1-dissolved)**(1/3)
+            matrix = translate(*(pivot+movement))@spin(-turn)@scale(sx*factor,sy*factor,factor)@translate(*(-pivot))
+            if heat and (component.shape not in ("bulb","led","coil","relay") or role == "filament"):
                 color = np.array(material[:3])*(1-heat)+np.array((1.,.38,.10))*heat
                 material = (*color,7. if heat>.75 else material[3])
             objects.append((name,material,matrix,component.part.label))
-            if flow:
-                points = [self.model.world(point,z+.07) for point in component.points]
+            current = current_level(events,self.beat,fraction)
+            # Absolute time prevents particles jumping back at narration cuts.
+            phase = (self.offset+time)*.21*current if current else flow*2
+            if (flow or current) and component.part.label not in flow_parts:
+                flow_parts.add(component.part.label)
+                points = self.model.routes.get(component.part.label)
+                if points is None:
+                    points = [self.model.world(point,z+.07) for point in component.points]
                 lengths = np.linalg.norm(np.diff(points,axis=0),axis=1)
                 total = sum(lengths)
                 for index in range(5):
-                    remaining = ((flow*2+index/5)%1)*total
+                    remaining = ((phase+index/5)%1)*total
                     for a,b,length in zip(points,points[1:],lengths):
                         if length and remaining<=length:
                             point = a+(b-a)*remaining/length
-                            objects.append(("sphere",(.40,.92,1.,7.),
-                                            matrix@translate(*point)@scale(.024,.024,.024),component.part.label))
+                            native_blood=component.shape=='blood_vessel'
+                            objects.append(('bio-rbc' if native_blood else "sphere",(.70,.04,.06,.08) if native_blood else (.40,.92,1.,7.),
+                                            matrix@translate(*point)@scale(.043,.034,.035) if native_blood else matrix@translate(*point)@scale(.024,.024,.024),component.part.label))
                             break
                         remaining -= length
         aspect = self.size[0]/self.size[1]

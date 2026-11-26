@@ -55,6 +55,16 @@ TEMPLATES = {template.id: template for template in (
              "Two slices of bread, the lever and carriage, a compressed spring, glowing heating wires, and the toast popping up"),
     Template("spring-loaded-latch", "Spring-Loaded Sliding Latch", "Mechanisms", "mechanism",
              "A reviewed five-part sliding latch: fixed housing and strike, connected bolt and handle, and a compression return spring"),
+    Template("dc-circuit", "Battery, Switch and Bulb", "Electricity", "mechanism",
+             "A connected copper-wire circuit with moving switch contacts, a glowing filament, electron drift and conventional current"),
+    Template("dc-relay", "Electromagnetic Relay", "Electricity", "mechanism",
+             "Separate control and lamp circuits, a copper electromagnet, moving armature, connected return spring and load contacts"),
+    Template('oral-medicine','A Pill\'s Journey','Biology','mechanism',
+             'An immediate-release tablet is swallowed, dissolves, is absorbed through intestinal villi, passes through the liver and reaches tissue; example binding and clearance'),
+    Template('swallowing-peristalsis','Swallowing and Peristalsis','Biology','mechanism',
+             'A food bolus moves through a muscular esophagus with a traveling contraction behind it and a lower sphincter opening toward the stomach'),
+    Template('alveolar-gas-exchange','Lung Gas Exchange','Biology','mechanism',
+             'Breathing lungs, alveolar air sacs, thin exchange surfaces, moving red blood cells and opposing oxygen/carbon dioxide transfer'),
     Template("light-prism", "Light Through a Prism", "Science", "prism",
              "An incoming beam and the colors that leave a glass prism at different angles"),
     Template("sound-octave", "Sound and Octaves", "Science", "sound",
@@ -72,6 +82,16 @@ MOTION_TEMPLATE = Template("motion", "Reel motion", "Custom", "motion",
 
 
 def matching_subjects(prompt):
+    from biology_explainers import biology_topic
+    biological=biology_topic(prompt)
+    if biological:
+        return [TEMPLATES[biological]]
+    from electrical_relay import matches_relay
+    if matches_relay(prompt):
+        return [TEMPLATES["dc-relay"]]
+    from dc_circuit import matches_circuit
+    if matches_circuit(prompt):
+        return [TEMPLATES["dc-circuit"]]
     if re.search(r"\b(?:freewheels?|freehubs?|(?:bicycle|bike)\b.*\bpawls?|bicycle ratchets?)\b", prompt, re.I):
         return [TEMPLATES["freewheel-cutaway"]]
     terms = {

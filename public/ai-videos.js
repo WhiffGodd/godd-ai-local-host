@@ -6,6 +6,7 @@ const promptScene = {id: "generated", name: "AI illustrations"};
 const page = {
   templates: [], selected: null, preview: null, provider: null,
   generation: null, upload: null, channel: null, generating: false, uploading: false,
+  libraryCategory: "",
 };
 
 async function request(path, body) {
@@ -29,6 +30,7 @@ function message(id, text, error = false) {
 }
 
 function save() {
+  $("promptCount").textContent = `${$("prompt").value.length.toLocaleString()} / 12,000`;
   sessionStorage.setItem(storeKey, JSON.stringify({
     generation: page.generation, upload: page.upload, sceneOverride: page.selected?.id,
     prompt: $("prompt").value, voice: $("voice").value, maxSeconds: $("maxSeconds").value,
@@ -90,7 +92,11 @@ function previewScene(template) {
 }
 
 function drawLibrary() {
-  $("templateGrid").replaceChildren(...page.templates.map(template => {
+  const biological = page.libraryCategory === "Biology";
+  $("allScenes").setAttribute("aria-pressed", String(!biological));
+  $("biologyScenes").setAttribute("aria-pressed", String(biological));
+  $("biologyLibraryNote").hidden = !biological;
+  $("templateGrid").replaceChildren(...page.templates.filter(template => !biological || template.category === "Biology").map(template => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "template";
@@ -228,6 +234,9 @@ async function watchGeneration(draft) {
 
 async function generate() {
   if (page.generating || page.uploading || !page.templates.length) return;
+  if (/\b25\s*(?:-\s*|\s)(?:seconds?|secs?)\s*(?:long\s*)?[.!]?\s*$/i.test($("prompt").value)) {
+    $("maxSeconds").value = "25";
+  }
   $("checkGeneration").hidden = true;
   page.generating = true;
   generationControls();
@@ -263,8 +272,8 @@ async function refreshConnection() {
     const data = await request("/api/youtube/ai-videos/status");
     page.youtubeEnabled = data.enabled;
     page.channel = data.channel;
-    message("connectionStatus", data.channel ? "AI Studio channel · " + data.channel.title :
-      data.enabled ? "Choose a YouTube channel for AI Studio." : "YouTube sign-in is unavailable at this address.");
+    message("connectionStatus", data.channel ? "Mechanism Videos channel · " + data.channel.title :
+      data.enabled ? "Choose a YouTube channel for AI Mechanism Videos." : "YouTube sign-in is unavailable at this address.");
   } catch (error) {
     message("connectionStatus", error.message, true);
   }
@@ -328,15 +337,29 @@ $("visualStyle").addEventListener("change", () => {
   save();
 });
 $("useScene").addEventListener("click", () => chooseTemplate(page.preview));
+$("allScenes").addEventListener("click", () => { page.libraryCategory = ""; drawLibrary(); });
+$("biologyScenes").addEventListener("click", () => { page.libraryCategory = "Biology"; drawLibrary(); });
 for (const button of document.querySelectorAll("[data-topic]")) {
   button.addEventListener("click", () => {
     $("prompt").value = button.dataset.topic;
+    if (button.dataset.seconds) $("maxSeconds").value = button.dataset.seconds;
+    if (button.dataset.category) { page.libraryCategory = button.dataset.category; drawLibrary(); }
     $("prompt").focus();
     $("visualStyle").value = "auto";
-    chooseTemplate(null);
+    const scene = page.templates.find(template => template.id === button.dataset.scene);
+    chooseTemplate(scene || null);
+    if (scene) previewScene(scene);
   });
 }
 $("generator").addEventListener("input", save);
+$("prompt").addEventListener("paste", event => {
+  const input = $("prompt");
+  const pasted = event.clipboardData?.getData("text") || "";
+  if (input.value.length - (input.selectionEnd - input.selectionStart) + pasted.length > input.maxLength) {
+    event.preventDefault();
+    message("generationStatus", "This prompt exceeds 12,000 characters. Shorten it before pasting; your existing prompt has been kept.", true);
+  }
+});
 $("publishForm").addEventListener("input", save);
 
 $("connect").addEventListener("click", async () => {
@@ -406,7 +429,8 @@ async function initialize() {
   const saved = readSaved();
   $("prompt").value = saved.prompt || "";
   $("visualStyle").value = "auto";
-  if (["60", "90", "120"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
+  if (["25", "60", "90", "120"].includes(saved.maxSeconds)) $("maxSeconds").value = saved.maxSeconds;
+  $("promptCount").textContent = `${$("prompt").value.length.toLocaleString()} / 12,000`;
   if (Array.from($("voice").options).some(option => option.value === saved.voice)) $("voice").value = saved.voice;
   page.generation = saved.generation;
   page.upload = saved.upload;

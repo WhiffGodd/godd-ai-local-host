@@ -79,6 +79,9 @@ textarea::placeholder { color: #9b98b5; }
   #generator, .library, .output { padding: 14px; }
 }
 @media (max-width: 640px) {
+  .topbar nav { flex-wrap: wrap; gap: 6px; padding-block: 12px; }
+  .nav-links { flex-wrap: wrap; gap: 4px; }
+  .nav-links a { padding: 8px; font-size: .78rem; }
   .workbench { display: flex; flex-direction: column; }
   .composer, .output { width: 100%; }
   .workbench[data-generated="true"] .output { order: -1; }

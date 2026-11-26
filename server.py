@@ -391,7 +391,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                 validated = {"generated_video_id": generated, "thumbnail_time": 0.8}
             else:
                 if generated is not None:
-                    raise ValueError("Open AI Video Studio to upload a generated video.")
+                    raise ValueError("Open AI Mechanism Videos to upload a generated video.")
                 validated = validate_render_payload(payload)
                 if payload.get("thumbnail_time") is not None:
                     validated["thumbnail_time"] = thumbnail_time(payload["thumbnail_time"])
@@ -632,7 +632,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 origin = self.headers.get("Origin")
                 if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
-                    self.youtube_json(403, {"error": "Open AI Videos in the studio to generate a video."})
+                    self.youtube_json(403, {"error": "Open AI Mechanism Videos in the studio to generate a video."})
                     return
                 generation = validate_generation(payload)
                 self.youtube_json(202, AI_VIDEO_JOBS.submit(generation))

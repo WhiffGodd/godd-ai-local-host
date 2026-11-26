@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 
 _ROOT = Path(__file__).resolve().parent / ".visual-engine"
 _MODEL = "DreamShaper_8_pruned.safetensors"
-_SETUP = "Custom topics need the local image model. See AI Video Studio setup in the README."
+_SETUP = "Custom topics need the local image model. See AI Mechanism Videos setup in the README."
 _STYLE = ("photorealistic editorial photograph, realistic proportions and materials, "
           "detailed surfaces, soft directional studio lighting, vertical composition, subject centered, "
           "one continuous image, clean lower third, no lettering")

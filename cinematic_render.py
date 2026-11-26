@@ -117,6 +117,18 @@ void main() {
         pixel=surface_pixel(display_color(base));
         return;
     }
+    if (metal == 8.) {
+        float rim=pow(1.-abs(dot(N,V)),2.5);
+        pixel=vec4(display_color(base*(.18+rim)),.055+.28*rim);
+        return;
+    }
+    if (metal == 9.) {
+        float wrap=clamp(dot(N,L)*.55+.45,0.,1.);
+        float rim=pow(1.-abs(dot(N,V)),2.);
+        vec3 tissue=base*(.40+1.8*wrap)+vec3(.10,.025,.018)*pow(max(dot(-N,L),0.),2.);
+        pixel=vec4(display_color(tissue),.24+.36*rim);
+        return;
+    }
     if (metal == 5. || metal == 6.) {
         float pores=noise(local*91.);
         float mottling=noise(local*12.)*.60 + noise(local*36.)*.40;
@@ -376,6 +388,10 @@ class CinematicRenderer:
             eye = np.asarray(old_eye)+(np.asarray(eye)-old_eye)*amount
             focus = np.asarray(old_focus)+(np.asarray(focus)-old_focus)*amount
         self.last_camera = (np.asarray(eye).copy(),np.asarray(focus).copy())
+        if hasattr(shot,'camera'):
+            # Labels must project through the same camera as the rendered
+            # anatomy, including the eased transition between closeups.
+            shot.camera=self.last_camera
         space = shot.subject == "moon"
         light = (-3.9,4.8,5.4) if not space else (-5.,1.7,2.0)
         light_view = _perspective(1.,1.05) @ _look_at(light,(0,0,0))
@@ -384,7 +400,9 @@ class CinematicRenderer:
         self.shadow.clear(depth=1.)
         if not space:
             _matrix(self.depth_shader["view"], light_view)
-            for name, _, model, _ in objects:
+            for name, material, model, _ in objects:
+                if material[3] in (8.,9.):
+                    continue
                 _matrix(self.depth_shader["model"], model)
                 self._arrays(name)[2].render()
         self.multisample.use()
@@ -404,19 +422,33 @@ class CinematicRenderer:
         groups = part.groups if part else ()
         edge = part.mesh_edge if part else 0.
         self.shader["highlight_edge"].value = edge
+        # Glass is composited after opaque internals, with depth writes off.
+        import moderngl
+        objects.sort(key=lambda obj: obj[1][3] in (8.,9.))
+        transparent = False
         for name, material, model, group in objects:
+            if material[3] in (8.,9.) and not transparent:
+                transparent = True
+                self.ctx.enable(moderngl.BLEND)
+                self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+                self.multisample.depth_mask = False
             self.shader["material"].value = material
             self.shader["machined"].value = name.startswith(("gear", "ratchet", "drilled", "recessed")) or name in ("ring", "cylinder", "bolt")
             self.shader["rolling_mark"].value = name == "bearing-ball"
             self.shader["highlight"].value = float(group in groups and (not edge or name.startswith("gear")))
             _matrix(self.shader["model"], model)
             self._arrays(name)[1].render()
+        if transparent:
+            self.multisample.depth_mask = True
+            self.ctx.disable(moderngl.BLEND)
         self.ctx.copy_framebuffer(self.framebuffer,self.multisample)
         pixels = self.framebuffer.read(components=3)
         frame = Image.frombytes("RGB",self.size,pixels,"raw","RGB",0,-1)
         if part:
             layer, xy = _part_badge(part.label,self.size)
             frame.paste(layer,xy,layer)
+        if hasattr(shot,"overlay"):
+            shot.overlay(frame,elapsed)
         if shot.subject == "bearing":
             label = ("PARTS SEPARATED FOR INSPECTION" if shot.view == "exploded" else
                      "WORKING CUTAWAY" if shot.view in ("cutaway","cage","rolling-balls") else "WORKING BALL BEARING")
