@@ -15,6 +15,7 @@ from electrical_detail import rounded_route, swept_tube
 from mechanism_dynamics import CurrentTrack, conducting_wires
 from solid_geometry import solid_meshes
 from mechanism_animation import PALETTE
+from mechanism_attachments import attachments_for, attach_objects
 
 
 def extrude_profile(points, depth=.18):
@@ -63,9 +64,17 @@ def _wire(points,radius):
     return swept_tube(points,radius)
 
 
+def part_rotation(angle,axis):
+    if axis=='z':return spin(angle)
+    c,s=cos(angle),sin(angle)
+    if axis=='x':return np.array(((1,0,0,0),(0,c,-s,0),(0,s,c,0),(0,0,0,1)))
+    return np.array(((c,0,s,0),(0,1,0,0),(-s,0,c,0),(0,0,0,1)))
+
+
 class Mechanism3D:
     def __init__(self, mechanism):
         self.parts,self.actions = mechanism
+        self.attachments=attachments_for(self.parts)
         left,top,right,bottom = _bounds(mechanism)
         self.centre = ((left+right)/2,(top+bottom)/2)
         self.unit = .042
@@ -201,7 +210,7 @@ class Mechanism3DShot:
             pivot = self.model.world(component.pivot)
             movement = np.array((dx,-dy,0.))*self.model.unit
             factor=biological_scale*max(.025,1-dissolved)**(1/3)
-            matrix = translate(*(pivot+movement))@spin(-turn)@scale(sx*factor,sy*factor,factor)@translate(*(-pivot))
+            matrix = translate(*(pivot+movement))@part_rotation(-turn,component.rotation_axis)@scale(sx*factor,sy*factor,factor)@translate(*(-pivot))
             if role=='switch_blade':
                 l,t=np.min(component.points,axis=0);r,b=np.max(component.points,axis=0)
                 anchor=self.model.world((l,(t+b)/2))
@@ -270,7 +279,7 @@ class Mechanism3DShot:
                 distance=max(2.,max(extent[1],extent[0]/aspect)/2/tan(.78/2)*1.45)
                 focus=centre
                 eye=centre+np.array((distance*.12,distance*.28,distance))
-        return objects,eye,focus
+        return attach_objects(objects,self.model.attachments),eye,focus
 
     def overlay(self,frame,time):
         if any(a.effect=='charge' and a.beat<=self.beat for a in self.model.actions):

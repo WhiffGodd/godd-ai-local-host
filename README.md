@@ -489,3 +489,45 @@ motion across narration cuts.
 These checks validate supported geometry, animation and basic connectivity.
 They are qualitative illustrations, not a general physics or medical simulator;
 review unfamiliar mechanisms and scientific narration before publishing.
+
+
+### Optional Blender prototype
+
+The standard renderer remains the default. The studio also offers **Detailed —
+Blender beta** for 3D exports. This uses an isolated background Blender process,
+procedural modeling, physical materials and studio lighting. It is substantially
+slower on a 4 GB GPU. Compare the five-second examples at
+`http://localhost:8080/render-comparison.html` before choosing it.
+
+On Windows, install a portable Blender 4.5 LTS copy in the ignored tools folder:
+
+```powershell
+python tools/install_blender.py
+```
+
+Restart the studio and select the rendering mode. A system installation is also
+supported; set `BLENDER_PATH` to its executable if it is not discovered. No Blender
+window needs to stay open. The installer verifies the official SHA-256 manifest;
+the portable binaries and intermediate renders are not tracked by Git.
+
+Custom solid parts now support `lathe` and `extrude` operations with validated,
+closed 2D profiles. This permits stepped shafts, hollow bodies, contoured levers
+and other parts without introducing a new topic-specific scene. Revolved parts
+retain circular cross-sections. Part `rotation_axis` can be x/y/z. Optional
+`parent` links describe rigid attachments; the root drives their movement in
+both backends, while independently moving joints remain separate. Missing and
+cyclic attachments are rejected, and attached swept bounds are checked.
+
+Reproduce the five-second renderer comparisons without invoking an AI model:
+
+```powershell
+python tools/preview_blender.py --case all --renderer both --samples 32 --output .tools/blender-final
+python tools/preview_blender.py --case profiles --renderer both --samples 32 --output .tools/blender-final
+python tools/publish_render_previews.py --source .tools/blender-final
+```
+
+These fixed-plan comparisons isolate rendering, geometry and kinematics. They do
+not establish that the local AI can correctly plan every arbitrary mechanism.
+The existing narration, subtitle timing, downloads and YouTube workflow are used
+for either renderer. No model-generated Python is executed: Blender receives
+validated geometry and pose data through a fixed worker.

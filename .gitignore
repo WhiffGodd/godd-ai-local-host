@@ -18,3 +18,4 @@ client_secret*.json
 # Locally generated caption verification files
 public/*.captions.json
 public/speech_accuracy_check.json
+.tools/

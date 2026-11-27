@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Animate a model-planned cutaway using validated drawing and motion data."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from math import cos, dist, isfinite, radians, sin, tau
 import re
@@ -12,6 +12,7 @@ from cinematic_render import _part_badge
 from explainer_parts import Part
 from biological_components import BIOLOGICAL_SHAPES
 from solid_geometry import read_solids
+from mechanism_attachments import attachments_for
 
 
 PALETTE = {
@@ -185,6 +186,8 @@ class Component:
     links: tuple = ()
     geometry: tuple = ()
     electrical_role: str = ''
+    parent: str = ''
+    rotation_axis: str = 'z'
 
 
 @dataclass(frozen=True)
@@ -223,7 +226,12 @@ def read_mechanism(data, beats, *, require_animation=True):
         electrical_role=item.get('electrical_role','')
         if electrical_role not in ('','source','load','conductor'):
             raise ValueError(f'{name}: unsupported electrical role')
-        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points,links,geometry,electrical_role)
+        parent=item.get('parent','')
+        if not isinstance(parent,str):raise ValueError(f'{name}: rigid parent must be a part name')
+        axis=item.get('rotation_axis','z')
+        if axis not in ('x','y','z'):raise ValueError(f'{name}: rotation axis must be x, y or z')
+        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points,links,geometry,electrical_role,parent,axis)
+    bindings=attachments_for(tuple(components.values()))
     actions = []
     for item in events:
         beat, effect = item["beat"], item["effect"]
@@ -260,6 +268,8 @@ def read_mechanism(data, beats, *, require_animation=True):
             raise ValueError('Dissolve needs a tablet/capsule and a fraction between 0 and 1')
         if effect=='pulse' and (components[name].shape not in BIOLOGICAL_SHAPES or not 0<=amount[0]<=4 or not 0<=amount[1]<=.25):
             raise ValueError('Biological pulse needs 0..4 cycles per second and 0..0.25 amplitude')
+        if components[name].part.label in bindings and effect in ('move','turn','spin','expand') and not (components[name].shape=='motor' and effect in ('turn','spin')):
+            continue
         actions.append(Action(beat, components[name].part.label, effect, amount, start, end))
     if require_animation and not actions:
         raise ValueError('The animation has no nonzero motion or changing state')
@@ -375,17 +385,21 @@ def _outline(component):
 def _bounds(mechanism):
     parts, actions = mechanism
     points = []
+    bindings=attachments_for(parts);by_name={p.part.label:p for p in parts}
     for component in parts:
-        events = tuple(action for action in actions if action.part == component.part.label)
+        root=component
+        while root.part.label in bindings:root=by_name[bindings[root.part.label]]
+        proxy=replace(component,pivot=root.pivot,points=tuple(_outline(component)),shape='contour') if root is not component else component
+        events = tuple(action for action in actions if action.part == root.part.label and not (root is not component and root.shape=='motor' and action.effect in ('turn','spin')))
         points.extend(_outline(component))
-        spins=any(a.effect=='spin' and a.amount[0] for a in events)
+        spins=any(a.effect=='spin' and a.amount[0] for a in events) or root.rotation_axis!='z' and any(a.effect=='turn' and a.amount[0] for a in events)
         for action in events:
             for index in range(9):
                 fraction = action.start+(action.end-action.start)*index/8
-                outline,centre,_,_=_transform(component,events,action.beat,fraction)
+                outline,centre,_,_=_transform(proxy,events,action.beat,fraction)
                 points.extend(outline)
                 if spins:
-                    radius=max(dist(centre,p) for p in outline)
+                    radius=max(dist(centre,p) for p in outline)*(1.2 if root.rotation_axis!='z' else 1)
                     points.extend((centre[0]+dx*radius,centre[1]+dy*radius) for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)))
     return _envelope(points)
 

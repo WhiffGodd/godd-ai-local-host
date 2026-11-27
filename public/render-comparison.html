@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compare 3D Rendering · Godd AI</title><link rel="stylesheet" href="/ai-videos.css">
+<style>
+main{max-width:920px;margin:38px auto;padding:0 20px 50px}h1{font-size:clamp(2rem,5vw,3rem)}p{color:var(--muted);line-height:1.6}
+.controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:24px 0}.controls>div{flex:1;min-width:220px}.controls button{height:44px}
+.comparison{display:grid;grid-template-columns:1fr 1fr;gap:20px}.sample{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px}
+.sample h2{margin-bottom:12px}.sample video{width:100%;max-height:560px;background:#080b13;border-radius:8px;aspect-ratio:9/16}.timing{font-size:.9rem;min-height:1.5em}
+a.back{color:var(--accent)}.note{border-left:3px solid var(--accent);padding-left:16px;margin-top:24px}@media(max-width:560px){.comparison{gap:10px}.sample{padding:10px}.sample h2{font-size:1rem}}
+</style></head><body><main>
+<a class="back" href="/ai-videos.html">← Back to AI Mechanism Videos</a>
+<h1 style="margin-top:24px">Compare 3D rendering</h1>
+<p>Five-second examples with the same parts, camera and movement. Compare materials, surface detail, transparency and attached movement before choosing a rendering mode.</p>
+<div class="controls"><div><label for="case">Example</label><select id="case"></select></div><button id="playBoth" class="primary" type="button">Play both</button></div>
+<div class="comparison"><section class="sample"><h2>Standard — faster</h2><video id="standard" controls muted playsinline loop preload="metadata" aria-label="Standard renderer comparison"></video><p id="standardTime" class="timing"></p></section>
+<section class="sample"><h2>Detailed — Blender beta</h2><video id="blender" controls muted playsinline loop preload="metadata" aria-label="Blender renderer comparison"></video><p id="blenderTime" class="timing"></p></section></div>
+<p id="status" role="status">Loading comparisons…</p>
+<p class="note">These fixed-plan samples check rendering and motion. They do not measure how accurately the AI interprets a new prompt. Timings are local prototype measurements at 360 × 640 and 30 fps; your full-resolution videos and computer will take different amounts of time.</p>
+</main><script>
+const element=id=>document.getElementById(id);let data;
+function choose(){const item=data.cases.find(c=>c.id===element('case').value);for(const engine of ['standard','blender']){const video=element(engine);video.pause();video.poster=item[engine].poster;video.src=item[engine].video;video.load();element(engine+'Time').textContent='Five-second render: '+item[engine].seconds+' seconds';}element('status').textContent=item.title+' · five-second comparison';}
+element('case').addEventListener('change',choose);element('playBoth').addEventListener('click',()=>{for(const engine of ['standard','blender']){element(engine).currentTime=0;element(engine).play().catch(()=>{});}});
+fetch('/render-comparison.json').then(r=>{if(!r.ok)throw Error();return r.json();}).then(value=>{data=value;for(const item of data.cases){const option=document.createElement('option');option.value=item.id;option.textContent=item.title;element('case').append(option);}choose();}).catch(()=>element('status').textContent='Comparison clips are not installed yet. See the local setup guide.');
+</script></body></html>

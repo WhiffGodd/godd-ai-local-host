@@ -36,9 +36,10 @@ from electrical_relay import RelayShot, matches_relay, relay_mechanism, relay_st
 from biology_explainers import biology_mechanism, biology_storyboard, biology_topic
 from biology_shots import BIOLOGY_SHOTS
 from mechanism_planner import plan_custom_mechanism
-from planning_json import planning_json
+from planning_json import planning_json, compact_local_schema
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
+from blender_renderer import BlenderRenderer, blender_executable, blender_settings
 
 
 OLLAMA_MODEL = os.environ.get("AI_VIDEO_OLLAMA_MODEL", "qwen3:4b")
@@ -194,7 +195,7 @@ def start_local_ollama():
 
 
 def generation_settings():
-    visuals = visual_settings()
+    visuals = {**visual_settings(),**blender_settings()}
     if os.environ.get("AI_VIDEO_GEMINI_API_KEY"):
         return {**visuals, "available": True, "provider": "Gemini"}
     installed = _ollama_models()
@@ -227,8 +228,13 @@ def validate_generation(payload):
     visual_style = payload.get("visual_style", "auto")
     if visual_style not in ("auto", "motion"):
         raise ValueError("Choose Reel motion or 3D cutaway.")
+    renderer=payload.get("renderer","standard")
+    if renderer not in ("standard","blender"):
+        raise ValueError("Choose standard or detailed 3D rendering.")
+    if renderer=="blender" and not blender_executable():
+        raise ValueError("Blender is unavailable. Install Blender or choose the standard renderer.")
     return {"prompt": prompt.strip(), "template": template, "example": example, "voice": voice,
-            "max_seconds": max_seconds, "visual_style": visual_style}
+            "max_seconds": max_seconds, "visual_style": visual_style,"renderer":renderer}
 
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -350,6 +356,7 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
         result = "".join(part.get("text", "") for part in response.json()["candidates"][0]["content"]["parts"]
                          if not part.get("thought"))
     else:
+        schema=compact_local_schema(schema)
         motion_story = "hook_objects" in schema["properties"]
         layout = any(name in schema['properties'] for name in ('components','parts','actions'))
         staged_layout=layout and not all(name in schema['properties'] for name in ('parts','actions'))
@@ -1027,7 +1034,9 @@ def render_explainer(payload, report_progress=None):
                    "-movflags", "+faststart", output]
         try:
             report("rendering", 0)
-            render_context = nullcontext() if custom or reel_motion else CinematicRenderer()
+            detailed=payload.get("renderer")=="blender" and not (custom or reel_motion)
+            progress_step=1 if detailed else 5
+            render_context = nullcontext() if custom or reel_motion else (BlenderRenderer((WIDTH,HEIGHT),model=mechanism_model) if detailed else CinematicRenderer())
             with render_context as renderer, (work / "ffmpeg.log").open("wb") as log:
                 if mechanism_model:
                     mechanism_model.upload(renderer)
@@ -1083,7 +1092,7 @@ def render_explainer(payload, report_progress=None):
                                 encoder.stdin.write(picture.tobytes())
                                 rendered_frames += 1
                                 percent = rendered_frames * 100 // total_frames
-                                if percent >= last_percent + 5 and percent < 100:
+                                if percent >= last_percent + progress_step and percent < 100:
                                     report("rendering", percent)
                                     last_percent = percent
                         encoder.stdin.close()
@@ -1095,6 +1104,7 @@ def render_explainer(payload, report_progress=None):
                             encoder.kill()
             return output, {"title": title, "description": description, "template": template.name,
                             "duration": total_frames / FPS, "scene_source": scene_source,
+                            "renderer": "blender" if detailed else "standard",
                             "views": [scene["view"] for scene in scenes]}
         except BaseException as error:
             Path(output).unlink(missing_ok=True)

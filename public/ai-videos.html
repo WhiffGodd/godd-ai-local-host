@@ -65,6 +65,14 @@
               <option value="120">2 minutes</option>
             </select>
           </div>
+          <div class="voice-setting">
+            <label for="renderQuality">3D rendering</label>
+            <select id="renderQuality">
+              <option value="standard">Standard — faster</option>
+              <option value="blender" id="blenderOption" disabled>Detailed — Blender beta</option>
+            </select>
+            <p class="status">Detailed rendering uses improved materials and modeled surfaces. It takes longer. <a href="/render-comparison.html">Compare five-second examples</a>.</p>
+          </div>
           <div class="generate-actions">
             <button id="generate" class="primary" type="submit" disabled>Generate video</button>
           </div>

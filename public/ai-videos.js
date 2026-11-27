@@ -34,7 +34,7 @@ function save() {
   sessionStorage.setItem(storeKey, JSON.stringify({
     generation: page.generation, upload: page.upload, sceneOverride: page.selected?.id,
     prompt: $("prompt").value, voice: $("voice").value, maxSeconds: $("maxSeconds").value,
-    visualStyle: $("visualStyle").value,
+    visualStyle: $("visualStyle").value, renderQuality: $("renderQuality").value,
     styleVersion: 3,
     draft: $("video").hidden ? null :
       Object.fromEntries(["title", "description", "visibility", "audience"].map(id => [id, $(id).value])),
@@ -247,7 +247,7 @@ async function generate() {
   try {
     const job = await request("/api/ai-videos", {
       prompt: $("prompt").value.trim(), template: page.selected?.id || "auto", voice: $("voice").value,
-      visual_style: $("visualStyle").value,
+      visual_style: $("visualStyle").value, renderer: $("renderQuality").value,
       max_seconds: Number($("maxSeconds").value),
     });
     page.generation = job.id;
@@ -423,6 +423,7 @@ $("publishForm").addEventListener("submit", async event => {
 });
 
 function updateVisualMode(settings) {
+  $("blenderOption").disabled = !settings.blender_available;
   $("visualMode").textContent = "Matching topics use working 3D models. Other topics use AI-planned 3D cutaways. Select a scene to use and preview it.";
   $("buildScene").disabled = settings.custom_visuals === false;
   $("buildScene").title = settings.custom_visuals_setup || "";
@@ -455,6 +456,8 @@ async function initialize() {
     const data = await request("/api/ai-videos/templates");
     page.templates = data.templates;
     page.provider = data;
+    $("blenderOption").disabled = !data.blender_available;
+    $("renderQuality").value = saved.renderQuality === "blender" && data.blender_available ? "blender" : "standard";
     updateVisualMode(data);
     drawLibrary();
     page.selected = page.templates.find(template => template.id === saved.sceneOverride) || null;
@@ -472,5 +475,7 @@ async function initialize() {
     message("generationStatus", "The template library could not load. Refresh the studio to retry.", true);
   }
 }
+
+$("renderQuality").addEventListener("change", save);
 
 initialize();

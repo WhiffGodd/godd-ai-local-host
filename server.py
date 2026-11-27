@@ -563,11 +563,13 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
                          "/youtube-studio.js": "public/youtube-studio.js",
                          "/privacy.html": "public/privacy.html",
                          "/ai-videos": "public/ai-videos.html", "/ai-videos.html": "public/ai-videos.html",
+                         "/render-comparison.html": "public/render-comparison.html",
+                         "/render-comparison.json": "public/render-comparison.json",
                          "/ai-videos.js": "public/ai-videos.js", "/ai-videos.css": "public/ai-videos.css"}
         asset = static_assets.get(path)
         if asset is None and path.startswith("/cinematic/"):
             name, extension = os.path.splitext(path.removeprefix("/cinematic/"))
-            if name in TEMPLATES and extension in (".webp", ".webm"):
+            if (name in TEMPLATES or re.fullmatch(r"preview-(motor|latch|alveolus|profiles)-(standard|blender)",name)) and extension in (".webp", ".webm"):
                 asset = f"public/cinematic/{name}{extension}"
         if asset is None:
             self.send_error(404, "File not found")

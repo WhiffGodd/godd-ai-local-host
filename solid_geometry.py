@@ -10,9 +10,10 @@ import numpy as np
 from PIL import ImageColor
 
 from cinematic_geometry import mesh
+from parametric_profiles import read_profile, profile_mesh
 
 
-PRIMITIVES=('box','cylinder','sphere','ring','shell')
+PRIMITIVES=('box','cylinder','sphere','ring','shell','lathe','extrude')
 
 
 @dataclass(frozen=True)
@@ -22,18 +23,25 @@ class SolidPiece:
     size: tuple
     axis: str
     color: str
+    profile: tuple = ()
 
     def data(self):
-        return dict(primitive=self.primitive,center=list(self.center),size=list(self.size),axis=self.axis,color=self.color)
+        data=dict(primitive=self.primitive,center=list(self.center),size=list(self.size),axis=self.axis,color=self.color)
+        if self.profile:data['profile']=[list(p) for p in self.profile]
+        return data
 
 
 def solid_schema(colors):
     triple=lambda lo,hi:dict(type='array',minItems=3,maxItems=3,items=dict(type='number',minimum=lo,maximum=hi))
-    return dict(type='array',minItems=1,maxItems=6,items=dict(type='object',additionalProperties=False,
-        properties=dict(primitive=dict(type='string',enum=list(PRIMITIVES)),center=triple(0,1),
-                        size=triple(.02,1),axis=dict(type='string',enum=['x','y','z']),
-                        color=dict(type='string',enum=list(colors))),
-        required=['primitive','center','size','axis','color']))
+    basic=dict(type='object',additionalProperties=False,properties=dict(
+        primitive=dict(type='string',enum=['box','cylinder','sphere','ring','shell']),center=triple(0,1),
+        size=triple(.02,1),axis=dict(type='string',enum=['x','y','z']),color=dict(type='string',enum=list(colors))),
+        required=['primitive','center','size','axis','color'])
+    profiled=copy.deepcopy(basic)
+    profiled['properties']['primitive']['enum']=['lathe','extrude']
+    profiled['properties']['profile']=dict(type='array',minItems=3,maxItems=32,items=dict(type='array',minItems=2,maxItems=2,items=dict(type='number',minimum=0,maximum=1)))
+    profiled['required'].append('profile')
+    return dict(type='array',minItems=1,maxItems=6,items=dict(anyOf=[basic,profiled]))
 
 
 def read_solids(value,name,colors):
@@ -54,7 +62,8 @@ def read_solids(value,name,colors):
             raise ValueError(f'{name}.geometry[{i}] extends outside its part: center +/- size/2 must fit 0..1')
         if item.get('primitive') not in PRIMITIVES or item.get('axis') not in ('x','y','z') or item.get('color') not in colors:
             raise ValueError(f'{name}.geometry[{i}] has an unsupported primitive, axis or material color')
-        result.append(SolidPiece(item['primitive'],center,size,item['axis'],item['color']))
+        profile=read_profile(item.get('profile'),f'{name}.geometry[{i}]') if item['primitive'] in ('lathe','extrude') else ()
+        result.append(SolidPiece(item['primitive'],center,size,item['axis'],item['color'],profile))
     return tuple(result)
 
 
@@ -89,9 +98,11 @@ def fit_solids(value):
 
 
 @lru_cache(maxsize=12)
-def _unit_mesh(primitive,axis):
-    source={'box':'beveled-box','cylinder':'cylinder','sphere':'sphere','ring':'groove','shell':'shell'}[primitive]
-    vertices=np.asarray(mesh(source),dtype=np.float64).copy()
+def _unit_mesh(primitive,axis,profile=()):
+    if primitive in ('lathe','extrude'):vertices=profile_mesh(primitive,profile)
+    else:
+        source={'box':'beveled-box','cylinder':'cylinder','sphere':'sphere','ring':'groove','shell':'shell'}[primitive]
+        vertices=np.asarray(mesh(source),dtype=np.float64).copy()
     rotation=np.eye(3)
     if axis=='x':rotation=np.array([[0,0,1],[0,1,0],[-1,0,0]])
     if axis=='y':rotation=np.array([[1,0,0],[0,0,1],[0,-1,0]])
@@ -106,6 +117,15 @@ def _unit_mesh(primitive,axis):
     return vertices
 
 
+def physical_dimensions(primitive,axis,dimensions):
+    dimensions=np.asarray(dimensions,dtype=float).copy()
+    if primitive=='lathe':
+        radial=[i for i in range(3) if i!='xyz'.index(axis)]
+        diameter=min(dimensions[radial])
+        dimensions[radial]=diameter
+    return dimensions
+
+
 def solid_meshes(component,world,palette):
     left,top=np.min(component.points,axis=0);right,bottom=np.max(component.points,axis=0)
     unit=np.linalg.norm(world((1,0))-world((0,0)))
@@ -114,7 +134,7 @@ def solid_meshes(component,world,palette):
     result=[]
     cutaway=bool(re.search(r'\b(?:housing|casing|enclosure|case|shell)\b',component.part.label,re.I))
     for piece in component.geometry:
-        vertices=_unit_mesh(piece.primitive,piece.axis).copy()
+        vertices=_unit_mesh(piece.primitive,piece.axis,piece.profile).copy()
         if cutaway and piece.primitive in ('box','cylinder','sphere'):
             triangles=vertices.reshape(-1,3,6)
             # Remove the camera-facing wall of an educational cutaway instead
@@ -122,7 +142,7 @@ def solid_meshes(component,world,palette):
             vertices=triangles[triangles[:,:,5].mean(axis=1)<=.15].reshape(-1,6).copy()
         cx,cy,cz=piece.center
         centre=world((left+cx*(right-left),top+cy*(bottom-top)),(cz-.5)*depth)
-        dimensions=np.array((w,h,depth))*piece.size
+        dimensions=physical_dimensions(piece.primitive,piece.axis,np.array((w,h,depth))*piece.size)
         vertices[:,:3]=vertices[:,:3]*dimensions+centre
         vertices[:,3:]/=dimensions
         vertices[:,3:]/=np.linalg.norm(vertices[:,3:],axis=1,keepdims=True)

@@ -70,6 +70,16 @@ class ElectricalDetailTests(unittest.TestCase):
         self.assertEqual(_electrical_shape('Switch blade','contour'),'contour')
         self.assertEqual(_electrical_shape('Motor shaft','oval'),'oval')
 
+    def test_motor_armature_clears_the_stationary_magnets_at_multiple_sizes(self):
+        for points in (((25,20),(75,80)),((40,40),(60,60)),((5,10),(95,90))):
+            item=component('motor',points=points)
+            model=Mechanism3D(((item,),()))
+            rotor=np.concatenate([row[3][:,:3] for row in model.compiled if model.roles[row[2]]=='rotor'])
+            centre=model.world(item.pivot)
+            radius=min(np.ptp(np.array(points),axis=0))*model.unit*.40
+            self.assertLess(np.linalg.norm(rotor[:,:2]-centre[:2],axis=1).max(),radius*.74)
+            self.assertTrue(np.isfinite(rotor).all())
+
     def test_motor_only_rotates_the_rotor_leaving_case_magnets_and_brushes_fixed(self):
         item=component('motor')
         model=Mechanism3D(((item,),(Action(1,'Motor','turn',(120,0),0,1),)))

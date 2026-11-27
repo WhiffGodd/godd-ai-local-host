@@ -9,6 +9,7 @@ from math import cos, sin, tau, pi
 import numpy as np
 
 from cinematic_geometry import mesh, scale, translate
+from parametric_profiles import profile_mesh
 from electrical_detail import printed, revolved, rounded_route, route_slice, smooth_profile
 
 COPPER = (.84,.37,.15,.80)
@@ -199,31 +200,45 @@ def electrical_meshes(component, world, wire, switch_blade=True):
         # Separate copper coils, commutator and shaft rotate as one assembly.
         w,h=width*u,height*u
         radius=min(w,h)*.40
-        primitive('ring',(cx,cy),(radius,radius,.30),CHROME,'stator',z=-.07)
-        primitive('cylinder',(cx,cy),(radius*.95,radius*.95,.025),CHROME,'stator',z=-.22)
+        primitive('ring',(cx,cy),(radius,radius,radius*.30),CHROME,'stator',z=-radius*.07)
+        # Revolved backplate with a real shaft bore, shared with generic CAD profiles.
+        plate=profile_mesh('lathe',((.065/.95,0),(1,0),(1,1),(.065/.95,1))).astype(np.float32)
+        dimensions=np.array((radius*1.9,radius*1.9,radius*.025))
+        plate[:,:3]=plate[:,:3]*dimensions+world((cx,cy),-radius*.22)
+        plate[:,3:]/=dimensions;plate[:,3:]/=np.linalg.norm(plate[:,3:],axis=1,keepdims=True)
+        result.append((plate,CHROME,'stator'))
         for angle in (pi/4,3*pi/4,5*pi/4,7*pi/4):
             position=(cx+radius*.86*cos(angle)/u,cy+radius*.86*sin(angle)/u)
-            primitive('recessed-bolt',position,(radius*.06,radius*.06,.03),CHROME,'stator',z=.10)
+            primitive('recessed-bolt',position,(radius*.06,radius*.06,radius*.03),CHROME,'stator',z=radius*.10)
         for sign in (-1,1):
-            primitive("beveled-box",(cx,cy+sign*radius*.68/u),(radius*.98,radius*.34,.19),(.65,.14,.10,.4) if sign<0 else (.10,.29,.63,.4),"stator")
-            result.append((printed('N' if sign<0 else 'S',world((cx,cy+sign*radius*.68/u),.098),radius*.25,radius*.20),INK,'stator'))
+            primitive("beveled-box",(cx,cy+sign*radius*.83/u),(radius*.75,radius*.18,radius*.19),(.65,.14,.10,.4) if sign<0 else (.10,.29,.63,.4),"stator")
+            result.append((printed('N' if sign<0 else 'S',world((cx,cy+sign*radius*.83/u),radius*.098),radius*.25,radius*.14),INK,'stator'))
         for angle in (0,tau/3,2*tau/3):
             center=world((cx,cy))
             radial=np.array((cos(angle),sin(angle),0.))
             side=np.array((-sin(angle),cos(angle),0.))
+            # Stacked iron sheets form a real armature inside each winding.
+            # All three cores, coils, commutator and shaft share the rotor pose.
+            for layer in range(9):
+                vertices=np.asarray(mesh('box'),dtype=np.float32).copy()
+                basis=np.column_stack((radial*radius*.60,side*radius*.17,np.array((0,0,radius*.008))))
+                vertices[:,:3]=vertices[:,:3]@basis.T+center+radial*radius*.38+np.array((0,0,(layer-4)*radius*.010))
+                vertices[:,3:]=vertices[:,3:]@np.linalg.inv(basis)
+                vertices[:,3:]/=np.linalg.norm(vertices[:,3:],axis=1,keepdims=True)
+                result.append((vertices,(.29,.34,.38,.78),'rotor'))
+            # Helical turns wrap around the core's tangent/depth cross-section;
+            # they are not flat, floating loops on the face of the motor.
             turns=[]
-            for turn in range(5):
-                distance=radius*(.14+turn*.035)
-                for t in np.linspace(0,1,60):
-                    a=tau*t
-                    turns.append(center+radial*(radius*.34+distance*cos(a))+side*(radius*.17*sin(a))+np.array((0,0,.02+turn*.012)))
-            result.append((wire(turns,.012),COPPER,'rotor'))
-        primitive('cylinder',(cx,cy),(.055,.055,.52),CHROME,'rotor',z=.05)
-        primitive('cylinder',(cx,cy),(.11,.11,.09),COPPER,'rotor',z=.22)
+            for i in range(13*32+1):
+                t=i/(13*32);a=tau*13*t
+                turns.append(center+radial*radius*(.12+.52*t)+side*radius*.12*cos(a)+np.array((0,0,radius*.085*sin(a))))
+            result.append((wire(turns,radius*.009),COPPER,'rotor'))
+        primitive('cylinder',(cx,cy),(radius*.055,radius*.055,radius*.52),CHROME,'rotor',z=radius*.05)
+        primitive('cylinder',(cx,cy),(radius*.11,radius*.11,radius*.09),COPPER,'rotor',z=radius*.22)
         for sign in (-1,1):
-            primitive('beveled-box',(cx+sign*.14/u,cy),(.07,.10,.075),BLACK,'stator',z=.22)
-        route([(left,cy),(cx-width*.35,cy)],.025,CHROME)
-        route([(cx+width*.35,cy),(right,cy)],.025,CHROME)
+            primitive('beveled-box',(cx+sign*radius*.14/u,cy),(radius*.07,radius*.10,radius*.075),BLACK,'stator',z=radius*.22)
+        route([(left,cy),(cx-width*.35,cy)],radius*.025,CHROME)
+        route([(cx+width*.35,cy),(right,cy)],radius*.025,CHROME)
     elif shape == "switch":
         primitive("beveled-box",(cx,cy+height*.25),(width*u,height*u*.40,.13),CERAMIC)
         for x in (left,right):

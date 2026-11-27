@@ -36,3 +36,16 @@ def planning_json(value):
     if not isinstance(result,dict):
         raise ValueError('The planner response must be a JSON object')
     return result
+
+
+def compact_local_schema(schema):
+    """Share repeated solid definitions so local inference keeps a small context."""
+    import copy
+    result=copy.deepcopy(schema)
+    variants=result.get('properties',{}).get('parts',{}).get('items',{}).get('anyOf',[])
+    geometries=[v['properties']['geometry'] for v in variants if 'geometry' in v.get('properties',{})]
+    if len(geometries)>1 and all(g==geometries[0] for g in geometries):
+        result.setdefault('$defs',{})['solidGeometry']=geometries[0]
+        for variant in variants:
+            if 'geometry' in variant.get('properties',{}):variant['properties']['geometry']={'$ref':'#/$defs/solidGeometry'}
+    return result

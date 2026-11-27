@@ -14,6 +14,7 @@ from planning_json import planning_json
 from mechanism_dynamics import conducting_wires, series_wire_directions
 from solid_geometry import fit_solids, solid_schema
 from connection_routing import route_wire
+from mechanism_attachments import validate_bindings
 
 
 def _key(name):
@@ -139,6 +140,8 @@ def _parts_data(data,beats):
                         'links':source.get(_key(p.part.label),{}).get('links',[])})
         if p.geometry:entries[-1]['geometry']=[piece.data() for piece in p.geometry]
         if p.electrical_role:entries[-1]['electrical_role']=p.electrical_role
+        if p.parent:entries[-1]['parent']=p.parent
+        if p.rotation_axis!='z':entries[-1]['rotation_axis']=p.rotation_axis
     by_name={_key(p['name']):p for p in entries}
     for part in entries:
         links=part['links']
@@ -256,7 +259,7 @@ def actions_schema(beats,parts):
 
 def inventory_schema(shapes,electrical):
     component=dict(type='object',additionalProperties=False,properties=dict(
-        name=dict(type='string',maxLength=42,pattern=r'^[^:\n]+$'),shape=dict(type='string',enum=[s for s in shapes if s!='wire']),
+        name=dict(type='string',maxLength=42,pattern=r'^[^:\n]+$'),parent=dict(type='string',maxLength=42),rotation_axis=dict(type='string',enum=['x','y','z']),shape=dict(type='string',enum=[s for s in shapes if s!='wire']),
         function=dict(type='string'),motion=dict(type='string',enum=['fixed','rotate','slide','deform','flow','state'])),
         required=['name','shape','function','motion'])
     properties=dict(components=dict(type='array',minItems=1,maxItems=16,items=component))
@@ -286,6 +289,11 @@ parts as crude cylinders or boxes. Coil already has copper windings, core and vi
 capacitor already has a marked can, leads and foil cutaway. Battery has a marked cell and
 internal layers. Use native assets for their actual identity and compound solids for parts
 they do not cover. A single complete native component can be sufficient for a mechanism.
+Use parent for rigid attachments, naming the exact parent component; omit it for roots.
+Use rotation_axis x/y/z for the actual shaft direction; z points toward the camera.
+Native motor's built-in shaft points along z. Other axes are available for custom parts.
+Drive motion on the root only. Rigid children follow it, keeping their relative positions;
+independently sliding or rotating joints are not rigid attachments. No cyclic parents.
 Do not reduce the whole requested mechanism to a box. Match the user's described system.
 If electrical, put EXTERNAL WIRES in connections only, with name/color/links. Components
 have NO links. Each wire links two component-name:terminal strings. Use the EXACT listed
@@ -323,8 +331,16 @@ def _inventory(data,shapes):
         if role not in ('none','source','load','conductor'):raise ValueError(f'{name}: unsupported electrical role')
         if shape!='solid':role='none'  # Native components already define their circuit behavior.
         if shape=='solid' and re.search(r'\b(?:power|voltage|dc)\s+(?:source|supply)\b',name,re.I):role='source'
-        clean=dict(name=name,shape=shape,function=item.get('function',''),motion=item['motion'],electrical_role='' if role=='none' else role)
+        clean=dict(name=name,shape=shape,function=item.get('function',''),motion=item['motion'],electrical_role='' if role=='none' else role,parent=item.get('parent',''),rotation_axis='z' if shape=='motor' else item.get('rotation_axis','z'))
         names[_key(name)]=clean;result.append(clean)
+    parents={}
+    for part in result:
+        if part['rotation_axis'] not in ('x','y','z'):raise ValueError(f'{part["name"]}: choose rotation_axis x, y or z')
+        if part['parent']:
+            parent=names.get(_key(part['parent']))
+            if parent is None:raise ValueError(f'{part["name"]}: rigid parent {part["parent"]!r} is missing')
+            parents[part['name']]=parent['name'];part['parent']=parent['name']
+    validate_bindings(parents,{p['name'] for p in result})
     wires=data.get('connections',[])
     if not isinstance(wires,list) or len(wires)+len(result)>24:raise ValueError('Components and wire connections together must fit 24 parts')
     missing=set()
@@ -389,7 +405,11 @@ def _inventory_geometry(data,beats,inventory):
     if inventory is None:return _parts_data(data,beats)
     data=copy.deepcopy(data)
     roles={_key(p['name']):p['electrical_role'] for p in inventory['components']}
+    parents={_key(p['name']):p.get('parent','') for p in inventory['components']}
+    axes={_key(p['name']):p.get('rotation_axis','z') for p in inventory['components']}
     for part in data['parts']:
+        if isinstance(part,dict):part['rotation_axis']=axes.get(_key(part['name']),'z')
+        if isinstance(part,dict) and parents.get(_key(part['name'])):part['parent']=parents[_key(part['name'])]
         if isinstance(part,dict) and roles.get(_key(part['name'])):
             part['electrical_role']=roles[_key(part['name'])]
     parts=_parts_data(dict(parts=data['parts']),beats)
@@ -433,6 +453,11 @@ do not use a single colored box for an unfamiliar machine. Each independently mo
 gets its own name and pivot. Local center and size are normalized triples in the part's box,
 0..1, and center +/- size/2 must fit inside it. Axis x/y/z is the cylinder/ring's shaft axis.
 Use metallic colors for manufactured surfaces. Prefer the smallest recognizable assembly.
+For distinctive manufactured parts use lathe or extrude with a closed profile of 3..32
+normalized [x,y] points. Extrude uses x-right/y-down outline coordinates. Lathe uses
+[radius,height] with radius 0..1 and height 0..1, revolved about the specified axis.
+Profiles must have area and cannot cross themselves. These operations can make stepped
+shafts, hollow tubes, contoured levers, knobs and casings instead of stacking plain blocks.
 Example compound part: {"name":"Flanged spindle","shape":"solid","color":"steel",
 "pivot":[50,50],"points":[[25,25],[75,75]],"geometry":[
 {"primitive":"cylinder","center":[0.5,0.5,0.5],"size":[0.2,0.2,1],"axis":"z","color":"steel"},

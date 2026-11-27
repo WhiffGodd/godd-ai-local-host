@@ -1,0 +1,66 @@
+{
+  "resolution": [
+    360,
+    640
+  ],
+  "fps": 30,
+  "duration": 5,
+  "cases": [
+    {
+      "id": "motor",
+      "title": "Electric motor",
+      "standard": {
+        "seconds": 1.1,
+        "video": "/cinematic/preview-motor-standard.webm",
+        "poster": "/cinematic/preview-motor-standard.webp"
+      },
+      "blender": {
+        "seconds": 45.7,
+        "video": "/cinematic/preview-motor-blender.webm",
+        "poster": "/cinematic/preview-motor-blender.webp"
+      }
+    },
+    {
+      "id": "latch",
+      "title": "Spring-loaded latch",
+      "standard": {
+        "seconds": 0.8,
+        "video": "/cinematic/preview-latch-standard.webm",
+        "poster": "/cinematic/preview-latch-standard.webp"
+      },
+      "blender": {
+        "seconds": 44.9,
+        "video": "/cinematic/preview-latch-blender.webm",
+        "poster": "/cinematic/preview-latch-blender.webp"
+      }
+    },
+    {
+      "id": "alveolus",
+      "title": "Alveolar gas exchange",
+      "standard": {
+        "seconds": 1.7,
+        "video": "/cinematic/preview-alveolus-standard.webm",
+        "poster": "/cinematic/preview-alveolus-standard.webp"
+      },
+      "blender": {
+        "seconds": 56.8,
+        "video": "/cinematic/preview-alveolus-blender.webm",
+        "poster": "/cinematic/preview-alveolus-blender.webp"
+      }
+    },
+    {
+      "id": "profiles",
+      "title": "Profile-built rotating assembly",
+      "standard": {
+        "seconds": 1.0,
+        "video": "/cinematic/preview-profiles-standard.webm",
+        "poster": "/cinematic/preview-profiles-standard.webp"
+      },
+      "blender": {
+        "seconds": 40.8,
+        "video": "/cinematic/preview-profiles-blender.webm",
+        "poster": "/cinematic/preview-profiles-blender.webp"
+      }
+    }
+  ]
+}
