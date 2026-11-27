@@ -20,7 +20,7 @@ PALETTE = {
 }
 ELECTRICAL_SHAPES = ("wire", "battery", "bulb", "led", "resistor", "capacitor", "coil", "motor", "terminal", "relay", "switch")
 SHAPES = ("plate", "contour", "oval", "gear", "pipe", "spring", "path", *ELECTRICAL_SHAPES, *BIOLOGICAL_SHAPES)
-EFFECTS = ("move", "turn", "expand", "flow", "energize", "current", "dissolve", "pulse")
+EFFECTS = ("move", "turn", "expand", "flow", "energize", "current", "charge", "switch", "dissolve", "pulse")
 
 
 def _object(**fields):
@@ -131,7 +131,8 @@ def _electrical_shape(name, shape):
 
     Preserve separately modeled subparts such as contacts and capacitor plates.
     """
-    if shape in ELECTRICAL_SHAPES:
+    if shape in ELECTRICAL_SHAPES and not re.fullmatch(
+            r'(?:battery|resistor|capacitor|switch|bulb|led|motor|coil|relay)(?: \d+)?',name,re.I):
         return shape
     if re.search(r'\b(?:terminal|filament|plate|electrode|contact|shaft|blade|housing|core|cover|lead|brush|armature)\b',name,re.I):
         return shape
@@ -141,6 +142,8 @@ def _electrical_shape(name, shape):
                            (r'\b(?:electric |DC )?motor\b','motor'),(r'\b(?:coil|solenoid|winding)s?\b','coil')):
         if re.search(pattern,name,re.I):
             return native
+    if re.fullmatch(r'(?:control |power |toggle )?switch(?: base)?',name,re.I):
+        return 'switch'
     if shape in ('pipe','path') and re.search(r'\b(?:wire|cable)s?\b',name,re.I):
         return 'wire'
     return shape
@@ -175,6 +178,7 @@ class Component:
     color: str
     pivot: tuple
     points: tuple
+    links: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -187,10 +191,10 @@ class Action:
     end: float
 
 
-def read_mechanism(data, beats):
+def read_mechanism(data, beats, *, require_animation=True):
     entries, events = data["parts"], data["actions"]
     if (not isinstance(entries,list) or not isinstance(events,list)
-            or not 3 <= len(entries) <= 24 or not 3 <= len(events) <= 64):
+            or not 1 <= len(entries) <= 24 or not (1 if require_animation else 0) <= len(events) <= 64):
         raise ValueError("Invalid mechanism size")
     components = {}
     for item in entries:
@@ -203,11 +207,13 @@ def read_mechanism(data, beats):
             raise ValueError("Invalid mechanism component")
         if shape in ("plate","gear","oval", *[s for s in ELECTRICAL_SHAPES if s != "wire"],
                      *[s for s in BIOLOGICAL_SHAPES if s not in ('blood_vessel','ureter','digestive_tube')]) and any(len(set(axis)) < 2 for axis in zip(*points)):
-            raise ValueError("A filled shape needs width and height")
+            raise ValueError(f"{name} ({shape}) has no width or height: {points}. Filled components need opposite corners with BOTH different x and different y, e.g. a thin horizontal base [[10,70],[90,74]]. Use pipe/path for a centreline")
         alias = re.escape(name) + ("" if name.endswith("s") else "s?")
         label = name[0].upper()+name[1:]
         part = Part(label, (label,), "detail", alias)
-        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points)
+        links=item.get('links',[])
+        links=tuple(tuple(link) for link in links) if links and all(isinstance(link,(tuple,list)) and len(link)==2 for link in links) else ()
+        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points,links)
     actions = []
     for item in events:
         beat, effect = item["beat"], item["effect"]
@@ -227,21 +233,26 @@ def read_mechanism(data, beats):
                 or (effect == "expand" and amount == (1,1))):
             continue
         if effect in ("flow","current") and components[name].shape not in ("pipe", "path", "wire",'blood_vessel','esophagus','intestine','neuron','ureter','digestive_tube'):
-            raise ValueError("Flow needs a connected route")
+            raise ValueError(f"{components[name].part.label}: {effect} needs a wire, pipe or connected route; never apply current to a solid component")
         if effect == "current" and not -1. <= amount[0] <= 1.:
             raise ValueError("Current level must be between -1 and 1")
         if effect == "energize" and not 0. <= amount[0] <= 1.:
             raise ValueError("Invalid heat, light, or pressure level")
+        if effect=='charge' and (components[name].shape!='capacitor' or not 0<=amount[0]<=1):
+            raise ValueError('Charge needs a capacitor and a normalized fraction between 0 and 1')
+        if effect=='switch' and (components[name].shape!='switch' or amount[0] not in (0,1)):
+            raise ValueError('Switch action needs a native switch and 0 (open) or 1 (closed)')
+        if effect=='turn' and components[name].shape=='switch':
+            raise ValueError('Use switch [0 or 1,0] to move the blade, not turn the fixed switch base')
         if effect=='dissolve' and (components[name].shape not in ('tablet','capsule') or not 0<=amount[0]<=1):
             raise ValueError('Dissolve needs a tablet/capsule and a fraction between 0 and 1')
         if effect=='pulse' and (components[name].shape not in BIOLOGICAL_SHAPES or not 0<=amount[0]<=4 or not 0<=amount[1]<=.25):
             raise ValueError('Biological pulse needs 0..4 cycles per second and 0..0.25 amplitude')
         actions.append(Action(beat, components[name].part.label, effect, amount, start, end))
-    if len({action.beat for action in actions}) < 3 or (all(action.effect == "energize" for action in actions)
-            and not any(part.shape in ELECTRICAL_SHAPES for part in components.values())):
-        raise ValueError("The animation needs at least three moving beats")
-    if all(action.effect in ("current","energize") and not action.amount[0] for action in actions):
-        raise ValueError("The electrical animation never switches on or carries current")
+    if require_animation and not actions:
+        raise ValueError('The animation has no nonzero motion or changing state')
+    if require_animation and all(action.effect in ("current","energize","charge","pulse","dissolve","switch") and not action.amount[0] for action in actions):
+        raise ValueError("The animation never moves or changes state")
     actions.sort(key=lambda action: (action.beat, action.start, action.end))
     mechanism = tuple(components.values()), tuple(actions)
     l,t,r,b = _bounds(mechanism)
@@ -254,10 +265,10 @@ def read_mechanism(data, beats):
     return mechanism
 
 
-def parse_mechanism_rows(data, beats):
+def parse_mechanism_rows(data, beats, *, require_animation=True):
     # Read older saved layouts too, while generating strictly typed JSON from now on.
     if data.get("parts") and isinstance(data["parts"][0], dict):
-        return read_mechanism(data, beats)
+        return read_mechanism({**data,'actions':data.get('actions',[])}, beats,require_animation=require_animation)
     def pair(text):
         return [float(value) for value in text.split(",")]
 
@@ -267,11 +278,11 @@ def parse_mechanism_rows(data, beats):
         parts.append({"name":name,"shape":shape,"color":color,"pivot":pair(pivot),
                       "points":[pair(point) for point in points.split()]})
     actions = []
-    for row in data["actions"]:
+    for row in data.get("actions",[]):
         beat,part,effect,amount,timing = (value.strip() for value in row.split("|"))
         start,end = pair(timing)
         actions.append({"beat":int(beat),"part":part,"effect":effect,"amount":pair(amount),"start":start,"end":end})
-    return read_mechanism({"parts":parts,"actions":actions},beats)
+    return read_mechanism({"parts":parts,"actions":actions},beats,require_animation=require_animation)
 
 
 def motion_state(events, beat, fraction):
@@ -300,9 +311,10 @@ def current_level(events, beat, fraction):
     """Persist signed current between beats, with an immediate open-contact stop."""
     level = 0.
     for action in events:
-        if action.effect == "current" and (action.beat < beat or
-                action.beat == beat and fraction >= action.start):
-            level = action.amount[0]
+        if action.effect == "current" and (action.beat < beat or action.beat == beat and fraction >= action.start):
+            target=action.amount[0]
+            p=1. if action.beat<beat else min(1.,max(0.,(fraction-action.start)/(action.end-action.start)))
+            level=0. if not target else level+(target-level)*(p*p*(3-2*p))
     return level
 
 

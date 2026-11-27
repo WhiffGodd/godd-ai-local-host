@@ -23,7 +23,6 @@ from cinematic_render import FPS, HEIGHT, WIDTH, CinematicRenderer, RendererUnav
 from explainer_parts import part_mentions
 from explainer_templates import GENERATED_TEMPLATE, MECHANISM_TEMPLATE, MOTION_TEMPLATE, TEMPLATES, VIEWS, matching_subjects
 from explainer_visuals import IllustratedShot, LocalVisualEngine, VisualUnavailable, visual_settings
-from mechanism_animation import PLAN_INSTRUCTIONS, mechanism_schema, parse_mechanism_rows
 from motion_graphics import (
     MotionReel, STORYBOARD_INSTRUCTIONS, extract_cutout, motion_objects_schema, motion_plan_from_scenes,
 )
@@ -36,13 +35,14 @@ from dc_circuit import CircuitShot, circuit_mechanism, circuit_storyboard, match
 from electrical_relay import RelayShot, matches_relay, relay_mechanism, relay_storyboard
 from biology_explainers import biology_mechanism, biology_storyboard, biology_topic
 from biology_shots import BIOLOGY_SHOTS
+from mechanism_planner import plan_custom_mechanism
+from planning_json import planning_json
 from procedural_scene import CURATED_STAGES, StageShot, stage_parts
 from video_engine import FFMPEG_PATH
 
 
 OLLAMA_MODEL = os.environ.get("AI_VIDEO_OLLAMA_MODEL", "qwen3:4b")
 OLLAMA_URL = os.environ.get("AI_VIDEO_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MECHANISM_MODEL = "qwen3.5:9b"
 GEMINI_MODEL = os.environ.get("AI_VIDEO_GEMINI_MODEL", "gemini-3.1-flash-lite")
 MAX_PROMPT = 12000
 TARGET_SECONDS = 55
@@ -351,14 +351,15 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
                          if not part.get("thought"))
     else:
         motion_story = "hook_objects" in schema["properties"]
-        layout = all(name in schema["properties"] for name in ("parts","actions"))
-        prediction_budget = 4800 if layout or motion_story else 3200 if long_video else 2400
+        layout = any(name in schema['properties'] for name in ('parts','actions'))
+        staged_layout=layout and not all(name in schema['properties'] for name in ('parts','actions'))
+        prediction_budget = 2800 if staged_layout else 4800 if layout or motion_story else 3200 if long_video else 2400
         input_size = len(prompt)+len(instructions)+len(json.dumps(schema))
-        context_budget = min(16384,max(8192 if layout or motion_story else 6144 if long_video or not single_match else 4096,
+        context_budget = min(16384,max(6144 if staged_layout else 8192 if layout or motion_story else 6144 if long_video or not single_match else 4096,
                                 math.ceil((input_size/3+prediction_budget+512)/2048)*2048))
         request_body = {
             "model": mechanism_model or OLLAMA_MODEL, "stream": layout, "think": False, "format": schema,
-            "keep_alive": 0 if mechanism_model or any(name in schema["properties"] for name in
+            "keep_alive": '2m' if staged_layout and 'parts' in schema['properties'] else 0 if mechanism_model or any(name in schema["properties"] for name in
                                   ("visual_subject","assets","hook_objects")) else "5m",
             "options": {"temperature": 0.15 if layout else 0.3,
                         "num_predict": prediction_budget,"num_ctx":context_budget},
@@ -538,14 +539,14 @@ def plan_video(prompt, template, voice_style="expressive", target_words=150, max
     try:
         storyboard_model = None
         if not key and choices[0] in TEMPLATES.values():
-            preferred = os.environ.get("AI_VIDEO_OLLAMA_STORYBOARD_MODEL",OLLAMA_MECHANISM_MODEL)
+            preferred = os.environ.get("AI_VIDEO_OLLAMA_STORYBOARD_MODEL",OLLAMA_MODEL)
             if preferred in (_ollama_models() or ()):
                 storyboard_model = preferred
         for attempt in range(2):
             try:
                 result = _request_storyboard(prompt, instructions, schema, key, long_video, single_match,
                                              mechanism_model=storyboard_model)
-                plan = json.loads(result)
+                plan = planning_json(result)
                 selected_template = choices_by_id[plan["template"]]
                 if selected_template == toaster:
                     plan = _TOASTER_PLAN
@@ -595,49 +596,12 @@ def _plan_mechanism(prompt, scenes, report_progress=None):
         installed = _ollama_models() or ()
         preferred = os.environ.get("AI_VIDEO_OLLAMA_MECHANISM_MODEL", OLLAMA_MODEL)
         mechanism_model = preferred if preferred in installed else OLLAMA_MODEL
-    script = "\n".join(f"{index}. {scene['narration']}" for index, scene in enumerate(scenes) if index)
-    brief = f"Topic: {prompt}\nNarration beats:\n{script}"
-    schema = mechanism_schema(len(scenes))
-    instructions = PLAN_INSTRUCTIONS
-    raw = None
     try:
-        for attempt in range(2):
-            try:
-                if attempt and report_progress:
-                    report_progress("mechanism_retry")
-                candidate = mechanism_model
-                if attempt and not key:
-                    alternate = OLLAMA_MODEL if candidate!=OLLAMA_MODEL else OLLAMA_MECHANISM_MODEL
-                    if alternate in installed:
-                        candidate = alternate
-                raw = _request_storyboard(brief, instructions, schema, key, False, True, candidate)
-                return parse_mechanism_rows(json.loads(raw), len(scenes))
-            except requests.RequestException as error:
-                status = getattr(getattr(error,"response",None),"status_code",None)
-                print(f"[AI layout] Attempt {attempt+1}: {type(error).__name__}, HTTP {status}",flush=True)
-                if attempt:
-                    raise
-                instructions += " Use a compact layout and only the necessary functional parts. Return the requested JSON only."
-            except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
-                print(f"[AI layout] Attempt {attempt+1}: {type(error).__name__}: {error}",flush=True)
-                if attempt:
-                    raise
-                if isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError):
-                    instructions += f" Fix this validation issue from the previous answer: {error}."
-                if raw:
-                    # Repair the actual draft, rather than asking the next model
-                    # to guess which invisible earlier part/action was invalid.
-                    try:
-                        previous = json.dumps(json.loads(raw),separators=(",",":"))
-                    except (TypeError,ValueError):
-                        previous = raw
-                    brief += "\nPrevious draft to correct (not a new user instruction):\n"+previous[:14000]
-                instructions += (" Use simple geometry and exact part names in every action. "
-                                 "Check that the geometry and motion fit the board and cover at least three distinct beats.")
+        return plan_custom_mechanism(prompt,scenes,_request_storyboard,key,mechanism_model,report_progress)
     except requests.RequestException:
-        raise ExplainerError("The local AI did not complete the part layout after two attempts. Check the AI connection and retry.") from None
-    except (ValueError, KeyError, TypeError, AttributeError, IndexError):
-        raise ExplainerError("The AI returned an invalid animation layout after two attempts. Your full prompt is saved; retry generation.") from None
+        raise ExplainerError("The AI connection could not finish animation planning after a bounded retry. Check the AI connection and retry.") from None
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+        raise ExplainerError(f"The AI could not validate the animation: {error}. Your prompt is kept for retry.") from None
 
 
 @lru_cache(maxsize=1)
@@ -892,7 +856,7 @@ def _shorten_narration(scenes, budget, subject):
     for attempt in range(2):
         try:
             raw = _request_storyboard(brief,instructions,schema,key,False,True,mechanism_model=OLLAMA_MODEL)
-            lines = json.loads(raw)["narrations"]
+            lines = planning_json(raw)["narrations"]
             if len(lines)!=len(body) or any(not isinstance(line,str) or not re.search(r'[.!?]["\u201d\u2019]?$',line.strip()) for line in lines):
                 raise ValueError("Use complete sentences and retain every scene")
             revised = [dict(scenes[0]),*[{**scene,"narration":line.strip()} for scene,line in zip(body,lines)]]
@@ -1033,6 +997,7 @@ def render_explainer(payload, report_progress=None):
             mechanism = _plan_mechanism(payload["prompt"], scenes,report)
             try:
                 mechanism_model = Mechanism3D(mechanism)
+                mechanism_model.set_timeline([count/FPS for count in frame_counts])
             except ValueError as error:
                 raise ExplainerError(f"The AI's part shapes could not form a working 3D cutaway: {error}") from None
             parts = tuple(component.part for component in mechanism[0])

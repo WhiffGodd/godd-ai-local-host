@@ -92,7 +92,7 @@ class LatchPlanningTests(unittest.TestCase):
                 _request_storyboard('Device','Instructions',mechanism_schema(6),None,False,True,OLLAMA_MODEL)
         response.close.assert_called_once()
 
-    def test_network_failure_gets_an_alternative_model_attempt(self):
+    def test_network_failure_retries_without_loading_a_larger_model(self):
         rows = {'parts':['Track|plate|steel|50,72|12,70 88,75',
                          'Gate|contour|blue|25,68|25,40 59,40 59,68 25,68',
                          'Handle|pipe|gold|30,48|30,48 45,48'],
@@ -101,7 +101,7 @@ class LatchPlanningTests(unittest.TestCase):
              patch('ai_video._request_storyboard',side_effect=[requests.ReadTimeout(),json.dumps(rows)]) as planner:
             mechanism = _plan_mechanism('Explain a sliding gate.',[{'narration':'The gate moves.'}]*4)
         self.assertEqual(len(mechanism[0]),3)
-        self.assertEqual([call.args[-1] for call in planner.call_args_list],[OLLAMA_MODEL,'qwen3.5:9b'])
+        self.assertEqual([call.args[-1] for call in planner.call_args_list],[OLLAMA_MODEL,OLLAMA_MODEL])
 
 
 if __name__=='__main__':

@@ -20,7 +20,7 @@ BLUE_SLEEVE = (.035,.12,.30,.18)
 INK = (.90,.92,.88,.03)
 
 
-def electrical_meshes(component, world, wire):
+def electrical_meshes(component, world, wire, switch_blade=True):
     left,top = np.min(component.points,axis=0)
     right,bottom = np.max(component.points,axis=0)
     cx,cy = (left+right)/2,(top+bottom)/2
@@ -161,7 +161,7 @@ def electrical_meshes(component, world, wire):
             route([(x,cy+height*.20),(x,cy+height*.43),(port+(-sign)*width*.04,cy+height*.43),
                    (port+(-sign)*width*.04,cy),(port,cy)],.025,CHROME,'lead')
         # A rolled foil/dielectric assembly, visible when a detail view opens the sleeve.
-        for material,offset in ((CHROME,0),(CERAMIC,.009)):
+        for material,offset,role in ((CHROME,0,'internal:positive_foil'),(CERAMIC,.003,'internal'),(CHROME,.006,'internal:negative_foil')):
             vertices=[]
             for index in range(600):
                 upper = h*.02 if cos(tau*8*(index+.5)/600)>.30 else h*.42
@@ -176,7 +176,7 @@ def electrical_meshes(component, world, wire):
                     r=radius*(.13+.72*step/600)+offset+extra
                     p=world(center)+np.array((r*sin(angle),upper,r*cos(angle)))
                     vertices.append((*p,0,1,0))
-            result.append((np.asarray(vertices,dtype=np.float32),material,'internal'))
+            result.append((np.asarray(vertices,dtype=np.float32),material,role))
     elif shape in ("coil","relay"):
         r=height*u*.30
         length=width*u*.78
@@ -230,6 +230,9 @@ def electrical_meshes(component, world, wire):
             primitive('cylinder',(x,cy),(.063,.063,.14),CHROME,z=.01)
             primitive('beveled-box',(x,cy),(.08,.012,.005),BLACK,z=.084)
             primitive('beveled-box',(x,cy),(.012,.08,.005),BLACK,z=.084)
+        if switch_blade:
+            route([(left,cy),(right,cy)],.030,COPPER,'switch_blade')
+            primitive('beveled-box',(cx,cy),(width*u*.27,height*u*.32,.11),BLACK,'switch_blade',z=.04)
     elif shape == "terminal":
         primitive('cylinder',(cx,cy),(width*u*.45,height*u*.45,.11),CHROME)
         primitive('beveled-box',(cx,cy),(width*u*.65,height*u*.08,.004),BLACK,z=.058)

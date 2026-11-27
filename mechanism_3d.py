@@ -12,6 +12,7 @@ from mechanism_animation import ELECTRICAL_SHAPES, _bounds, _outline, biological
 from biological_components import BIOLOGICAL_SHAPES, biological_mesh, biological_parts, biological_route
 from electrical_components import electrical_meshes
 from electrical_detail import rounded_route, swept_tube
+from mechanism_dynamics import CurrentTrack, conducting_wires
 
 
 def extrude_profile(points, depth=.18):
@@ -72,6 +73,8 @@ class Mechanism3D:
         self.compiled = []
         self.roles = {}
         self.routes = {}
+        self.switch_auto={}
+        self._conductive_cache={}
         electrical = any(part.shape in (*ELECTRICAL_SHAPES,*BIOLOGICAL_SHAPES) for part in self.parts)
         for index,component in enumerate(self.parts):
             name = "custom-cutaway-"+str(index)
@@ -89,7 +92,11 @@ class Mechanism3D:
             if component.shape == 'wire':
                 self.routes[component.part.label]=np.array([self.world(point,.085) for point in rounded_route(component.points)])
             if component.shape in ELECTRICAL_SHAPES:
-                for piece,(vertices,material,role) in enumerate(electrical_meshes(component,self.world,_wire)):
+                left,top=np.min(component.points,axis=0);right,bottom=np.max(component.points,axis=0)
+                manual_blade=component.shape=='switch' and any('blade' in p.part.label.casefold() and
+                    np.linalg.norm(np.array(p.pivot)-[left,(top+bottom)/2])<3 for p in self.parts if p is not component)
+                self.switch_auto[component.part.label]=component.shape=='switch' and not manual_blade
+                for piece,(vertices,material,role) in enumerate(electrical_meshes(component,self.world,_wire,switch_blade=not manual_blade)):
                     piece_name = name+"-"+str(piece)
                     self.roles[piece_name] = role
                     self.compiled.append((component,events,piece_name,vertices,material,z))
@@ -114,6 +121,24 @@ class Mechanism3D:
             metal = .78 if component.color in ("#91aabd","#30485f","#edf3e9","#eab15b") else .32
             events = tuple(action for action in self.actions if action.part==component.part.label)
             self.compiled.append((component,events,name,vertices,(*color,metal),z))
+        self.set_timeline([3.]*(max((a.beat for a in self.actions),default=0)+1))
+
+    def set_timeline(self,durations):
+        self.durations=list(durations)
+        self.current_tracks={p.part.label:CurrentTrack([a for a in self.actions if a.part==p.part.label],self.durations)
+                             for p in self.parts if p.shape=='wire'}
+
+    def logical_time(self,beat,fraction):
+        duration=self.durations[beat] if beat<len(self.durations) else self.durations[-1]
+        return sum(self.durations[:beat])+max(0,beat-len(self.durations))*duration+fraction*duration
+
+    def live_wires(self,beat,fraction):
+        closed={p.part.label.casefold():biological_level([a for a in self.actions if a.part==p.part.label],'switch',beat,fraction)>=.999
+                for p in self.parts if self.switch_auto.get(p.part.label)}
+        signature=tuple(sorted(closed.items()))
+        if signature not in self._conductive_cache:
+            self._conductive_cache[signature]=conducting_wires(self.parts,closed)
+        return self._conductive_cache[signature]
 
     def world(self, point, z=0.):
         return np.array(((point[0]-self.centre[0])*self.unit,
@@ -139,6 +164,8 @@ class Mechanism3DShot:
         fraction = min(1.,max(0.,time/max(self.duration-1/30,.01)))
         objects = []
         flow_parts=set()
+        charge_parts=set()
+        live=self.model.live_wires(self.beat,fraction)
         for component,events,name,_,material,z in self.model.compiled:
             dx,dy,turn,sx,sy,heat,flow = motion_state(events,self.beat,fraction)
             dissolved=biological_level(events,'dissolve',self.beat,fraction)
@@ -150,7 +177,7 @@ class Mechanism3DShot:
             if dissolved>=.999:
                 continue
             role = self.model.roles.get(name)
-            if role == 'internal' and self.view != 'detail':
+            if (role == 'internal' or role and role.startswith('internal:')) and self.view != 'detail':
                 continue
             if role in ('shell_front','shell_print') and self.view == 'detail' and component.shape in ('battery','capacitor'):
                 continue
@@ -164,13 +191,22 @@ class Mechanism3DShot:
             movement = np.array((dx,-dy,0.))*self.model.unit
             factor=biological_scale*max(.025,1-dissolved)**(1/3)
             matrix = translate(*(pivot+movement))@spin(-turn)@scale(sx*factor,sy*factor,factor)@translate(*(-pivot))
+            if role=='switch_blade':
+                l,t=np.min(component.points,axis=0);r,b=np.max(component.points,axis=0)
+                anchor=self.model.world((l,(t+b)/2))
+                state=biological_level(events,'switch',self.beat,fraction)
+                matrix=matrix@translate(*anchor)@spin((1-state)*tau*.10)@translate(*(-anchor))
             if heat and (component.shape not in ("bulb","led","coil","relay") or role == "filament"):
                 color = np.array(material[:3])*(1-heat)+np.array((1.,.38,.10))*heat
                 material = (*color,7. if heat>.75 else material[3])
             objects.append((name,material,matrix,component.part.label))
             current = current_level(events,self.beat,fraction)
+            if component.links and component.part.label not in live:
+                current=0.
+                flow=0.
             # Absolute time prevents particles jumping back at narration cuts.
-            phase = (self.offset+time)*.21*current if current else flow*2
+            track=self.model.current_tracks.get(component.part.label)
+            phase=track.area(self.model.logical_time(self.beat,fraction))*.21 if current and track else flow*2
             if (flow or current) and component.part.label not in flow_parts:
                 flow_parts.add(component.part.label)
                 points = self.model.routes.get(component.part.label)
@@ -188,10 +224,47 @@ class Mechanism3DShot:
                                             matrix@translate(*point)@scale(.043,.034,.035) if native_blood else matrix@translate(*point)@scale(.024,.024,.024),component.part.label))
                             break
                         remaining -= length
+            charge=biological_level(events,'charge',self.beat,fraction)
+            if component.shape=='capacitor' and charge>0 and component.part.label not in charge_parts and self.view=='detail':
+                charge_parts.add(component.part.label)
+                l,t=np.min(component.points,axis=0);r,b=np.max(component.points,axis=0)
+                cx,cy=(l+r)/2,(t+b)/2
+                radius=min((r-l)*.30,(b-t)*.27)*self.model.unit
+                for index in range(max(1,round(charge*6))):
+                    y=cy-(b-t)*.25+index*(b-t)*.055
+                    for sign,color in ((-1,(1.,.62,.14,7.)),(1,(.15,.65,1.,7.))):
+                        point=self.model.world((cx+sign*(r-l)*.13,y),radius*.95)
+                        marker=matrix@translate(*point)
+                        objects.append(('box',color,marker@scale(.037,.008,.008),component.part.label))
+                        if sign<0:
+                            objects.append(('box',color,marker@scale(.008,.037,.008),component.part.label))
+                    if index%2==0:
+                        a=self.model.world((cx-(r-l)*.10,y),radius*.90)
+                        width=(r-l)*.20*self.model.unit
+                        objects.append(('box',(.75,.60,.25,7.),matrix@translate(*(a+[width/2,0,0]))@scale(width,.003,.003),component.part.label))
         aspect = self.size[0]/self.size[1]
         distance = max(self.model.radius_y,self.model.radius_x/aspect)/tan(.78/2)*1.18
         if self.view == "overhead":
             eye = (distance*.10,distance*.53,distance*.86)
         else:
             eye = (distance*.18,distance*.16,distance*(.96 if self.view=="detail" else 1.))
-        return objects,eye,np.array((0.,0.,.12))
+        focus=np.array((0.,0.,.12))
+        if self.view=='detail':
+            active=[p for p in self.model.parts if any(a.part==p.part.label and a.beat==self.beat and a.effect in ('charge','energize') for a in self.model.actions)]
+            if len(active)==1:
+                p=active[0]
+                points=np.asarray([self.model.world(point) for point in p.points])
+                centre=(points.min(axis=0)+points.max(axis=0))/2
+                extent=np.ptp(points,axis=0)
+                distance=max(2.,max(extent[1],extent[0]/aspect)/2/tan(.78/2)*1.45)
+                focus=centre
+                eye=centre+np.array((distance*.12,distance*.28,distance))
+        return objects,eye,focus
+
+    def overlay(self,frame,time):
+        if any(a.effect=='charge' and a.beat<=self.beat for a in self.model.actions):
+            from PIL import ImageDraw
+            from cinematic_render import _font
+            draw=ImageDraw.Draw(frame);w,h=self.size
+            draw.text((w*.07,h*.21),'CHARGE MARKERS:  + POSITIVE   - NEGATIVE',font=_font(round(w*.023)),fill='#c5d5de')
+            draw.text((w*.07,h*.92),'QUALITATIVE CUTAWAY - PARTICLE SIZE / SPEED ENLARGED',font=_font(round(w*.019)),fill='#8ba6b6')

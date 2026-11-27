@@ -438,3 +438,28 @@ For public sign-in, configure a production web client with your site's HTTPS
 callback and complete Google's [OAuth verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
 Set the credentials on that server once. Visitors connect through Google with
 their own accounts. A project in Testing allows only its listed test users.
+
+### Custom mechanism planning
+
+Custom prompts use a shared two-stage planner: validated component geometry,
+then motion and state changes referencing those exact components. Each stage
+gets one bounded repair attempt with the specific validation error. Movement
+repairs retain the valid geometry. A single meaningful continuing motion is
+accepted; zero-motion placeholders and incomplete responses are rejected.
+
+The local planner uses `AI_VIDEO_OLLAMA_MODEL` (default `qwen3:4b`) and does not
+silently switch to a larger model after an error. To select a stronger installed
+model explicitly, set `AI_VIDEO_OLLAMA_MECHANISM_MODEL`; storyboard selection
+can be configured separately with `AI_VIDEO_OLLAMA_STORYBOARD_MODEL`.
+
+Generated electrical circuits name component terminals in their wire links.
+Wire endpoints snap to those terminals, incomplete source paths get a geometry
+repair, and open switches suppress flow on their disconnected branch. Only a
+verified single-source series loop shares current states across its wires;
+branch currents are never inferred. Capacitor charge and switch blade movement
+are separate states. The renderer integrates current for continuous particle
+motion across narration cuts.
+
+These checks validate supported geometry, animation and basic connectivity.
+They are qualitative illustrations, not a general physics or medical simulator;
+review unfamiliar mechanisms and scientific narration before publishing.
