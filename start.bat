@@ -1,5 +1,7 @@
 @echo off
 cd /d "%~dp0" || exit /b 1
+if not defined AI_VIDEO_OLLAMA_MECHANISM_MODEL set "AI_VIDEO_OLLAMA_MECHANISM_MODEL=qwen3.5:9b"
+if not defined AI_VIDEO_PLANNING_TIMEOUT set "AI_VIDEO_PLANNING_TIMEOUT=360"
 title godd.ai - NVIDIA RTX GPU Accelerated Studio
 echo ========================================================
 echo  🚀 godd.ai Local GPU Server (RTX 3050 NVENC)

@@ -441,16 +441,42 @@ their own accounts. A project in Testing allows only its listed test users.
 
 ### Custom mechanism planning
 
-Custom prompts use a shared two-stage planner: validated component geometry,
-then motion and state changes referencing those exact components. Each stage
+Custom prompts use a shared three-stage planner: the physical parts and their
+connections, validated component geometry, then motion and state changes
+referencing those exact components. Each stage
 gets one bounded repair attempt with the specific validation error. Movement
 repairs retain the valid geometry. A single meaningful continuing motion is
 accepted; zero-motion placeholders and incomplete responses are rejected.
+
+Unfamiliar parts can use compound solid geometry assembled from cylinders,
+rings, spheres, open shells and beveled boxes, with separate materials, proportions and
+pivots. This builds prompt-defined parts without adding a whole-device template
+for each topic. Known physical components keep their detailed native meshes.
+External wires are planned separately and routed around component envelopes;
+solid coils and other hardware never carry wire-routing metadata. Custom solids
+can declare source/load/conductor roles and expose terminals without needing a
+new native device model. Generic casings open in the cutaway to reveal internals.
+Continuous rotation uses a persistent spin speed in revolutions per second;
+finite turn actions remain available for individual indexed movements.
+
+Geometry coordinates are explicitly bounded to the 0–100 board in the model
+schema. Finite layouts generated in another coordinate scale are fitted using
+one shared transform for all points and pivots, preserving proportions and
+connections. Invalid pairs and nonfinite numbers are rejected with the exact
+part and field so the repair request can correct the actual error.
 
 The local planner uses `AI_VIDEO_OLLAMA_MODEL` (default `qwen3:4b`) and does not
 silently switch to a larger model after an error. To select a stronger installed
 model explicitly, set `AI_VIDEO_OLLAMA_MECHANISM_MODEL`; storyboard selection
 can be configured separately with `AI_VIDEO_OLLAMA_STORYBOARD_MODEL`.
+The 4B model is the fast option; it can still misunderstand complex assemblies.
+A stronger installed model can improve part identity and layout. On slower
+hardware, `AI_VIDEO_PLANNING_TIMEOUT` sets each planning request's deadline in
+seconds (default 180, allowed 60–480); retries remain bounded.
+The Windows launchers prefer the installed `qwen3.5:9b` mechanism model with a
+360-second request deadline. This is slower on a 4 GB GPU. Explicit environment
+settings take precedence, and the server falls back to the base model if that
+model is not installed. The storyboard model remains separately configurable.
 
 Generated electrical circuits name component terminals in their wire links.
 Wire endpoints snap to those terminals, incomplete source paths get a geometry

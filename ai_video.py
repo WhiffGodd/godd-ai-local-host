@@ -351,21 +351,25 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
                          if not part.get("thought"))
     else:
         motion_story = "hook_objects" in schema["properties"]
-        layout = any(name in schema['properties'] for name in ('parts','actions'))
+        layout = any(name in schema['properties'] for name in ('components','parts','actions'))
         staged_layout=layout and not all(name in schema['properties'] for name in ('parts','actions'))
-        prediction_budget = 2800 if staged_layout else 4800 if layout or motion_story else 3200 if long_video else 2400
+        prediction_budget = (1600 if 'components' in schema['properties'] else 3600 if 'parts' in schema['properties'] else 2800) if staged_layout else 4800 if layout or motion_story else 3200 if long_video else 2400
         input_size = len(prompt)+len(instructions)+len(json.dumps(schema))
         context_budget = min(16384,max(6144 if staged_layout else 8192 if layout or motion_story else 6144 if long_video or not single_match else 4096,
                                 math.ceil((input_size/3+prediction_budget+512)/2048)*2048))
         request_body = {
             "model": mechanism_model or OLLAMA_MODEL, "stream": layout, "think": False, "format": schema,
-            "keep_alive": '2m' if staged_layout and 'parts' in schema['properties'] else 0 if mechanism_model or any(name in schema["properties"] for name in
+            "keep_alive": '2m' if staged_layout and any(k in schema['properties'] for k in ('components','parts')) else 0 if mechanism_model or any(name in schema["properties"] for name in
                                   ("visual_subject","assets","hook_objects")) else "5m",
             "options": {"temperature": 0.15 if layout else 0.3,
                         "num_predict": prediction_budget,"num_ctx":context_budget},
             "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}],
         }
         started = time.monotonic()
+        try:
+            planning_timeout=min(480,max(60,float(os.environ.get('AI_VIDEO_PLANNING_TIMEOUT','180'))))
+        except ValueError:
+            planning_timeout=180
         def send():
             return requests.post(f"{OLLAMA_URL}/api/chat",json=request_body,
                                  timeout=(4,90 if layout else 300),**({"stream":True} if layout else {}))
@@ -382,7 +386,7 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
             try:
                 response.raise_for_status()
                 for line in response.iter_lines():
-                    if time.monotonic()-started>180:
+                    if time.monotonic()-started>planning_timeout:
                         raise requests.ReadTimeout("Animation planning exceeded its time budget")
                     if not line:
                         continue

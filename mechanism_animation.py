@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from functools import lru_cache
-from math import cos, dist, radians, sin, tau
+from math import cos, dist, isfinite, radians, sin, tau
 import re
 
 from PIL import Image, ImageColor, ImageDraw
@@ -11,6 +11,7 @@ from PIL import Image, ImageColor, ImageDraw
 from cinematic_render import _part_badge
 from explainer_parts import Part
 from biological_components import BIOLOGICAL_SHAPES
+from solid_geometry import read_solids
 
 
 PALETTE = {
@@ -19,8 +20,8 @@ PALETTE = {
     "tissue":"#bf7970", "blood":"#b83143", "bone":"#e8dfc7", "purple":"#9d7eb4",
 }
 ELECTRICAL_SHAPES = ("wire", "battery", "bulb", "led", "resistor", "capacitor", "coil", "motor", "terminal", "relay", "switch")
-SHAPES = ("plate", "contour", "oval", "gear", "pipe", "spring", "path", *ELECTRICAL_SHAPES, *BIOLOGICAL_SHAPES)
-EFFECTS = ("move", "turn", "expand", "flow", "energize", "current", "charge", "switch", "dissolve", "pulse")
+SHAPES = ("solid", "plate", "contour", "oval", "gear", "pipe", "spring", "path", *ELECTRICAL_SHAPES, *BIOLOGICAL_SHAPES)
+EFFECTS = ("move", "turn", "spin", "expand", "flow", "energize", "current", "charge", "switch", "dissolve", "pulse")
 
 
 def _object(**fields):
@@ -29,14 +30,16 @@ def _object(**fields):
 
 def mechanism_schema(beats):
     pair = {"type":"array", "items":{"type":"number"}, "minItems":2, "maxItems":2}
+    coordinate = {**pair, "items":{"type":"number","minimum":0,"maximum":100}}
+    amount = {**pair, "items":{"type":"number","minimum":-720,"maximum":720}}
     return _object(
         parts={"type": "array", "minItems": 3, "maxItems": 24, "items": _object(
             name={"type":"string"}, shape={"type":"string","enum":list(SHAPES)},
-            color={"type":"string","enum":list(PALETTE)}, pivot=pair,
-            points={"type":"array","minItems":2,"maxItems":48,"items":pair})},
+            color={"type":"string","enum":list(PALETTE)}, pivot=coordinate,
+            points={"type":"array","minItems":2,"maxItems":48,"items":coordinate})},
         actions={"type": "array", "minItems": 3, "maxItems": 64, "items": _object(
             beat={"type":"integer","minimum":1,"maximum":beats-1}, part={"type":"string"},
-            effect={"type":"string","enum":list(EFFECTS)}, amount=pair,
+            effect={"type":"string","enum":list(EFFECTS)}, amount=amount,
             start={"type":"number","minimum":0,"maximum":.9}, end={"type":"number","minimum":.05,"maximum":1}),
                  "description": f"Actions must reference narration beats 1 through {beats-1}."},
     )
@@ -115,10 +118,10 @@ formulations and medicines behave differently. Use neutral educational descripti
 Supply data only. Follow provider safety rules and keep explanations non-actionable for harmful topics."""
 
 
-def _pair(value, lower, upper):
+def _pair(value, lower, upper, field='Coordinate pair'):
     if (not isinstance(value, list) or len(value) != 2
-            or any(type(item) not in (float, int) or not lower <= item <= upper for item in value)):
-        raise ValueError("Invalid mechanism coordinates")
+            or any(type(item) not in (float, int) or not lower <= item <= upper or not isfinite(item) for item in value)):
+        raise ValueError(f"{field} must be [x,y] with two finite numbers from {lower} to {upper}; received {value!r}")
     return tuple(value)
 
 
@@ -131,10 +134,11 @@ def _electrical_shape(name, shape):
 
     Preserve separately modeled subparts such as contacts and capacitor plates.
     """
+    if shape=='wire':return shape  # A routed conductor never becomes a complete device by its label.
     if shape in ELECTRICAL_SHAPES and not re.fullmatch(
             r'(?:battery|resistor|capacitor|switch|bulb|led|motor|coil|relay)(?: \d+)?',name,re.I):
         return shape
-    if re.search(r'\b(?:terminal|filament|plate|electrode|contact|shaft|blade|housing|core|cover|lead|brush|armature)\b',name,re.I):
+    if re.search(r'\b(?:terminal|filament|plate|electrode|contact|shaft|blade|housing|core|cover|lead|brush|armature|rotor|stator|magnet)\b',name,re.I):
         return shape
     for pattern,native in ((r'\b(?:batter(?:y|ies)|battery cell)\b','battery'),
                            (r'\bcapacitors?\b','capacitor'),(r'\bresistors?\b','resistor'),
@@ -179,6 +183,8 @@ class Component:
     pivot: tuple
     points: tuple
     links: tuple = ()
+    geometry: tuple = ()
+    electrical_role: str = ''
 
 
 @dataclass(frozen=True)
@@ -200,12 +206,12 @@ def read_mechanism(data, beats, *, require_animation=True):
     for item in entries:
         name = _name(item["name"])
         shape = _biological_shape(name,_electrical_shape(name,item["shape"]))
-        pivot = _pair(item["pivot"], 0, 100)
-        points = tuple(_pair(point, 0, 100) for point in item["points"])
+        pivot = _pair(item["pivot"], 0, 100,f'{name}.pivot')
+        points = tuple(_pair(point, 0, 100,f'{name}.points[{index}]') for index,point in enumerate(item["points"]))
         if (not name or name.casefold() in components or shape not in SHAPES or not 2 <= len(points) <= 48
                 or (shape == "contour" and len(points) < 3) or len(set(points)) < 2):
             raise ValueError("Invalid mechanism component")
-        if shape in ("plate","gear","oval", *[s for s in ELECTRICAL_SHAPES if s != "wire"],
+        if shape in ("solid","plate","gear","oval", *[s for s in ELECTRICAL_SHAPES if s != "wire"],
                      *[s for s in BIOLOGICAL_SHAPES if s not in ('blood_vessel','ureter','digestive_tube')]) and any(len(set(axis)) < 2 for axis in zip(*points)):
             raise ValueError(f"{name} ({shape}) has no width or height: {points}. Filled components need opposite corners with BOTH different x and different y, e.g. a thin horizontal base [[10,70],[90,74]]. Use pipe/path for a centreline")
         alias = re.escape(name) + ("" if name.endswith("s") else "s?")
@@ -213,13 +219,17 @@ def read_mechanism(data, beats, *, require_animation=True):
         part = Part(label, (label,), "detail", alias)
         links=item.get('links',[])
         links=tuple(tuple(link) for link in links) if links and all(isinstance(link,(tuple,list)) and len(link)==2 for link in links) else ()
-        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points,links)
+        geometry=read_solids(item.get('geometry'),name,PALETTE) if shape=='solid' else ()
+        electrical_role=item.get('electrical_role','')
+        if electrical_role not in ('','source','load','conductor'):
+            raise ValueError(f'{name}: unsupported electrical role')
+        components[name.casefold()] = Component(part, shape, PALETTE[item["color"]], pivot, points,links,geometry,electrical_role)
     actions = []
     for item in events:
         beat, effect = item["beat"], item["effect"]
         name = _name(item["part"]).casefold()
-        amount = _pair(item["amount"], -720, 720)
-        start, end = _pair([item["start"], item["end"]], 0, 1)
+        amount = _pair(item["amount"], -720, 720,f'{item["part"]} beat {beat} amount')
+        start, end = _pair([item["start"], item["end"]], 0, 1,f'{item["part"]} beat {beat} timing')
         if start >= end:
             raise ValueError(f"{item['part']} on beat {beat} needs start < end; received {start}, {end}")
         if (type(beat) is not int or not 1 <= beat < beats or name not in components
@@ -238,6 +248,8 @@ def read_mechanism(data, beats, *, require_animation=True):
             raise ValueError("Current level must be between -1 and 1")
         if effect == "energize" and not 0. <= amount[0] <= 1.:
             raise ValueError("Invalid heat, light, or pressure level")
+        if effect=='spin' and (not -4<=amount[0]<=4 or components[name].shape=='switch'):
+            raise ValueError('Spin needs a rotating part and a speed from -4 to 4 revolutions per second')
         if effect=='charge' and (components[name].shape!='capacitor' or not 0<=amount[0]<=1):
             raise ValueError('Charge needs a capacitor and a normalized fraction between 0 and 1')
         if effect=='switch' and (components[name].shape!='switch' or amount[0] not in (0,1)):
@@ -251,7 +263,7 @@ def read_mechanism(data, beats, *, require_animation=True):
         actions.append(Action(beat, components[name].part.label, effect, amount, start, end))
     if require_animation and not actions:
         raise ValueError('The animation has no nonzero motion or changing state')
-    if require_animation and all(action.effect in ("current","energize","charge","pulse","dissolve","switch") and not action.amount[0] for action in actions):
+    if require_animation and all(action.effect in ("spin","current","energize","charge","pulse","dissolve","switch") and not action.amount[0] for action in actions):
         raise ValueError("The animation never moves or changes state")
     actions.sort(key=lambda action: (action.beat, action.start, action.end))
     mechanism = tuple(components.values()), tuple(actions)
@@ -344,7 +356,7 @@ def _outline(component):
     points = component.points
     if component.shape in ("contour","path","pipe","wire",'blood_vessel','ureter','digestive_tube'):
         return points
-    if component.shape == "plate" or component.shape in (*ELECTRICAL_SHAPES,*BIOLOGICAL_SHAPES):
+    if component.shape in ("solid","plate") or component.shape in (*ELECTRICAL_SHAPES,*BIOLOGICAL_SHAPES):
         x,y,x2,y2 = _envelope(points)
         return ((x,y),(x2,y),(x2,y2),(x,y2))
     if component.shape == "spring":
@@ -366,10 +378,15 @@ def _bounds(mechanism):
     for component in parts:
         events = tuple(action for action in actions if action.part == component.part.label)
         points.extend(_outline(component))
+        spins=any(a.effect=='spin' and a.amount[0] for a in events)
         for action in events:
             for index in range(9):
                 fraction = action.start+(action.end-action.start)*index/8
-                points.extend(_transform(component,events,action.beat,fraction)[0])
+                outline,centre,_,_=_transform(component,events,action.beat,fraction)
+                points.extend(outline)
+                if spins:
+                    radius=max(dist(centre,p) for p in outline)
+                    points.extend((centre[0]+dx*radius,centre[1]+dy*radius) for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)))
     return _envelope(points)
 
 

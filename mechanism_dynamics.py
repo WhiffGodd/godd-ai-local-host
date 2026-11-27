@@ -10,12 +10,12 @@ def eased(value):
 
 class CurrentTrack:
     """Integrate signed current so particles slow down without jumping backwards."""
-    def __init__(self,events,durations):
+    def __init__(self,events,durations,effect='current'):
         offsets=[0.]
         for duration in durations:offsets.append(offsets[-1]+duration)
         self.segments=[];self.starts=[]
         for event in sorted(events,key=lambda a:(a.beat,a.start,a.end)):
-            if event.effect!='current':continue
+            if event.effect!=effect:continue
             start=offsets[event.beat]+event.start*durations[event.beat]
             end=offsets[event.beat]+event.end*durations[event.beat]
             value=self.level(start);area=self.area(start)
@@ -59,9 +59,11 @@ def conducting_wires(parts,closed):
         if part.shape=='wire' and part.links:
             (a,pa),(b,pb)=part.links
             edge((a.casefold(),pa),(b.casefold(),pb),part.part.label)
-        elif part.shape=='battery':
-            sources.append(((name,'positive'),(name,'negative')))
-        elif part.shape in ('resistor','capacitor','coil','motor','bulb','led','terminal','relay') or part.shape=='switch' and closed.get(name,False):
+        elif part.shape=='battery' or getattr(part,'electrical_role','')=='source':
+            sources.append(((name,'positive' if part.shape=='battery' else 'left'),(name,'negative' if part.shape=='battery' else 'right')))
+        elif part.shape=='switch':
+            if closed.get(name,False):edge((name,'left'),(name,'right'))
+        elif getattr(part,'electrical_role','') in ('load','conductor') or part.shape in ('resistor','capacitor','coil','motor','bulb','led','terminal','relay'):
             edge((name,'left'),(name,'right'))
     live=set();visited_count=0
     for start,goal in sources:
@@ -82,7 +84,7 @@ def conducting_wires(parts,closed):
 
 def series_wire_directions(parts):
     """Return orientations only for an unambiguous, single-source series loop."""
-    sources=[p for p in parts if p.shape=='battery']
+    sources=[p for p in parts if p.shape=='battery' or getattr(p,'electrical_role','')=='source']
     if len(sources)!=1:return {}
     graph={};wires=set()
     def edge(a,b,wire=None):
@@ -95,10 +97,10 @@ def series_wire_directions(parts):
             (a,pa),(b,pb)=part.links
             edge((a.casefold(),pa),(b.casefold(),pb),part.part.label)
             wires.add(part.part.label)
-        elif part.shape in ('resistor','capacitor','coil','motor','bulb','led','terminal','switch'):
+        elif getattr(part,'electrical_role','') in ('load','conductor') or part.shape in ('resistor','capacitor','coil','motor','bulb','led','terminal','switch'):
             edge((name,'left'),(name,'right'))
     name=sources[0].part.label.casefold()
-    node=(name,'positive');goal=(name,'negative');seen=set();result={}
+    node=(name,'positive' if sources[0].shape=='battery' else 'left');goal=(name,'negative' if sources[0].shape=='battery' else 'right');seen=set();result={}
     while node!=goal:
         seen.add(node)
         following=[item for item in graph.get(node,()) if item[0] not in seen]

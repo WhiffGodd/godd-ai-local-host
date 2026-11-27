@@ -8,7 +8,7 @@ import numpy as np
 from mechanism_animation import Action, read_mechanism
 from mechanism_3d import Mechanism3D, Mechanism3DShot
 from mechanism_dynamics import CurrentTrack, conducting_wires
-from mechanism_planner import _finish_actions, _parts_data, plan_custom_mechanism
+from mechanism_planner import _finish_actions, _parts_data, actions_schema, parts_schema, plan_custom_mechanism
 from planning_json import planning_json
 
 
@@ -33,6 +33,45 @@ def circuit():
 
 
 class UniversalPlannerTests(unittest.TestCase):
+    def test_schema_bounds_geometry_separately_from_signed_motion(self):
+        for variant in parts_schema(4,['plate','wire'])['properties']['parts']['items']['anyOf']:
+            for pair in (variant['properties']['pivot'],variant['properties']['points']['items']):
+                self.assertEqual(pair['items'],dict(type='number',minimum=0,maximum=100))
+        amount=actions_schema(4,[part('Gate','plate',[[10,10],[90,20]])])['properties']['actions']['items']['anyOf'][0]['properties']['amount']
+        self.assertEqual(amount['items']['minimum'],-720)
+
+    def test_whole_layout_is_fitted_without_clipping_or_changing_joints(self):
+        raw={'parts':[part('Support','plate',[[-100,-30],[100,-10]]),
+                      part('Link','pipe',[[100,-10],[200,50]])]}
+        raw['parts'][1]['pivot']=[100,-10]
+        valid=_parts_data(raw,4)
+        self.assertEqual(valid[0]['points'][-1],valid[1]['points'][0])
+        self.assertEqual(valid[1]['pivot'],valid[1]['points'][0])
+        a,b=valid[0]['points'];c,d=valid[1]['points']
+        self.assertAlmostEqual((b[0]-a[0])/(d[0]-c[0]),2)
+        self.assertAlmostEqual((b[1]-a[1])/(d[1]-c[1]),1/3)
+        for item in valid:
+            self.assertTrue(all(0<=v<=100 for pair in [item['pivot'],*item['points']] for v in pair))
+        self.assertEqual(raw['parts'][0]['points'][0],[-100,-30])
+
+    def test_numeric_strings_recover_but_invalid_coordinates_name_the_field(self):
+        raw={'parts':[part('Guide','plate',[[10,20],[90,25]])]}
+        raw['parts'][0]['points']=[['10','20'],['90','25']]
+        raw['parts'][0]['pivot']=['50','22.5']
+        self.assertEqual(_parts_data(raw,4)[0]['pivot'],[50,22.5])
+        for bad in ([10,float('nan')],[True,20],[10,float('inf')],[10,20,30],[10],[10,'bad'],[10,10**1000]):
+            with self.subTest(bad=str(bad)[:50]):
+                invalid=copy.deepcopy(raw);invalid['parts'][0]['points'][0]=bad
+                with self.assertRaisesRegex(ValueError,r'Guide.points\[0\]'):_parts_data(invalid,4)
+
+    def test_coordinate_error_gives_repair_the_part_and_field_then_succeeds(self):
+        bad={'parts':[part('Guide','plate',[[10,20,30],[90,25]])]}
+        good={'parts':[part('Guide','plate',[[10,20],[90,25]])]}
+        request=Mock(side_effect=[bad,good,{'actions':[action('Guide','move',[0,10])]}])
+        result=plan_custom_mechanism('Move a guide',[dict(narration='Hook'),dict(narration='Move')],request,None,'small')
+        self.assertIn('Guide.points[0]',request.call_args_list[1].args[1])
+        self.assertEqual(len(result[1]),1)
+
     def test_wrapped_json_is_accepted_but_truncated_nested_plan_is_rejected(self):
         for value in ('```json\n{"parts":[]}\n```','Here is the plan: {"parts":[]}'):
             self.assertEqual(planning_json(value),{'parts':[]})
@@ -48,7 +87,7 @@ class UniversalPlannerTests(unittest.TestCase):
                 request=Mock(side_effect=[json.dumps(geometry),json.dumps({'actions':[action(name,effect,amount)]})])
                 result=plan_custom_mechanism(prompt,[{'narration':'Hook'},{'narration':prompt}],request,None,'small')
                 self.assertEqual(len(result[1]),1)
-                self.assertEqual(list(request.call_args_list[0].args[2]['properties']),['parts'])
+                self.assertEqual(list(request.call_args_list[0].args[2]['properties']),['components'])
                 schema=request.call_args_list[1].args[2]
                 variants=schema['properties']['actions']['items']['anyOf']
                 self.assertEqual([v['properties']['part']['const'] for v in variants],[name])
@@ -60,7 +99,7 @@ class UniversalPlannerTests(unittest.TestCase):
         request=Mock(side_effect=[geometry,{'actions':[bad]},{'actions':[action('Cam','turn',[90,0])]}])
         result=plan_custom_mechanism('Rotate a cam',[{'narration':'Hook'},{'narration':'Turn'}],request,None,'small')
         self.assertEqual(len(result[1]),1)
-        self.assertEqual([list(c.args[2]['properties']) for c in request.call_args_list],[['parts'],['actions'],['actions']])
+        self.assertEqual([list(c.args[2]['properties']) for c in request.call_args_list],[['components'],['actions'],['actions']])
         self.assertIn('start < end',request.call_args_list[2].args[1])
         self.assertIn('"Cam"',request.call_args_list[2].args[0])
 

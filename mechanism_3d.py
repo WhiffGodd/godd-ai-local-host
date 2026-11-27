@@ -13,6 +13,8 @@ from biological_components import BIOLOGICAL_SHAPES, biological_mesh, biological
 from electrical_components import electrical_meshes
 from electrical_detail import rounded_route, swept_tube
 from mechanism_dynamics import CurrentTrack, conducting_wires
+from solid_geometry import solid_meshes
+from mechanism_animation import PALETTE
 
 
 def extrude_profile(points, depth=.18):
@@ -80,6 +82,10 @@ class Mechanism3D:
             name = "custom-cutaway-"+str(index)
             z = 0. if electrical else index*.055
             events = tuple(action for action in self.actions if action.part==component.part.label)
+            if component.shape=='solid':
+                for piece,(vertices,material) in enumerate(solid_meshes(component,self.world,PALETTE)):
+                    self.compiled.append((component,events,name+'-'+str(piece),vertices,material,z))
+                continue
             if component.shape in BIOLOGICAL_SHAPES:
                 route=biological_route(component)
                 if route is not None:
@@ -127,6 +133,8 @@ class Mechanism3D:
         self.durations=list(durations)
         self.current_tracks={p.part.label:CurrentTrack([a for a in self.actions if a.part==p.part.label],self.durations)
                              for p in self.parts if p.shape=='wire'}
+        self.spin_tracks={p.part.label:CurrentTrack([a for a in self.actions if a.part==p.part.label],self.durations,'spin')
+                          for p in self.parts if any(a.part==p.part.label and a.effect=='spin' for a in self.actions)}
 
     def logical_time(self,beat,fraction):
         duration=self.durations[beat] if beat<len(self.durations) else self.durations[-1]
@@ -168,6 +176,9 @@ class Mechanism3DShot:
         live=self.model.live_wires(self.beat,fraction)
         for component,events,name,_,material,z in self.model.compiled:
             dx,dy,turn,sx,sy,heat,flow = motion_state(events,self.beat,fraction)
+            spin_track=self.model.spin_tracks.get(component.part.label)
+            if spin_track:
+                turn+=360*spin_track.area(self.model.logical_time(self.beat,fraction))
             dissolved=biological_level(events,'dissolve',self.beat,fraction)
             biological_scale=1.
             for action in events:
@@ -196,7 +207,7 @@ class Mechanism3DShot:
                 anchor=self.model.world((l,(t+b)/2))
                 state=biological_level(events,'switch',self.beat,fraction)
                 matrix=matrix@translate(*anchor)@spin((1-state)*tau*.10)@translate(*(-anchor))
-            if heat and (component.shape not in ("bulb","led","coil","relay") or role == "filament"):
+            if heat and (component.shape not in ("bulb","led","coil","relay","motor") or role == "filament" or component.shape=='motor' and role=='rotor'):
                 color = np.array(material[:3])*(1-heat)+np.array((1.,.38,.10))*heat
                 material = (*color,7. if heat>.75 else material[3])
             objects.append((name,material,matrix,component.part.label))
