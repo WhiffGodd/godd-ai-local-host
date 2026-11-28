@@ -194,6 +194,23 @@ def start_local_ollama():
     print(f"[Ollama] Still unavailable at {OLLAMA_URL}. See {log_path} for startup details.")
 
 
+
+def release_render_model_memory():
+    """Unload this studio's idle local models before starting a GPU renderer."""
+    if os.environ.get('AI_VIDEO_GEMINI_API_KEY'):return
+    owned={OLLAMA_MODEL,os.environ.get('AI_VIDEO_OLLAMA_MECHANISM_MODEL','qwen3.5:9b')}
+    try:
+        response=requests.get(f'{OLLAMA_URL}/api/ps',timeout=4);response.raise_for_status()
+        for model in response.json().get('models',[]):
+            name=model.get('name')
+            if name in owned:
+                released=requests.post(f'{OLLAMA_URL}/api/generate',json=dict(model=name,keep_alive=0,stream=False),timeout=10)
+                released.raise_for_status()
+    except (requests.RequestException,ValueError,TypeError):
+        # Blender still gets its own startup/error recovery if Ollama is offline.
+        pass
+
+
 def generation_settings():
     visuals = {**visual_settings(),**blender_settings()}
     if os.environ.get("AI_VIDEO_GEMINI_API_KEY"):
@@ -358,15 +375,16 @@ def _request_storyboard(prompt, instructions, schema, key, long_video, single_ma
     else:
         schema=compact_local_schema(schema)
         motion_story = "hook_objects" in schema["properties"]
-        layout = any(name in schema['properties'] for name in ('components','parts','actions'))
+        wiring_only=set(schema['properties'])=={'connections'}
+        layout = any(name in schema['properties'] for name in ('components','parts','actions','connections'))
         staged_layout=layout and not all(name in schema['properties'] for name in ('parts','actions'))
-        prediction_budget = (1600 if 'components' in schema['properties'] else 3600 if 'parts' in schema['properties'] else 2800) if staged_layout else 4800 if layout or motion_story else 3200 if long_video else 2400
+        prediction_budget = (1600 if 'components' in schema['properties'] or wiring_only else 3600 if 'parts' in schema['properties'] else 2800) if staged_layout else 4800 if layout or motion_story else 3200 if long_video else 2400
         input_size = len(prompt)+len(instructions)+len(json.dumps(schema))
         context_budget = min(16384,max(6144 if staged_layout else 8192 if layout or motion_story else 6144 if long_video or not single_match else 4096,
                                 math.ceil((input_size/3+prediction_budget+512)/2048)*2048))
         request_body = {
             "model": mechanism_model or OLLAMA_MODEL, "stream": layout, "think": False, "format": schema,
-            "keep_alive": '2m' if staged_layout and any(k in schema['properties'] for k in ('components','parts')) else 0 if mechanism_model or any(name in schema["properties"] for name in
+            "keep_alive": '2m' if staged_layout and any(k in schema['properties'] for k in ('components','parts','connections')) else 0 if mechanism_model or any(name in schema["properties"] for name in
                                   ("visual_subject","assets","hook_objects")) else "5m",
             "options": {"temperature": 0.15 if layout else 0.3,
                         "num_predict": prediction_budget,"num_ctx":context_budget},
@@ -1035,8 +1053,9 @@ def render_explainer(payload, report_progress=None):
         try:
             report("rendering", 0)
             detailed=payload.get("renderer")=="blender" and not (custom or reel_motion)
+            if detailed:release_render_model_memory()
             progress_step=1 if detailed else 5
-            render_context = nullcontext() if custom or reel_motion else (BlenderRenderer((WIDTH,HEIGHT),model=mechanism_model) if detailed else CinematicRenderer())
+            render_context = nullcontext() if custom or reel_motion else (BlenderRenderer((WIDTH,HEIGHT),model=mechanism_model,fallback=True) if detailed else CinematicRenderer())
             with render_context as renderer, (work / "ffmpeg.log").open("wb") as log:
                 if mechanism_model:
                     mechanism_model.upload(renderer)
@@ -1104,7 +1123,8 @@ def render_explainer(payload, report_progress=None):
                             encoder.kill()
             return output, {"title": title, "description": description, "template": template.name,
                             "duration": total_frames / FPS, "scene_source": scene_source,
-                            "renderer": "blender" if detailed else "standard",
+                            "renderer": getattr(renderer,"backend","blender") if detailed else "standard",
+                            "render_warning": getattr(renderer,"warning",None) if detailed else None,
                             "views": [scene["view"] for scene in scenes]}
         except BaseException as error:
             Path(output).unlink(missing_ok=True)

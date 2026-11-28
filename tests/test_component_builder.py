@@ -63,7 +63,8 @@ class ComponentBuilderTests(unittest.TestCase):
         data=self.inventory();data['connections'][0]['links'][1]='Missing:left'
         with self.assertRaisesRegex(ValueError,'missing from components'):_inventory(data,SHAPES)
         data=self.inventory();data['connections'].pop()
-        with self.assertRaisesRegex(ValueError,'incomplete'):_inventory(data,SHAPES)
+        repaired=_inventory(data,SHAPES)
+        self.assertEqual(repaired['connections'][-1]['links'],['Battery:negative','Coil:right'])
 
     def test_inventory_preserves_subpart_identity_and_repairs_wire_name_collisions(self):
         data=self.inventory()

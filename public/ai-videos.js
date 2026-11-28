@@ -18,7 +18,7 @@ async function request(path, body) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data || typeof data !== "object") {
-    throw Object.assign(new Error(data?.error || "Could not reach the studio. Try again."), {status: response.status});
+    throw Object.assign(new Error(data?.error || "Could not reach the studio. Try again."), {status: response.status, code: data?.code});
   }
   return data;
 }
@@ -144,7 +144,7 @@ function youtubeControls() {
   $("connect").hidden = !page.youtubeEnabled || !!page.channel;
   $("disconnect").hidden = !page.channel;
   $("disconnect").disabled = page.uploading;
-  $("publishForm").hidden = !page.channel && !page.upload;
+  $("publishForm").hidden = (!page.channel && !page.upload) || (!page.generation && !page.upload);
   $("upload").disabled = page.uploading;
   $("upload").formNoValidate = !!page.upload;
   $("upload").textContent = page.upload ? "Check upload status" : "Upload to YouTube";
@@ -160,6 +160,7 @@ function showVideo(job, draft = null) {
   const runtime = Number.isFinite(seconds) ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") : "";
   const visualStyle = job.metadata.scene_source === "schematic" ? "3D schematic" : job.metadata.template;
   $("selectedStyle").textContent = [visualStyle, runtime].filter(Boolean).join(" · ");
+  $("downloadVideo").hidden = false;
   $("downloadVideo").href = source + "?download=1";
   $("previewLink").hidden = false;
   $("exportTools").hidden = false;
@@ -200,18 +201,39 @@ function showGenerationProgress(job) {
   message("previewStatus", "The finished video will appear here.");
 }
 
+
+function clearUnavailableVideo() {
+  page.generation = null;
+  $("video").hidden = true;
+  $("video").pause();
+  $("video").removeAttribute("src");
+  $("video").load();
+  $("downloadVideo").removeAttribute("href");
+  $("previewLink").hidden = true;
+  $("exportTools").hidden = true;
+  $("selectedStyle").textContent = "";
+  delete document.querySelector(".workbench").dataset.generated;
+  save();
+}
+
 async function watchGeneration(draft) {
   $("checkGeneration").hidden = true;
   page.generating = true;
   generationControls();
   try {
-    const end = Date.now() + 20 * 60 * 1000;
+    const end = Date.now() + ($("renderQuality").value === "blender" ? 90 : 20) * 60 * 1000;
     while (Date.now() < end) {
       const job = await request("/api/ai-videos/" + encodeURIComponent(page.generation));
-      if (job.state === "failed") throw Object.assign(new Error(job.error), {finished: true});
+      if (job.state === "failed") throw Object.assign(new Error(job.error), {finished: true, code: job.code});
+      if (job.state === "uploaded") {
+        clearUnavailableVideo();
+        message("generationStatus", "This video was uploaded to YouTube and its local copy was deleted.");
+        message("previewStatus", "The uploaded video is available in YouTube Studio.");
+        return;
+      }
       if (job.state === "complete") {
         showVideo(job, draft);
-        message("generationStatus", "Your video is ready.");
+        message("generationStatus", "Your video is ready." + (job.metadata.render_warning ? " " + job.metadata.render_warning : ""));
         message("previewStatus", "");
         return;
       }
@@ -221,13 +243,14 @@ async function watchGeneration(draft) {
     throw new Error("The video is taking longer than expected.");
   } catch (error) {
     if (error.finished || error.status === 404) {
-      page.generation = null;
-      save();
+      clearUnavailableVideo();
     }
     if (error.finished && /Ollama|Gemini|local AI|AI connection/.test(error.message)) $("checkModel").hidden = false;
     $("checkGeneration").hidden = !page.generation;
-    message("generationStatus", page.generation ? error.message + " Use Check video status to reconnect." : error.message, true);
-    message("previewStatus", page.generation ? "Waiting for a status update." : "No video is available to preview.");
+    const missing = error.status === 404;
+    const problem = missing ? "This saved video is unavailable. Your prompt and settings are kept. Click Generate video to create it again." : error.message;
+    message("generationStatus", page.generation ? problem + " Use Check video status to reconnect." : problem, true);
+    message("previewStatus", page.generation ? "Waiting for a status update." : "Your prompt is ready to generate again.");
   } finally {
     $("generationProgress").hidden = true;
     page.generating = false;
@@ -298,9 +321,11 @@ async function watchUpload() {
         link.rel = "noopener noreferrer";
         link.textContent = "Open in YouTube Studio";
         message("publishStatus", "Uploaded" + (job.privacy ? " (" + job.privacy + ")" : "") + ". " +
-          (job.thumbnail_warning ? job.thumbnail_warning + " " : ""));
+          (job.thumbnail_warning ? job.thumbnail_warning + " " : "") +
+          (job.cleanup_warning || (job.local_copy_deleted ? "Local video copies deleted. " : "")));
         $("publishStatus").append(link);
         page.upload = null;
+        if (job.local_copy_deleted) clearUnavailableVideo();
         save();
         return;
       }
@@ -325,8 +350,19 @@ $("generator").addEventListener("submit", event => { event.preventDefault(); gen
 $("checkGeneration").addEventListener("click", () => watchGeneration());
 $("checkModel").addEventListener("click", checkModel);
 $("title").addEventListener("input", save);
-$("video").addEventListener("error", () => {
-  if (!$("video").hidden) message("previewStatus", "The preview could not load. Try Download MP4 or refresh the studio.", true);
+$("video").addEventListener("error", async () => {
+  if ($("video").hidden || !page.generation || page.generating) return;
+  const generation = page.generation;
+  try {
+    const job = await request("/api/ai-videos/" + encodeURIComponent(generation));
+    if (page.generation !== generation) return;
+    if (job.state === "failed") { await watchGeneration(); return; }
+    message("previewStatus", "The preview could not load. Try Download MP4 or Check video status.", true);
+  } catch (error) {
+    if (page.generation !== generation) return;
+    if (error.status === 404) await watchGeneration();
+    else message("previewStatus", "The preview connection was interrupted. Check video status to reconnect.", true);
+  }
 });
 $("autoTemplate").addEventListener("click", () => {
   $("visualStyle").value = "auto";

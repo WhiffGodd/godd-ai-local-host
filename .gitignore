@@ -19,3 +19,6 @@ client_secret*.json
 public/*.captions.json
 public/speech_accuracy_check.json
 .tools/
+
+# Private generated videos and restart-safe job records
+.local-data/

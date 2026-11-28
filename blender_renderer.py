@@ -17,7 +17,7 @@ import time
 import numpy as np
 from PIL import Image
 
-from cinematic_render import RendererUnavailable, _part_badge
+from cinematic_render import CinematicRenderer, RendererUnavailable, _part_badge
 from cinematic_geometry import mesh
 from mechanism_attachments import validate_bindings
 from solid_geometry import physical_dimensions
@@ -56,10 +56,11 @@ def procedural_description(component,index,world):
 
 
 class BlenderRenderer:
-    def __init__(self,size=(720,1280),model=None,bindings=None,samples=32,timeout=150):
+    def __init__(self,size=(720,1280),model=None,bindings=None,samples=32,timeout=150,fallback=False):
         if len(size)!=2 or any(type(v) is not int or not 64<=v<=2160 for v in size):raise ValueError('Unsupported preview resolution')
         self.executable=blender_executable()
         if not self.executable:raise RendererUnavailable('Blender is unavailable. Install Blender or choose the standard renderer.')
+        self.allow_fallback=fallback;self.fallback_renderer=None;self.mesh_data={};self.backend='blender';self.warning=None
         self.size=tuple(size);self.samples=max(8,min(64,int(samples)));self.timeout=timeout
         self.meshes={};self.descriptions={};self.sent=set();self.process=None;self.events=queue.Queue();self.logs=deque(maxlen=100)
         self.workspace=tempfile.TemporaryDirectory(prefix='godd_blender_');self.root=Path(self.workspace.name)
@@ -76,9 +77,12 @@ class BlenderRenderer:
     def __exit__(self,*_):self.close()
 
     def register_mesh(self,name,vertices):
+        if self.fallback_renderer is not None:
+            self.fallback_renderer.register_mesh(name,vertices);return
         if name in self.meshes:return
         vertices=np.asarray(vertices,dtype=np.float32)
         if vertices.ndim!=2 or vertices.shape[1]!=6 or len(vertices)%3 or not len(vertices) or len(vertices)>2_000_000 or not np.isfinite(vertices).all():raise ValueError('Invalid Blender mesh')
+        if self.allow_fallback:self.mesh_data[name]=vertices
         filename=hashlib.sha256(name.encode()).hexdigest()[:24]+'.npz'
         if name not in self.descriptions:np.savez_compressed(self.root/filename,vertices=vertices)
         self.meshes[name]=dict(procedural=self.descriptions[name]) if name in self.descriptions else dict(file=filename)
@@ -111,6 +115,20 @@ class BlenderRenderer:
         if self._event().get('state')!='ready':raise RendererUnavailable('Blender did not initialize correctly')
 
     def frame(self,shot,elapsed,part=None,subtitle=None):
+        if self.fallback_renderer is not None:
+            return self.fallback_renderer.frame(shot,elapsed,part,subtitle)
+        try:return self._blender_frame(shot,elapsed,part,subtitle)
+        except (RendererUnavailable,OSError) as error:
+            if not self.allow_fallback:raise
+            print('Blender render failed; continuing with Standard:',error,flush=True)
+            self.close()
+            self.fallback_renderer=CinematicRenderer(self.size)
+            self.closed=False;self.backend='standard'
+            self.warning='Blender could not finish on this computer. This video was completed with Standard rendering.'
+            for name,vertices in self.mesh_data.items():self.fallback_renderer.register_mesh(name,vertices)
+            return self.fallback_renderer.frame(shot,elapsed,part,subtitle)
+
+    def _blender_frame(self,shot,elapsed,part=None,subtitle=None):
         started=time.monotonic();objects,eye,focus=shot.at(elapsed,part)
         previous=getattr(shot,'camera_from',None)
         if previous is not None and elapsed<.8:
@@ -150,6 +168,7 @@ class BlenderRenderer:
     def close(self):
         if self.closed:return
         self.closed=True
+        if self.fallback_renderer is not None:self.fallback_renderer.close()
         if self.process and self.process.poll() is None:
             try:
                 self.process.stdin.write('{"command":"quit"}\n');self.process.stdin.flush();self.process.wait(timeout=5)

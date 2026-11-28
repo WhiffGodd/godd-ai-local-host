@@ -531,3 +531,25 @@ not establish that the local AI can correctly plan every arbitrary mechanism.
 The existing narration, subtitle timing, downloads and YouTube workflow are used
 for either renderer. No model-generated Python is executed: Blender receives
 validated geometry and pose data through a fixed worker.
+
+
+### Saved local AI videos
+
+Unpublished AI Mechanism Videos and their titles/descriptions are saved privately in
+`.local-data/ai-videos/` for seven days. Restarting the local server preserves their
+preview, download and YouTube upload links. This folder is ignored by Git and is
+not served as a public directory. Set `AI_VIDEO_STORAGE_DIR` to choose another
+storage folder. Hosted deployments need storage that survives redeployment to
+retain these files across a rebuild.
+
+A restart during an unfinished render records an interrupted generation. The
+studio preserves your prompt and lets you generate it again. Video identifiers
+from versions that kept jobs only in memory cannot be restored automatically.
+
+After a successful YouTube upload and thumbnail processing, managed local video
+copies are deleted. Failed uploads keep the video for retry. A small upload-status
+record remains so reopening its link explains where the video went.
+
+If Blender fails during rendering, the studio finishes the current export with
+Standard rendering and shows a notice identifying the actual renderer used.
+This recovery does not bypass animation-planning validation.

@@ -4,7 +4,6 @@ import copy
 import json
 import math
 import re
-from types import SimpleNamespace
 
 import requests
 
@@ -15,6 +14,7 @@ from mechanism_dynamics import conducting_wires, series_wire_directions
 from solid_geometry import fit_solids, solid_schema
 from connection_routing import route_wire
 from mechanism_attachments import validate_bindings
+from circuit_inventory import CircuitInventoryError, complete_inventory_circuit, inventory_ports, simple_series_connections
 
 
 def _key(name):
@@ -302,12 +302,24 @@ Every referenced component MUST be listed in components. Battery terminals are p
 and negative. Native resistor, capacitor, coil, motor, switch, bulb, led, terminal and relay
 have left/right terminals. Non-electrical solids do not have electrical terminals.
 For custom electrical components use solid and declare electrical_role source, load or
-conductor; these have left/right terminals too. A physical external power supply is a
+conductor; these have left/right terminals too. Being made of metal does not put a part
+in the electrical circuit: an iron core, sliding rod or return spring is mechanical unless
+the prompt explicitly says it carries current between contacts. A physical external power supply is a
 source. Use none for purely mechanical parts. Sources must have a complete return path.
+A series source-switch-load circuit needs THREE wires, including load-to-source return.
+Only the switch and electrical load belong in that path; mechanical rods/springs do not.
 If showing current, include the physical supply and complete return path. Never short
 the source. Coil is a component, not a wire. No links across a capacitor's dielectric.
 Components plus connections must total at most 24. Use connections:[] if no wiring is needed.
 No made-up medical claims or invented measurements. Return only the schema.'''
+
+
+def _mechanical_electrical_subpart(part):
+    """Metal cores/supports are not circuit conductors just because they are metal."""
+    if part['shape']!='solid':return False
+    text=part['name']+' '+part.get('function','')
+    current_purpose=re.search(r'\b(?:current|voltage|circuit|wire|winding|electrode|contact|brush|commutator|conduct(?:s|ing|or|ive)?)s?\b',text,re.I)
+    return not current_purpose and bool(re.search(r'\b(?:spring|core|rod|shaft|housing|casing|support|guide|magnet)s?\b',text,re.I))
 
 
 def _inventory(data,shapes):
@@ -332,6 +344,7 @@ def _inventory(data,shapes):
         if shape!='solid':role='none'  # Native components already define their circuit behavior.
         if shape=='solid' and re.search(r'\b(?:power|voltage|dc)\s+(?:source|supply)\b',name,re.I):role='source'
         clean=dict(name=name,shape=shape,function=item.get('function',''),motion=item['motion'],electrical_role='' if role=='none' else role,parent=item.get('parent',''),rotation_axis='z' if shape=='motor' else item.get('rotation_axis','z'))
+        if role=='conductor' and _mechanical_electrical_subpart(clean):clean['electrical_role']=''
         names[_key(name)]=clean;result.append(clean)
     parents={}
     for part in result:
@@ -341,7 +354,20 @@ def _inventory(data,shapes):
             if parent is None:raise ValueError(f'{part["name"]}: rigid parent {part["parent"]!r} is missing')
             parents[part['name']]=parent['name'];part['parent']=parent['name']
     validate_bindings(parents,{p['name'] for p in result})
-    wires=data.get('connections',[])
+    return _inventory_connections(result,data.get('connections',[]))
+
+
+def _inventory_connections(components,wires):
+    try:return _canonical_inventory_connections(components,wires)
+    except CircuitInventoryError:
+        replacement=simple_series_connections(components,wires)
+        if replacement is None:raise
+        return _canonical_inventory_connections(components,replacement)
+
+
+def _canonical_inventory_connections(components,wires):
+    result=copy.deepcopy(components)
+    names={_key(p['name']):p for p in result}
     if not isinstance(wires,list) or len(wires)+len(result)>24:raise ValueError('Components and wire connections together must fit 24 parts')
     missing=set()
     for wire in wires:
@@ -368,6 +394,8 @@ def _inventory(data,shapes):
             target,port=link.rsplit(':',1);part=names.get(_key(target))
             if part is None:raise ValueError(f'{name}: {target!r} is missing from components; list it before wiring it')
             if part['shape']=='solid' and not part['electrical_role']:
+                if _mechanical_electrical_subpart(part):
+                    raise CircuitInventoryError(f"{part['name']} is a mechanical part, not an electrical load. Keep it out of the wired path; connect the source, switches and actual electrical loads with a complete return.",components,wires)
                 part['electrical_role']='load'  # An explicitly wired custom two-terminal part.
             ports=electrical_ports(dict(shape=part['shape'],points=[[0,0],[10,10]],electrical_role=part['electrical_role']))
             port=terminal_port(port,part['shape'])
@@ -376,12 +404,32 @@ def _inventory(data,shapes):
         if canonical[0]==canonical[1]:raise ValueError(f'{name}: a wire cannot connect a terminal to itself')
         if wire['color'] not in PALETTE:raise ValueError(f'{name}: use a supported insulation color')
         connections.append(dict(name=name,color=wire['color'],links=canonical))
-    if connections and any(p['shape']=='battery' or p['electrical_role']=='source' for p in result):
-        graph=[SimpleNamespace(shape=p['shape'],part=SimpleNamespace(label=p['name']),links=(),electrical_role=p['electrical_role']) for p in result]
-        graph.extend(SimpleNamespace(shape='wire',part=SimpleNamespace(label=w['name']),links=[v.rsplit(':',1) for v in w['links']]) for w in connections)
-        live=conducting_wires(graph,{p['name'].casefold():True for p in result if p['shape']=='switch'})
-        if {w['name'] for w in connections}-live:raise ValueError('The wire inventory is incomplete: every wire must be on a source-to-return path when switches close')
-    return dict(components=result,connections=connections)
+    try:
+        return dict(components=result,connections=complete_inventory_circuit(result,connections))
+    except CircuitInventoryError as error:
+        # Roles inferred from an invalid wire draft must not turn mechanical
+        # parts into electrical loads in the focused repair request.
+        error.inventory['components']=copy.deepcopy(components)
+        raise
+
+
+WIRE_REPAIR_INSTRUCTIONS='''Repair ONLY the electrical connections for the supplied fixed inventory.
+Return connections JSON, never new components, geometry, narration or actions.
+Use the exact component:terminal strings allowed by the schema. Keep the user's
+intended circuit and every physical component. Close a source-to-return path
+through the intended switches and loads. A switch and load in series need three
+wires: source-positive to switch-left, switch-right to load-left, load-right to
+source-negative, using the real inventory names. Mechanical rods, return springs
+and housings do not need electrical wires. Never short the source or connect both
+terminals of a load to the same source terminal. Repair all listed topology issues.'''
+
+
+def _wiring_schema(inventory):
+    wire=copy.deepcopy(inventory_schema(SHAPES,True)['properties']['connections'])
+    wire['maxItems']=min(16,24-len(inventory['components']))
+    terminals=[p['name']+':'+port for p in inventory['components'] for port in inventory_ports(p)]
+    wire['items']['properties']['links']['items']=dict(type='string',enum=terminals)
+    return dict(type='object',additionalProperties=False,properties=dict(connections=wire),required=['connections'])
 
 
 def _geometry_schema(beats,shapes,inventory):
@@ -528,13 +576,19 @@ def plan_custom_mechanism(prompt,scenes,request,key,model,progress=None):
     brief='User prompt (preserve all details):\n'+prompt+'\nNarration:\n'+'\n'.join(
         f"{i}. {scene['narration']}" for i,scene in enumerate(scenes) if i)
     shapes,electrical,biology=_domain(brief)
-    inventory=None;prefetched=None
+    inventory=None;prefetched=None;wiring_repair=None
     if progress:progress('mechanism_inventory')
     for attempt in range(2):
         try:
-            raw=request(brief,INVENTORY_INSTRUCTIONS,inventory_schema(shapes,electrical),key,False,True,model)
+            if wiring_repair is None:
+                raw=request(brief,INVENTORY_INSTRUCTIONS,inventory_schema(shapes,electrical),key,False,True,model)
+            else:
+                repair_brief=brief+'\nFIXED COMPONENTS AND PREVIOUS CONNECTIONS:\n'+json.dumps(wiring_repair,separators=(',',':'))
+                raw=request(repair_brief,WIRE_REPAIR_INSTRUCTIONS,_wiring_schema(wiring_repair),key,False,True,model)
             data=planning_json(raw)
-            if 'parts' in data:
+            if wiring_repair is not None:
+                inventory=_inventory_connections(wiring_repair['components'],data['connections'])
+            elif 'parts' in data:
                 # Saved responses from the former two-stage planner remain readable.
                 prefetched=data
             else:inventory=_inventory(data,shapes)
@@ -542,6 +596,7 @@ def plan_custom_mechanism(prompt,scenes,request,key,model,progress=None):
         except (ValueError,KeyError,TypeError,AttributeError,IndexError,requests.RequestException) as error:
             print(f'[AI inventory] Attempt {attempt+1}: {type(error).__name__}: {error}',flush=True)
             if attempt:raise
+            if isinstance(error,CircuitInventoryError):wiring_repair=error.inventory
             if progress:progress('mechanism_retry')
             brief+='\nRepair the component inventory: '+str(error)
             if 'raw' in locals():brief+='\nPrevious inventory:\n'+str(raw)[:10000]

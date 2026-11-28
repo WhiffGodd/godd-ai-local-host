@@ -1,3 +1,4 @@
+import hashlib
 import http.server
 import socketserver
 import socket
@@ -53,7 +54,8 @@ YOUTUBE_PREFIX = "/api/youtube/"
 AI_YOUTUBE_PREFIX = YOUTUBE_PREFIX + "ai-videos/"
 YOUTUBE_COOKIES = ("godd_youtube_clips", "godd_youtube_ai")
 THUMBNAIL_SLOTS = BoundedSemaphore(2)
-AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=3600, report_progress=True)
+AI_VIDEO_JOBS = RenderJobs(render_explainer, max_pending=2, lifetime=7*24*3600, report_progress=True,
+                          storage_dir=os.environ.get("AI_VIDEO_STORAGE_DIR",os.path.join(BASE_DIR,".local-data","ai-videos")))
 
 
 def download_filename(title, start):
@@ -138,7 +140,26 @@ def apply_youtube_thumbnail(owner, payload, path, video_id):
     return set_video_thumbnail(video_id, access, image)
 
 
-EXPORT_JOBS = RenderJobs(run_export, publisher=publish_to_youtube, thumbnailer=apply_youtube_thumbnail)
+def delete_uploaded_video(owner,payload,path,result):
+    # Called only after YouTube confirms the upload and thumbnail processing ends.
+    if 'generated_video_id' in payload:
+        # Older versions left duplicate AI outputs in the system temp directory.
+        # Remove only app-owned files that match this confirmed uploaded video.
+        with open(path,'rb') as video:digest=hashlib.file_digest(video,'sha256').digest()
+        temporary_root=os.path.realpath(tempfile.gettempdir())
+        for entry in os.scandir(temporary_root):
+            if not (entry.is_file(follow_symlinks=False) and entry.name.startswith('godd_ai_video_') and entry.name.endswith('.mp4')):continue
+            if entry.stat().st_size!=os.path.getsize(path):continue
+            with open(entry.path,'rb') as candidate:matches=hashlib.file_digest(candidate,'sha256').digest()==digest
+            if matches:os.remove(entry.path)
+        AI_VIDEO_JOBS.mark_uploaded(payload['generated_video_id'],result)
+    for suffix in ('','.captions.json','.srt'):
+        try:os.remove(path+suffix)
+        except FileNotFoundError:pass
+
+
+EXPORT_JOBS = RenderJobs(run_export, publisher=publish_to_youtube, thumbnailer=apply_youtube_thumbnail,
+                         on_published=delete_uploaded_video)
 
 SAMPLE_VIDEOS = [
     {
@@ -731,7 +752,7 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
         parts = path.split("/")
         job = AI_VIDEO_JOBS.snapshot(parts[3])
         if not job:
-            self.youtube_json(404, {"error": "This AI video expired or could not be found."})
+            self.youtube_json(404, {"error": "This saved video is unavailable. Your prompt is kept; generate the video again.", "code": "AI_VIDEO_NOT_FOUND"})
             return
         if len(parts) == 4:
             self.youtube_json(200, job)
@@ -741,7 +762,11 @@ class GoddAIRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
         output = AI_VIDEO_JOBS.completed_path(parts[3])
         if not output:
-            self.youtube_json(409, {"error": "The video is still rendering."})
+            if job['state']=='uploaded':
+                self.youtube_json(410,{"error":"This video was uploaded to YouTube and its local copy was deleted.","code":"VIDEO_UPLOADED","video_id":job.get('video_id')})
+            elif job['state']=='failed':
+                self.youtube_json(409,{"error":job.get('error','Video generation did not finish. Your prompt is kept.'),"code":job.get('code')})
+            else:self.youtube_json(409, {"error": "The video is still rendering."})
             return
         try:
             video = open(output, "rb")

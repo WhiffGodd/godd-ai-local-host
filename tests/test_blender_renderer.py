@@ -147,4 +147,36 @@ class BlenderBackendTests(unittest.TestCase):
         self.assertTrue(renderer.closed);self.assertFalse(root.exists())
 
 
+    def test_worker_failure_can_finish_the_same_frame_with_standard_rendering(self):
+        fallback=Mock();expected=Image.new('RGB',(64,64),'red');fallback.frame.return_value=expected
+        with patch('blender_renderer.blender_executable',return_value='fake'):
+            renderer=BlenderRenderer((64,64),fallback=True)
+        root=renderer.root
+        vertices=np.array([[0,0,0,0,0,1],[1,0,0,0,0,1],[0,1,0,0,0,1]],dtype=float)
+        renderer.register_mesh('Part',vertices)
+        shot=Mock();subtitle=(Image.new('RGBA',(4,4),'red'),(0,0))
+        with patch.object(renderer,'_blender_frame',side_effect=RendererUnavailable('GPU failed')) as original,patch('blender_renderer.CinematicRenderer',return_value=fallback):
+            self.assertIs(renderer.frame(shot,1.5,None,subtitle),expected)
+            self.assertIs(renderer.frame(shot,1.6,None,subtitle),expected)
+        self.assertEqual(original.call_count,1)
+        self.assertEqual(renderer.backend,'standard');self.assertIn('Standard',renderer.warning)
+        self.assertFalse(root.exists());fallback.register_mesh.assert_called_once()
+        self.assertEqual(fallback.frame.call_args.args,(shot,1.6,None,subtitle))
+        renderer.close();fallback.close.assert_called_once()
+
+    def test_strict_blender_preview_does_not_disguise_a_failed_benchmark(self):
+        with patch('blender_renderer.blender_executable',return_value='fake'):renderer=BlenderRenderer((64,64))
+        with renderer,patch.object(renderer,'_blender_frame',side_effect=RendererUnavailable('GPU failed')):
+            with self.assertRaisesRegex(RendererUnavailable,'GPU failed'):renderer.frame(Mock(),0)
+
+
+    def test_blender_setup_unloads_only_the_studios_own_models(self):
+        from ai_video import release_render_model_memory,OLLAMA_MODEL
+        response=Mock();response.json.return_value={'models':[{'name':OLLAMA_MODEL},{'name':'another-app-model'}]}
+        with patch.dict(os.environ,{'AI_VIDEO_GEMINI_API_KEY':''}),patch('ai_video.requests.get',return_value=response),patch('ai_video.requests.post') as post:
+            release_render_model_memory()
+        post.assert_called_once()
+        self.assertEqual(post.call_args.kwargs['json'],dict(model=OLLAMA_MODEL,keep_alive=0,stream=False))
+
+
 if __name__=='__main__':unittest.main()
